@@ -1,0 +1,601 @@
+{
+  "last_updated": "2026-07-28",
+  "accounts": [
+    {
+      "screen_name": "0xBolin123",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "0xGaurav1",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "0xIntuition",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "0xJonnyDee",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "0xKeng",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "0xMementoMori",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "0xPolygon",
+      "source": "manual_curation"
+    },
+    {
+      "screen_name": "APACwebaijobs",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "AccountableData",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "AroNetwork",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "BITNOBELio",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "Belita_2000",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "BitcoinOnwards",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "BlessingUD12",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "BlockchainNeyo",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "Bybit_Official",
+      "source": "manual_curation"
+    },
+    {
+      "screen_name": "CIPHER9333",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "COTInetwork",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "CTITraffic",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "Compound_xyz",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "CryptoJobsList",
+      "source": "manual_curation"
+    },
+    {
+      "screen_name": "CryptoMaliel",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "DeFiRobinVerse",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "DinoJVidiliCons",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "DoglinsNFT",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "ElNachoCrypto",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "EricCLFung",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "EveyNFT",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "Farooxyz",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "FootNfts",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "GTFI_NEXTREX",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "Hackbiee",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "HeesharCareer",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "HogwartsCrypto",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "HungNgu76442123",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "JawsOnChain",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "LayerZero_Labs",
+      "source": "manual_curation"
+    },
+    {
+      "screen_name": "LegacyWeb3io",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "MansaTesla",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "MarsSteamer",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "Master_Henk1",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "MerlinEgalite",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "MetaMask",
+      "source": "manual_curation"
+    },
+    {
+      "screen_name": "MohIlIpo",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "NexusDataLabs",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "NoxosIntel",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "OWProjex",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "OxJulesX",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "PhiloH_web3",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "PiperOnChain",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "PlexusRS",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "PromptKarir",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "RO22PER",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "RallyOnChain",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "RangaSquared",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "RavenNetworkHQ",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "ReenLBank",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "Reental_co",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "RhMerryMen",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "RitOnchain",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "Saint_YAB",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "SoeHaghighi",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "Sophietechchain",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "StarkWareLtd",
+      "source": "manual_curation"
+    },
+    {
+      "screen_name": "SuperteamTalent",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "Symphony_Young",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "SynapticChain",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "TechTerminalx",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "Thanos_Lampr",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "TheSuperMom1",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "TomachiAnura",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "TrapixExchange",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "Uniswap",
+      "source": "manual_curation"
+    },
+    {
+      "screen_name": "Vanarchain",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "Veretin_recruit",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "WhitePigeon9991",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "XYZCryptos",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "Yusufcancakiir",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "ZEITFinance",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "Zentrixgaming_",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "Zureon_Official",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "_WrldKing04_",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "a16zcrypto",
+      "source": "manual_curation"
+    },
+    {
+      "screen_name": "aave",
+      "source": "manual_curation"
+    },
+    {
+      "screen_name": "alexey9kin",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "anurag_629",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "arbitrum",
+      "source": "manual_curation"
+    },
+    {
+      "screen_name": "avax",
+      "source": "manual_curation"
+    },
+    {
+      "screen_name": "bapput2",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "beingivish",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "bettertiffany11",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "binance",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "bonepitfun",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "c0nst",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "casinocodepromo",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "ccacc_hub",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "chainlink",
+      "source": "manual_curation"
+    },
+    {
+      "screen_name": "coinbase",
+      "source": "manual_curation"
+    },
+    {
+      "screen_name": "conceguz7",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "crackedceo",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "crypto_vazima",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "damiloladerek",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "defilordsss",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "eigenlayer",
+      "source": "manual_curation"
+    },
+    {
+      "screen_name": "fraserhiresweb3",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "fraterxyz",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "growthinweb3",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "hireincrypto",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "jackcooldev",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "jamestanvirqaz",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "jason_shaw26",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "jito_labs",
+      "source": "manual_curation"
+    },
+    {
+      "screen_name": "kelanoo",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "koderHolic",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "learn_cryptora",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "leonabboud",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "leyannick23",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "longpratas",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "love_jhamnani",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "nerdydruskii",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "official_QV",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "okezienedum",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "orbis86_x",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "otoco_io",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "oxydocais",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "paradigm",
+      "source": "manual_curation"
+    },
+    {
+      "screen_name": "pawgencydogs",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "podcastaqua",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "reejob_",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "rrohit689",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "sapijiju",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "shubhadapande39",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "snowball_money",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "solana",
+      "source": "manual_curation"
+    },
+    {
+      "screen_name": "solanamobile",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "squirrellyverse",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "sure_stack",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "thecvcook",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "thekimbingham",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "theweb3dof",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "tiger_research_",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "usemanifestapp",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "vanishree_rao",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "warmytoken",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "web3isgreat",
+      "source": "manual_curation"
+    },
+    {
+      "screen_name": "womeninweb3hk",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "workwithdhanes",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "zeroxcholy",
+      "source": "keyword_search"
+    },
+    {
+      "screen_name": "zksync",
+      "source": "manual_curation"
+    }
+  ]
+}
