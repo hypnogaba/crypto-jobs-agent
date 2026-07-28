@@ -1,7 +1,10 @@
 # Crypto Jobs Agent
 
-MVP-тест: щоденний моніторинг hiring-сигналів у X для crypto/web3, чернетки DM у Telegram.
+An experiment in automated hiring-signal detection for web3/crypto job seekers.
 
-Статус: Фаза 1 (X-only тест, без сайту). Деталі — `docs/superpowers/specs/2026-07-28-crypto-hiring-agent-mvp-design.md`.
+Instead of browsing job boards, this catches hiring signals where they actually
+appear first in crypto, and turns them into a ready-to-send outreach draft. The
+person still reviews and sends everything themselves — nothing here applies or
+posts automatically.
 
-Керування рутиною — `docs/routine-notes.md`.
+Status: early-stage, personal project, work in progress.
