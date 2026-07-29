@@ -1,0 +1,92 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+enum DeliveryChannel {
+  TELEGRAM
+  EMAIL
+}
+
+enum ApplyPath {
+  HUMAN
+  FORMAL
+}
+
+enum CardStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+model User {
+  id                 String   @id @default(cuid())
+  email              String   @unique
+  telegramChatId     String?
+  deliveryChannel    DeliveryChannel @default(EMAIL)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  profile            CandidateProfile?
+  cards              DailyCard[]
+}
+
+model CandidateProfile {
+  id             String   @id @default(cuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  rawCvText      String?  @db.Text
+  githubHandle   String?
+  xHandle        String?
+
+  // Parsed/editable summary shown on onboarding (section 4.1 of the product doc)
+  seekingRole    String?
+  ecosystem      String?
+  format         String?
+  compFrom       Int?
+  avoid          String?
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model JobSignal {
+  id           String   @id @default(cuid())
+  sourceUrl    String?
+  sourceText   String   @db.Text
+  role         String
+  company      String?
+  compFrom     Int?
+  compTo       Int?
+  remote       String?
+  path         ApplyPath
+  contactHandle String?
+  createdAt    DateTime @default(now())
+
+  cards        DailyCard[]
+}
+
+model DailyCard {
+  id           String     @id @default(cuid())
+  userId       String
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobSignalId  String
+  jobSignal    JobSignal  @relation(fields: [jobSignalId], references: [id], onDelete: Cascade)
+
+  whyYou       String     @db.Text
+  draftText    String     @db.Text
+  status       CardStatus @default(PENDING)
+
+  deliveredAt  DateTime?
+  createdAt    DateTime   @default(now())
+
+  @@unique([userId, jobSignalId])
+}
