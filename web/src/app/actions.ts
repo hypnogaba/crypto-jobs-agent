@@ -55,3 +55,17 @@ export async function saveDetails(formData: FormData) {
 
   redirect("/onboarding/connect");
 }
+
+export async function regenerateConnectToken() {
+  const cookieStore = await cookies();
+  const userId = cookieStore.get("userId")?.value;
+  if (!userId) redirect("/");
+
+  const { generateConnectToken } = await import("@/lib/telegram-connect");
+  const token = generateConnectToken();
+
+  const prisma = await getPrisma();
+  await prisma.user.update({ where: { id: userId }, data: { connectToken: token } });
+
+  redirect("/onboarding/connect");
+}

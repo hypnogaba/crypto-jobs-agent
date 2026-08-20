@@ -1,12 +1,14 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
+import { getPrisma } from "@/lib/prisma";
 
 export default async function Dashboard() {
   const cookieStore = await cookies();
   const userId = cookieStore.get("userId")?.value;
   if (!userId) redirect("/");
+
+  const prisma = await getPrisma();
 
   const user = await prisma.user.findUnique({
     where: { id: userId },

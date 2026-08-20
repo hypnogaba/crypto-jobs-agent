@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Crypto Jobs Agent",
-  description: "Find your next web3 role, done for you.",
+  title: "Job Search Agent",
+  description: "Get up to 5 matching roles a day, sent straight to Telegram.",
 };
 
 export default function RootLayout({
