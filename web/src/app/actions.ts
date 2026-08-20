@@ -2,42 +2,29 @@
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { prisma } from "@/lib/prisma";
+import { getPrisma } from "@/lib/prisma";
 import { parseCv } from "@/lib/ai";
 
-export async function onboard(formData: FormData) {
-  const email = String(formData.get("email") ?? "").trim();
-  const cvText = String(formData.get("cvText") ?? "").trim();
-  const githubHandle = String(formData.get("githubHandle") ?? "").trim() || null;
-  const xHandle = String(formData.get("xHandle") ?? "").trim() || null;
-  const deliveryChannel = formData.get("deliveryChannel") === "TELEGRAM" ? "TELEGRAM" : "EMAIL";
-
-  if (!email || !cvText) {
-    throw new Error("Email and a short description are required.");
+export async function startOnboarding(formData: FormData) {
+  const input = String(formData.get("input") ?? "").trim();
+  if (!input) {
+    throw new Error("Tell us what you're looking for, or paste your CV.");
   }
 
-  const parsed = await parseCv(cvText);
+  const parsed = await parseCv(input);
+  const prisma = await getPrisma();
 
-  const user = await prisma.user.upsert({
-    where: { email },
-    create: {
-      email,
-      deliveryChannel,
+  const user = await prisma.user.create({
+    data: {
       profile: {
         create: {
-          rawCvText: cvText,
-          githubHandle,
-          xHandle,
-          ...parsed,
-        },
-      },
-    },
-    update: {
-      deliveryChannel,
-      profile: {
-        upsert: {
-          create: { rawCvText: cvText, githubHandle, xHandle, ...parsed },
-          update: { rawCvText: cvText, githubHandle, xHandle, ...parsed },
+          mode: "FREETEXT",
+          rawInput: input,
+          seekingRole: parsed.seekingRole,
+          category: parsed.category,
+          location: parsed.location,
+          remoteOk: parsed.remoteOk,
+          salaryMin: parsed.salaryMin,
         },
       },
     },
@@ -46,21 +33,25 @@ export async function onboard(formData: FormData) {
   const cookieStore = await cookies();
   cookieStore.set("userId", user.id, { httpOnly: true, sameSite: "lax" });
 
-  redirect("/dashboard");
+  redirect("/onboarding/details");
 }
 
-export async function updateDeliveryChannel(formData: FormData) {
+export async function saveDetails(formData: FormData) {
   const cookieStore = await cookies();
   const userId = cookieStore.get("userId")?.value;
   if (!userId) redirect("/");
 
-  const deliveryChannel = formData.get("deliveryChannel") === "TELEGRAM" ? "TELEGRAM" : "EMAIL";
-  const telegramChatId = String(formData.get("telegramChatId") ?? "").trim() || null;
+  const category = String(formData.get("category") ?? "").trim() || null;
+  const location = String(formData.get("location") ?? "").trim() || null;
+  const remoteOk = formData.get("remoteOk") === "on";
+  const salaryMinRaw = String(formData.get("salaryMin") ?? "").trim();
+  const salaryMin = salaryMinRaw ? Number.parseInt(salaryMinRaw, 10) : null;
 
-  await prisma.user.update({
-    where: { id: userId },
-    data: { deliveryChannel, telegramChatId },
+  const prisma = await getPrisma();
+  await prisma.candidateProfile.update({
+    where: { userId },
+    data: { category, location, remoteOk, salaryMin },
   });
 
-  redirect("/dashboard");
+  redirect("/onboarding/connect");
 }
