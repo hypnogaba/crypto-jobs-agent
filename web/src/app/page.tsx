@@ -50,12 +50,23 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
           <form action={startOnboarding} className="rise rise-4 mt-11 max-w-2xl">
             <label htmlFor="input" className="eyebrow">{t(locale, "home.field")}</label>
             <textarea
-              id="input" name="input" required rows={4}
+              id="input" name="input" rows={4}
               className="field field-night mt-3 resize-y text-base"
               placeholder={t(locale, "home.placeholder")}
             />
-            {error === "empty" && (
-              <p className="mt-2 text-sm" style={{ color: "var(--ember)" }}>{t(locale, "err.empty")}</p>
+            <label className="mt-4 flex flex-wrap items-center gap-3">
+              <span className="eyebrow">{t(locale, "home.orCv")}</span>
+              <input type="file" name="cv" accept=".pdf,.txt,.md,text/plain,application/pdf"
+                className="text-sm file:mr-3 file:cursor-pointer file:rounded-sm file:border
+                           file:px-3 file:py-1.5 file:text-xs"
+                style={{ color: "var(--night-2)" }} />
+            </label>
+            <p className="mt-2 text-xs" style={{ color: "var(--night-2)" }}>{t(locale, "home.cvHint")}</p>
+
+            {error && (
+              <p className="mt-3 text-sm" style={{ color: "var(--ember)" }}>
+                {t(locale, `err.${error}`)}
+              </p>
             )}
             <div className="mt-5 flex flex-wrap items-center gap-5">
               <button type="submit" className="btn">{t(locale, "home.cta")}</button>

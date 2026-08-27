@@ -1,10 +1,11 @@
 import { redirect } from "next/navigation";
 import Shell from "../shell";
-import { detectLocale, listMatches } from "../actions";
+import { detectLocale, listMatches, recordFeedback } from "../actions";
 import { currentUser } from "@/lib/auth";
 import { t } from "@/lib/i18n";
 
-export default async function Dashboard() {
+export default async function Dashboard({ searchParams }: { searchParams: Promise<{ queued?: string }> }) {
+  const { queued } = await searchParams;
   const locale = await detectLocale();
   const user = await currentUser();
   if (!user) redirect("/login");
@@ -21,6 +22,7 @@ export default async function Dashboard() {
 
   return (
     <Shell locale={locale} title={t(locale, "dash.title")} wide>
+      {queued && <p className="tag tag-ok mb-6 inline-block">{t(locale, "dash.queued")}</p>}
       {matches.length === 0 ? (
         <div className="card px-8 py-14 text-center">
           <p className="display text-2xl" style={{ color: "var(--ink-2)" }}>{t(locale, "dash.empty")}</p>
@@ -67,6 +69,16 @@ export default async function Dashboard() {
                   </li>
                 ))}
               </ol>
+
+              <form action={recordFeedback} className="mt-3 flex gap-2">
+                <input type="hidden" name="digestId" value={digestId} />
+                <button name="reaction" value="not_relevant" className="btn btn-quiet px-3 py-2 text-xs">
+                  {t(locale, "dash.notRelevant")}
+                </button>
+                <button name="reaction" value="more" className="btn btn-quiet px-3 py-2 text-xs">
+                  {t(locale, "dash.more")}
+                </button>
+              </form>
             </section>
           ))}
         </div>

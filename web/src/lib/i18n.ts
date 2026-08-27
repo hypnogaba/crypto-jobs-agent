@@ -9,6 +9,13 @@ import type { Locale } from "./vocab";
 type Dict = Record<string, string>;
 
 const en: Dict = {
+  "dash.notRelevant": "Not what I need",
+  "dash.more": "Five more",
+  "dash.queued": "Queued. The next batch arrives within the hour.",
+  "err.tooBig": "That file is over 4 MB. Paste the text instead.",
+  "err.unreadable": "We could not read text from that file. If it is a scan, paste the text instead.",
+  "home.orCv": "or attach your CV",
+  "home.cvHint": "PDF or plain text. The file is never stored.",
   "nav.faq": "FAQ",
   "nav.sources": "Sources",
   "nav.privacy": "Privacy",
@@ -152,6 +159,13 @@ const en: Dict = {
 };
 
 const uk: Dict = {
+  "dash.notRelevant": "Не те, що треба",
+  "dash.more": "Ще п'ять",
+  "dash.queued": "Прийнято. Наступна добірка прийде протягом години.",
+  "err.tooBig": "Файл більший за 4 МБ. Встав текст замість нього.",
+  "err.unreadable": "Не змогли прочитати текст із файлу. Якщо це скан, встав текст вручну.",
+  "home.orCv": "або прикріпи резюме",
+  "home.cvHint": "PDF або звичайний текст. Файл не зберігається.",
   "nav.faq": "Питання",
   "nav.sources": "Джерела",
   "nav.privacy": "Приватність",
@@ -295,6 +309,13 @@ const uk: Dict = {
 };
 
 const fr: Dict = {
+  "dash.notRelevant": "Pas ce qu'il me faut",
+  "dash.more": "Cinq de plus",
+  "dash.queued": "Pris en compte. La prochaine sélection arrive dans l'heure.",
+  "err.tooBig": "Ce fichier dépasse 4 Mo. Collez le texte à la place.",
+  "err.unreadable": "Impossible de lire ce fichier. Si c'est un scan, collez le texte.",
+  "home.orCv": "ou joignez votre CV",
+  "home.cvHint": "PDF ou texte. Le fichier n'est jamais conserve.",
   "nav.faq": "Questions",
   "nav.sources": "Sources",
   "nav.privacy": "Confidentialité",
@@ -438,6 +459,13 @@ const fr: Dict = {
 };
 
 const ru: Dict = {
+  "dash.notRelevant": "Не то, что нужно",
+  "dash.more": "Ещё пять",
+  "dash.queued": "Принято. Следующая подборка придёт в течение часа.",
+  "err.tooBig": "Файл больше 4 МБ. Вставь текст вместо него.",
+  "err.unreadable": "Не смогли прочитать текст из файла. Если это скан, вставь текст вручную.",
+  "home.orCv": "или прикрепи резюме",
+  "home.cvHint": "PDF или обычный текст. Файл не хранится.",
   "nav.faq": "Вопросы",
   "nav.sources": "Источники",
   "nav.privacy": "Приватность",

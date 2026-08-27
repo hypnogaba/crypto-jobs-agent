@@ -6,6 +6,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { all, one, run, uuid } from "@/lib/db";
 import { createSession, currentUser, destroySession, hashPassword, requireUser, verifyPassword } from "@/lib/auth";
 import { parseProfile, type ParsedProfile } from "@/lib/parse";
+import { CvError, extractCvText } from "@/lib/cv";
 import { isLocale, localeFromHeader } from "@/lib/i18n";
 import { checkRate, clearRate, recordFailure } from "@/lib/ratelimit";
 import type { Locale } from "@/lib/vocab";
@@ -26,7 +27,18 @@ export async function detectLocale(): Promise<Locale> {
 
 /** Крок 1: вільний текст або резюме. Розбір іде в куку-чернетку до реєстрації. */
 export async function startOnboarding(formData: FormData): Promise<void> {
-  const text = String(formData.get("input") ?? "").trim();
+  let text = String(formData.get("input") ?? "").trim();
+
+  // Резюме файлом — та сама гілка логіки, лише інший спосіб отримати текст
+  const file = formData.get("cv");
+  if (file instanceof File && file.size > 0) {
+    try {
+      text = await extractCvText(file);
+    } catch (e) {
+      redirect(`/?error=${e instanceof CvError ? e.message : "unreadable"}`);
+    }
+  }
+
   if (text.length < 3) redirect("/?error=empty");
 
   const { ANTHROPIC_API_KEY } = await env();
@@ -187,11 +199,21 @@ export async function deleteAccount(): Promise<void> {
   redirect("/");
 }
 
-export async function recordFeedback(digestId: string, reaction: "not_relevant" | "more"): Promise<void> {
+export async function recordFeedback(formData: FormData): Promise<void> {
   const user = await requireUser();
+  const digestId = String(formData.get("digestId") ?? "");
+  const reaction = String(formData.get("reaction") ?? "");
+  if (reaction !== "not_relevant" && reaction !== "more") return;
+
   await run("INSERT INTO feedback (id,user_id,digest_id,reaction) VALUES (?,?,?,?)",
     uuid(), user.id, digestId, reaction);
   await run("UPDATE users SET last_interaction_at=datetime('now') WHERE id=?", user.id);
+
+  // «Ще п'ять» — це запит, який мусить хтось виконати, а не просто відмітка
+  if (reaction === "more") {
+    await run("INSERT INTO delivery_requests (id,user_id) VALUES (?,?)", uuid(), user.id);
+  }
+  redirect("/dashboard?queued=1");
 }
 
 export const listMatches = async (userId: string) =>

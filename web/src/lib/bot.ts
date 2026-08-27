@@ -35,9 +35,14 @@ export async function continueBotOnboarding(env: Env, chatId: number, data: stri
       await run("INSERT INTO feedback (id,user_id,digest_id,reaction) VALUES (?,?,?,?)",
         uuid(), user.id, digestId, reaction);
       await run("UPDATE users SET last_interaction_at=datetime('now') WHERE id=?", user.id);
-      await send(env, chatId, reaction === "more"
-        ? "Зрозумів, підберу ще. Прийде за кілька хвилин."
-        : "Дякую, врахую. Завтрашня добірка буде точнішою.");
+      if (reaction === "more") {
+        // Черга, а не обіцянка: сайт на Workers не дотягнеться до сканера,
+        // тому запит підбирає сервер під час найближчого прогону доставки.
+        await run("INSERT INTO delivery_requests (id,user_id) VALUES (?,?)", uuid(), user.id);
+        await send(env, chatId, "Прийняв. Наступна добірка прийде протягом години.");
+      } else {
+        await send(env, chatId, "Дякую, врахую. Завтрашня добірка буде точнішою.");
+      }
     }
   }
 }

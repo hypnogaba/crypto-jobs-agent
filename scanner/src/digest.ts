@@ -92,12 +92,20 @@ async function main(): Promise<void> {
     "SELECT COUNT(*) AS jobs, COUNT(DISTINCT company_key) AS companies FROM jobs_cache"))[0]
     ?? { jobs: 0, companies: 0 };
 
+  // Хто натиснув «Ще п'ять»: їм добірка йде поза розкладом
+  const requested = new Set((await d1.query<{ user_id: string }>(
+    "SELECT DISTINCT user_id FROM delivery_requests WHERE handled_at IS NULL"
+  )).map((r) => r.user_id));
+  if (requested.size > 0) console.log(`Запитів «ще»: ${requested.size}`);
+
   let delivered = 0;
   for (const u of users) {
-    if (!force && hourIn(u.timezone, now) !== u.delivery_hour) continue;
+    const onRequest = requested.has(u.id);
+    if (!force && !onRequest && hourIn(u.timezone, now) !== u.delivery_hour) continue;
 
     // ── автопауза після 14 днів повної тиші ──
-    if (u.last_interaction_at) {
+    // Того, хто щойно попросив ще, паузити безглуздо: він якраз активний.
+    if (u.last_interaction_at && !onRequest) {
       const silentDays = (now.getTime() - new Date(u.last_interaction_at).getTime()) / 86_400_000;
       if (silentDays > 17) {
         await d1.execute("UPDATE users SET status='paused', paused_reason='inactive' WHERE id=?", [u.id]);
@@ -160,6 +168,16 @@ async function main(): Promise<void> {
 
     const top = pickTop(candidates, profile, DIGEST_SIZE, now);
     if (top.length === 0) {
+      // Запит закриваємо навіть без результату — інакше він висітиме вічно
+      if (onRequest) {
+        await d1.execute(
+          "UPDATE delivery_requests SET handled_at=datetime('now') WHERE user_id=? AND handled_at IS NULL",
+          [u.id]);
+        if (botToken && u.telegram_chat_id) {
+          await sendTelegram(botToken, u.telegram_chat_id,
+            "Поки що більше нічого нового під твій профіль. Наступна добірка — вранці.", "none");
+        }
+      }
       console.log(`  ${u.id.slice(0, 8)}: нічого не підійшло`);
       continue;
     }
@@ -186,7 +204,12 @@ async function main(): Promise<void> {
         continue;
       }
       delivered++;
-      console.log(`  ${u.id.slice(0, 8)}: надіслано ${withWhy.length}`);
+      if (onRequest) {
+        await d1.execute(
+          "UPDATE delivery_requests SET handled_at=datetime('now') WHERE user_id=? AND handled_at IS NULL",
+          [u.id]);
+      }
+      console.log(`  ${u.id.slice(0, 8)}: надіслано ${withWhy.length}${onRequest ? " (на запит)" : ""}`);
     } else {
       console.log(`  ${u.id.slice(0, 8)}: підібрано ${withWhy.length}, доставка чекає на токен бота`);
       if (process.env.PRINT_DIGEST) console.log("\n" + text + "\n");
