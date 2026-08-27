@@ -1,0 +1,163 @@
+import type { D1Client, D1Statement } from "./d1.js";
+import type { AtsProvider, Company, NormalizedJob, SourceStatus } from "./types.js";
+
+interface CompanyRow {
+  slug: string; name: string; ats_provider: string | null; ats_slug: string | null;
+  tags: string; discovered_via: string | null; last_fit_at: string | null;
+  last_scanned_at: string | null; dry_scans: number;
+}
+interface SourceRow {
+  source_name: string; status: string; consecutive_fail_days: number; last_ok_at: string | null;
+}
+
+const parseTags = (raw: string | null): string[] => {
+  try { const v = JSON.parse(raw ?? "[]"); return Array.isArray(v) ? v : []; } catch { return []; }
+};
+
+export class Repo {
+  constructor(private readonly d1: D1Client) {}
+
+  // ── вакансії ───────────────────────────────────────────────
+  async upsertJobs(jobs: NormalizedJob[]): Promise<void> {
+    if (jobs.length === 0) return;
+    const statements: D1Statement[] = jobs.map((j) => ({
+      sql: `INSERT INTO jobs_cache
+              (id,url,company,company_key,title,location,remote,salary_min,salary_max,salary_currency,source,tags,dedupe_key,posted_at,fetched_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(url) DO UPDATE SET
+              company=excluded.company, title=excluded.title, location=excluded.location,
+              remote=excluded.remote, source=excluded.source, tags=excluded.tags,
+              posted_at=excluded.posted_at, fetched_at=excluded.fetched_at`,
+      params: [
+        crypto.randomUUID(), j.url, j.company, j.companyKey, j.title, j.location,
+        j.remote ? 1 : 0, j.salaryMin ?? null, j.salaryMax ?? null, j.salaryCurrency ?? null,
+        j.source, JSON.stringify(j.tags), j.dedupeKey, j.postedAt, j.fetchedAt,
+      ],
+    }));
+    await this.d1.batch(statements);
+  }
+
+  async countDistinctCompaniesSince(sinceIso: string): Promise<number> {
+    const rows = await this.d1.query<{ n: number }>(
+      "SELECT COUNT(DISTINCT company_key) AS n FROM jobs_cache WHERE fetched_at >= ?", [sinceIso]);
+    return rows[0]?.n ?? 0;
+  }
+
+  async countJobs(): Promise<number> {
+    const rows = await this.d1.query<{ n: number }>("SELECT COUNT(*) AS n FROM jobs_cache");
+    return rows[0]?.n ?? 0;
+  }
+
+  // ── компанії ───────────────────────────────────────────────
+  async listCompanies(): Promise<Company[]> {
+    const rows = await this.d1.query<CompanyRow>("SELECT * FROM companies");
+    return rows.map((r) => ({
+      slug: r.slug, name: r.name,
+      atsProvider: (r.ats_provider as AtsProvider | null) ?? null,
+      atsSlug: r.ats_slug, tags: parseTags(r.tags),
+      discoveredVia: r.discovered_via, lastFitAt: r.last_fit_at,
+      lastScannedAt: r.last_scanned_at, dryScans: r.dry_scans,
+    }));
+  }
+
+  async knownCompanyKeys(): Promise<Set<string>> {
+    const rows = await this.d1.query<{ slug: string; name: string }>("SELECT slug,name FROM companies");
+    const set = new Set<string>();
+    for (const r of rows) { set.add(r.slug); set.add(r.name.toLowerCase()); }
+    return set;
+  }
+
+  /** AUTO-GROW: знайдена компанія лишається джерелом назавжди. */
+  async upsertCompany(c: {
+    slug: string; name: string; provider: AtsProvider | null; atsSlug: string | null;
+    tags?: string[]; discoveredVia?: string;
+  }): Promise<void> {
+    await this.d1.execute(
+      `INSERT INTO companies (slug,name,ats_provider,ats_slug,tags,discovered_via,added_at)
+       VALUES (?,?,?,?,?,?,datetime('now'))
+       ON CONFLICT(slug) DO UPDATE SET
+         ats_provider=COALESCE(excluded.ats_provider, companies.ats_provider),
+         ats_slug=COALESCE(excluded.ats_slug, companies.ats_slug),
+         name=excluded.name`,
+      [c.slug, c.name, c.provider, c.atsSlug, JSON.stringify(c.tags ?? []), c.discoveredVia ?? "manual"]);
+  }
+
+  async markCompanyScanned(slug: string, foundJobs: boolean): Promise<void> {
+    await this.d1.execute(
+      `UPDATE companies SET last_scanned_at=datetime('now'),
+         last_fit_at = CASE WHEN ? THEN datetime('now') ELSE last_fit_at END,
+         dry_scans   = CASE WHEN ? THEN 0 ELSE dry_scans + 1 END
+       WHERE slug = ?`,
+      [foundJobs ? 1 : 0, foundJobs ? 1 : 0, slug]);
+  }
+
+  // ── здоров'я джерел ────────────────────────────────────────
+  async recordSourceOutcome(source: string, ok: boolean, jobs: number, error?: string): Promise<void> {
+    if (ok) {
+      await this.d1.execute(
+        `INSERT INTO sources_state (source_name,status,last_ok_at,consecutive_fail_days,last_error,jobs_last_run,checked_at)
+         VALUES (?,'ok',datetime('now'),0,NULL,?,datetime('now'))
+         ON CONFLICT(source_name) DO UPDATE SET
+           status='ok', last_ok_at=datetime('now'), consecutive_fail_days=0,
+           last_error=NULL, jobs_last_run=excluded.jobs_last_run, checked_at=datetime('now')`,
+        [source, jobs]);
+      return;
+    }
+    await this.d1.execute(
+      `INSERT INTO sources_state (source_name,status,consecutive_fail_days,last_error,jobs_last_run,checked_at)
+       VALUES (?,'degraded',1,?,0,datetime('now'))
+       ON CONFLICT(source_name) DO UPDATE SET
+         status='degraded',
+         -- Рахуємо ДНІ падінь, а не прогони: повторний скан того самого дня
+         -- (наприклад, форсований watchdog) не має вбивати живе джерело.
+         consecutive_fail_days = CASE
+           WHEN date(COALESCE(sources_state.checked_at, '1970-01-01')) < date('now')
+             THEN sources_state.consecutive_fail_days + 1
+           ELSE MAX(sources_state.consecutive_fail_days, 1)
+         END,
+         last_error=excluded.last_error, jobs_last_run=0, checked_at=datetime('now')`,
+      [source, (error ?? "невідома помилка").slice(0, 300)]);
+  }
+
+  async listSourceStates(): Promise<Array<{ source: string; status: SourceStatus; consecutiveFailDays: number }>> {
+    const rows = await this.d1.query<SourceRow>("SELECT * FROM sources_state");
+    return rows.map((r) => ({
+      source: r.source_name,
+      status: (r.status as SourceStatus) ?? "ok",
+      consecutiveFailDays: r.consecutive_fail_days,
+    }));
+  }
+
+  async deprecateSource(source: string): Promise<void> {
+    await this.d1.execute("UPDATE sources_state SET status='deprecated' WHERE source_name=?", [source]);
+  }
+
+  async getSourceKey(source: string): Promise<string | null> {
+    const rows = await this.d1.query<{ key_value: string }>(
+      "SELECT key_value FROM source_keys WHERE source_name=?", [source]);
+    return rows[0]?.key_value ?? null;
+  }
+
+  // ── прогони ────────────────────────────────────────────────
+  async startRun(id: string, startedAt: string): Promise<void> {
+    await this.d1.execute("INSERT INTO scan_runs (id,started_at,status) VALUES (?,?,'running')", [id, startedAt]);
+  }
+
+  async finishRun(id: string, o: {
+    distinctCompanies: number; jobsFound: number; ladderReached: string;
+    status: "ok" | "short" | "failed"; notes: string;
+  }): Promise<void> {
+    await this.d1.execute(
+      `UPDATE scan_runs SET finished_at=datetime('now'), distinct_companies=?, jobs_found=?,
+         ladder_reached=?, status=?, notes=? WHERE id=?`,
+      [o.distinctCompanies, o.jobsFound, o.ladderReached, o.status, o.notes.slice(0, 4000), id]);
+  }
+
+  async lastRunSince(sinceIso: string): Promise<{ id: string; distinctCompanies: number; status: string } | null> {
+    const rows = await this.d1.query<{ id: string; distinct_companies: number; status: string }>(
+      "SELECT id,distinct_companies,status FROM scan_runs WHERE started_at>=? ORDER BY started_at DESC LIMIT 1",
+      [sinceIso]);
+    const r = rows[0];
+    return r ? { id: r.id, distinctCompanies: r.distinct_companies, status: r.status } : null;
+  }
+}

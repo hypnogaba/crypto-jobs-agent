@@ -1,0 +1,131 @@
+import { mapLimit, runSource, SourceUnavailableError } from "./http.js";
+import type { AtsProvider, Company, RawJob, SourceResult } from "./types.js";
+import { ATS, GUESS_ORDER } from "./sources/ats.js";
+import { AGGREGATORS } from "./sources/aggregators.js";
+import { fetchGetro, extractAts } from "./sources/getro.js";
+import { companyKey } from "./normalize.js";
+
+export interface RungRun { jobs: RawJob[]; results: SourceResult[] }
+
+// ── R1: прямі ATS компаній зі списку ─────────────────────────
+export interface R1Deps {
+  markScanned: (slug: string, found: boolean) => Promise<void>;
+  learnAts: (slug: string, name: string, provider: AtsProvider, atsSlug: string) => Promise<void>;
+}
+
+export async function runR1(companies: Company[], deps: R1Deps, concurrency = 6): Promise<RungRun> {
+  const results = await mapLimit(companies, concurrency, async (c): Promise<SourceResult> => {
+    if (c.atsProvider && c.atsSlug) {
+      const source = `${c.atsProvider}:${c.atsSlug}`;
+      const r = await runSource(source, () => ATS[c.atsProvider!](c.atsSlug!, c.name));
+      await deps.markScanned(c.slug, r.jobs.length > 0);
+      return r;
+    }
+    // ATS ще невідомий — пробуємо провайдерів по черзі й запам'ятовуємо відповідь
+    for (const provider of GUESS_ORDER) {
+      try {
+        const jobs = await ATS[provider](c.atsSlug ?? c.slug, c.name);
+        if (jobs.length > 0) {
+          await deps.learnAts(c.slug, c.name, provider, c.atsSlug ?? c.slug);
+          await deps.markScanned(c.slug, true);
+          return { source: `${provider}:${c.slug}`, ok: true, jobs };
+        }
+      } catch { /* не на цьому провайдері — пробуємо наступний */ }
+    }
+    await deps.markScanned(c.slug, false);
+    return { source: `unknown:${c.slug}`, ok: true, jobs: [] };
+  });
+  return { jobs: results.flatMap((r) => r.jobs), results };
+}
+
+// ── R2: агрегатори ───────────────────────────────────────────
+export async function runR2(skip: Set<string> = new Set()): Promise<RungRun> {
+  const active = Object.entries(AGGREGATORS).filter(([n]) => !skip.has(n));
+  const results = await mapLimit(active, 5, ([name, fn]) => runSource(name, () => fn()));
+  return { jobs: results.flatMap((r) => r.jobs), results };
+}
+
+// ── R3: колекції Getro ───────────────────────────────────────
+export async function runR3(collectionIds: number[], skip: Set<string> = new Set()): Promise<RungRun> {
+  const active = collectionIds.filter((id) => !skip.has(`getro:${id}`));
+  const results = await mapLimit(active, 4, (id) => runSource(`getro:${id}`, () => fetchGetro(id)));
+  return { jobs: results.flatMap((r) => r.jobs), results };
+}
+
+/** Перебирає id колекцій і повертає ті, що відповідають. Робиться зрідка. */
+export async function discoverGetroCollections(
+  ids: number[], concurrency = 3, paceMs = 350
+): Promise<number[]> {
+  // Getro тротлить агресивно. Повільно й із витримкою — надійніше, ніж швидко й у 429.
+  const live = await mapLimit(ids, concurrency, async (id, i) => {
+    await new Promise((r) => setTimeout(r, (i % concurrency) * paceMs));
+    try {
+      const jobs = await fetchGetro(id, { retries: 2, retryDelayMs: 1500, timeoutMs: 15_000 }, 1);
+      return jobs.length > 0 ? id : null;
+    } catch { return null; }
+  });
+  return live.filter((v): v is number => v !== null);
+}
+
+// ── R4: вгадування ATS-слага з назви компанії ────────────────
+export function slugify(name: string): string {
+  return name.toLowerCase()
+    .replace(/\b(inc|llc|ltd|limited|gmbh|corp|corporation|co|the|group|sa|bv|ag|kg)\b/g, "")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+export interface R4Deps {
+  addCompany: (c: { slug: string; name: string; provider: AtsProvider; atsSlug: string; discoveredVia: string }) => Promise<void>;
+}
+
+/**
+ * Береш назву компанії з будь-якого агрегатора, робиш слаг, стукаєш у ATS.
+ * Виміряна ефективність — 45%. Кожне влучання стає постійним джерелом.
+ */
+export async function runR4(
+  pool: RawJob[], knownKeys: Set<string>, deps: R4Deps, maxCandidates = 60, concurrency = 8
+): Promise<RungRun & { added: number }> {
+  const seen = new Set<string>();
+  const candidates: Array<{ name: string; slug: string }> = [];
+  for (const job of pool) {
+    const key = companyKey(job.company);
+    const slug = slugify(job.company);
+    if (!slug || slug.length < 3 || seen.has(slug)) continue;
+    if (knownKeys.has(slug) || knownKeys.has(key)) continue;
+    seen.add(slug);
+    candidates.push({ name: job.company, slug });
+    if (candidates.length >= maxCandidates) break;
+  }
+
+  let added = 0;
+  const results = await mapLimit(candidates, concurrency, async (c): Promise<SourceResult> => {
+    for (const provider of GUESS_ORDER) {
+      try {
+        const jobs = await ATS[provider](c.slug, c.name, { retries: 0, timeoutMs: 12_000 });
+        if (jobs.length > 0) {
+          await deps.addCompany({ slug: c.slug, name: c.name, provider, atsSlug: c.slug, discoveredVia: "slug_guess" });
+          added++;
+          return { source: `${provider}:${c.slug}`, ok: true, jobs };
+        }
+      } catch (e) {
+        if (!(e instanceof SourceUnavailableError)) { /* мережа — просто далі */ }
+      }
+    }
+    return { source: `guess:${c.slug}`, ok: true, jobs: [] };
+  });
+
+  return { jobs: results.flatMap((r) => r.jobs), results, added };
+}
+
+/** Витягує компанії з ATS-лінків у вже зібраних вакансіях (Getro дає 80%). */
+export function harvestAtsFromJobs(jobs: RawJob[]): Array<{ slug: string; name: string; provider: AtsProvider }> {
+  const out = new Map<string, { slug: string; name: string; provider: AtsProvider }>();
+  for (const j of jobs) {
+    const hit = extractAts(j.url);
+    if (!hit) continue;
+    if (!out.has(hit.slug)) {
+      out.set(hit.slug, { slug: hit.slug, name: j.company, provider: hit.provider as AtsProvider });
+    }
+  }
+  return [...out.values()];
+}

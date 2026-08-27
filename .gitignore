@@ -2,3 +2,8 @@
 
 # Local-only notes containing personal data — never commit
 *.private.md
+
+# scanner
+scanner/node_modules/
+scanner/dist/
+scanner/.env
