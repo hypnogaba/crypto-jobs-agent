@@ -12,10 +12,10 @@ const hasRealApiKey = Boolean(process.env.ANTHROPIC_API_KEY);
 
 export interface ParsedCandidateProfile {
   seekingRole: string;
-  ecosystem: string;
-  format: string;
-  compFrom: number;
-  avoid: string;
+  category: string;
+  location: string;
+  remoteOk: boolean;
+  salaryMin: number;
 }
 
 export async function parseCv(rawText: string): Promise<ParsedCandidateProfile> {
@@ -26,15 +26,18 @@ export async function parseCv(rawText: string): Promise<ParsedCandidateProfile> 
 }
 
 function mockParseCv(rawText: string): ParsedCandidateProfile {
-  const hasRust = /rust/i.test(rawText);
-  const hasSolana = /solana/i.test(rawText);
+  const isRemote = /remote/i.test(rawText);
+  const salaryMatch = /\$?(\d{2,3})[,.]?(\d{3})?\s*k/i.exec(rawText);
+  const salaryMin = salaryMatch
+    ? Number.parseInt(salaryMatch[1], 10) * 1000
+    : 80000;
 
   return {
-    seekingRole: hasRust ? "Senior Rust / Protocol Engineer" : "Software Engineer",
-    ecosystem: hasSolana ? "Solana" : "Ethereum / EVM",
-    format: "Remote, EU timezone",
-    compFrom: 150000,
-    avoid: "NFT, gaming",
+    seekingRole: "Role parsed from your input (mock — set ANTHROPIC_API_KEY for real parsing)",
+    category: "General",
+    location: isRemote ? "" : "Not specified",
+    remoteOk: isRemote,
+    salaryMin,
   };
 }
 

@@ -1,13 +1,11 @@
 /**
- * Delivery abstraction — sends a daily card to the user via their chosen
- * channel (Telegram or email). Telegram is fully wired up (reuses the
- * Phase 1 test bot). Email is a no-op until RESEND_API_KEY is set.
+ * Delivery abstraction — sends a daily card to the user via Telegram.
+ * Email delivery is out of scope for the MVP (Telegram-only).
  */
 
 import type { User, JobSignal, DailyCard } from "@/generated/prisma/client";
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const RESEND_API_KEY = process.env.RESEND_API_KEY;
 
 export async function deliverCard(
   user: User,
@@ -15,11 +13,7 @@ export async function deliverCard(
   signal: JobSignal
 ): Promise<{ ok: boolean; error?: string }> {
   const text = formatCardText(signal, card.whyYou, card.draftText);
-
-  if (user.deliveryChannel === "TELEGRAM") {
-    return deliverViaTelegram(user.telegramChatId, text);
-  }
-  return deliverViaEmail(user.email, signal.role, text);
+  return deliverViaTelegram(user.telegramChatId, text);
 }
 
 function formatCardText(signal: JobSignal, whyYou: string, draftText: string): string {
@@ -59,34 +53,6 @@ async function deliverViaTelegram(
       body: JSON.stringify({ chat_id: chatId, text }),
     }
   );
-  const data = await res.json();
+  const data = (await res.json()) as { ok: boolean };
   return data.ok ? { ok: true } : { ok: false, error: JSON.stringify(data) };
-}
-
-async function deliverViaEmail(
-  email: string,
-  role: string,
-  text: string
-): Promise<{ ok: boolean; error?: string }> {
-  if (!RESEND_API_KEY) {
-    return { ok: false, error: "RESEND_API_KEY not configured" };
-  }
-
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${RESEND_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      from: "jobs@yourdomain.com",
-      to: email,
-      subject: `New opportunity: ${role}`,
-      text,
-    }),
-  });
-  if (!res.ok) {
-    return { ok: false, error: await res.text() };
-  }
-  return { ok: true };
 }

@@ -1,14 +1,9 @@
 import { PrismaClient } from "@/generated/prisma/client";
-import { PrismaMariaDb } from "@prisma/adapter-mariadb";
+import { PrismaD1 } from "@prisma/adapter-d1";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 
-const globalForPrisma = globalThis as unknown as {
-  prisma: PrismaClient | undefined;
-};
-
-const adapter = new PrismaMariaDb(process.env.DATABASE_URL!);
-
-export const prisma = globalForPrisma.prisma ?? new PrismaClient({ adapter });
-
-if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prisma = prisma;
+export async function getPrisma(): Promise<PrismaClient> {
+  const { env } = getCloudflareContext();
+  const adapter = new PrismaD1(env.DB);
+  return new PrismaClient({ adapter });
 }
