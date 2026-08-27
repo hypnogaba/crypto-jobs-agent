@@ -49,10 +49,15 @@ export class D1Client {
       // Найчастіша причина мовчазної смерті скану: у /etc покладено тимчасовий
       // OAuth-токен wrangler, який живе близько години. Кажемо це прямо.
       if (res.status === 401 || res.status === 403) {
+        // Найчастіша причина мовчазної смерті скану. Самооновити такий токен
+        // не можна: refresh-токен Cloudflare одноразовий і ротується, тому
+        // сервер і локальний wrangler б'ються за один і той самий, а сам
+        // wrangler оновлює доступ лише в пам'яті свого процесу.
         throw new Error(
-          "D1 відмовив у доступі. Найімовірніше, CF_API_TOKEN — це тимчасовий " +
-          "OAuth-токен wrangler, який протух. Потрібен постійний API-токен " +
-          "із правом D1:Edit у /etc/nextrole-scanner.env.");
+          "D1 відмовив у доступі. Майже напевно CF_API_TOKEN — це тимчасовий " +
+          "OAuth-токен wrangler, який діє близько години. Потрібен постійний " +
+          "API-токен із правом D1:Edit у /etc/nextrole-scanner.env. " +
+          "Створити: dash.cloudflare.com → My Profile → API Tokens → Create Custom Token.");
       }
       throw new Error(`D1 HTTP ${res.status}: ${body}`);
     }
