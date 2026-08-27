@@ -1,1 +1,4 @@
 .superpowers/
+
+# Local-only notes containing personal data — never commit
+*.private.md
