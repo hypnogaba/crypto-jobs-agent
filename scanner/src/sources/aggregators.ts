@@ -106,19 +106,38 @@ const rssItems = (xml: string): Array<Record<string, string>> => {
   return items;
 };
 
-/** «Company: Title» — типовий формат заголовка в RSS джоб-бордів. */
-const splitTitle = (raw: string): { company: string; title: string } => {
-  const m = /^(.+?)\s*[:|–—-]\s*(.+)$/.exec(raw);
-  return m ? { company: m[1]!.trim(), title: m[2]!.trim() } : { company: "Unknown company", title: raw };
-};
+/**
+ * RSS джоб-бордів використовує два несумісні формати заголовка:
+ *   "Company: Title"   — We Work Remotely, Jobspresso
+ *   "Title at Company" — NoDesk, CryptocurrencyJobs
+ * Без другого варіанта майже сотня вакансій за прогін лишалась без компанії.
+ */
+function splitTitle(raw: string): { company: string; title: string } {
+  const clean = decode(raw).replace(/\s+/g, " ").trim();
+
+  const at = /^(.+?)\s+at\s+(.+)$/i.exec(clean);
+  if (at && at[2]!.length <= 60 && !/\bat\s*$/i.test(at[1]!)) {
+    return { title: at[1]!.trim(), company: at[2]!.trim().replace(/[.,]$/, "") };
+  }
+
+  const colon = /^(.+?)\s*[:|–—]\s*(.+)$/.exec(clean);
+  if (colon && colon[1]!.length <= 60) {
+    return { company: colon[1]!.trim(), title: colon[2]!.trim() };
+  }
+
+  return { company: "Unknown company", title: clean };
+}
 
 async function rssSource(url: string, source: string, o: FetchOptions): Promise<RawJob[]> {
   const xml = await fetchXml(url, {}, o);
-  return rssItems(xml).filter((i) => i.link && i.title).map((i) => {
-    const { company, title } = splitTitle(i.title!);
-    return { url: i.link!, company, title, location: i.region || null, remote: true,
-      postedAt: iso(i.date), source };
-  });
+  return rssItems(xml)
+    .filter((i) => i.link && i.title)
+    .map((i) => {
+      const { company, title } = splitTitle(i.title!);
+      return { url: i.link!, company, title, location: i.region ? decode(i.region) : null,
+        remote: true, postedAt: iso(i.date), source };
+    })
+    .filter((j) => j.company !== "Unknown company");   // без компанії картка марна
 }
 
 export const fetchWeWorkRemotely = (o: FetchOptions = {}) => rssSource("https://weworkremotely.com/remote-jobs.rss", "aggregator:wwr", o);
@@ -127,9 +146,19 @@ export const fetchNoDesk         = (o: FetchOptions = {}) => rssSource("https://
 export const fetchCryptoJobs     = (o: FetchOptions = {}) => rssSource("https://cryptocurrencyjobs.co/index.xml", "aggregator:cryptocurrencyjobs", o);
 
 // ── Hacker News «Who is hiring» ───────────────────────────────
-const decode = (v: string): string => v
-  .replace(/&#x2F;/g, "/").replace(/&#x27;/g, "'").replace(/&quot;/g, '"')
-  .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+/** RSS-стрічки часто кодують сутності двічі й тричі — розкодовуємо до стабільного стану. */
+function decode(v: string): string {
+  let out = v;
+  for (let i = 0; i < 4; i++) {
+    const next = out
+      .replace(/&#x2F;/gi, "/").replace(/&#x27;/gi, "'").replace(/&#39;/g, "'")
+      .replace(/&quot;/gi, '"').replace(/&nbsp;/gi, " ")
+      .replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&amp;/gi, "&");
+    if (next === out) break;
+    out = next;
+  }
+  return out;
+}
 
 export function parseHnComment(html: string, createdAt: string): RawJob | null {
   const link = /href="([^"]+)"/.exec(html);
@@ -137,7 +166,10 @@ export function parseHnComment(html: string, createdAt: string): RawJob | null {
   const url = decode(link[1]!);
   if (!/^https?:\/\//i.test(url)) return null;
 
-  const flat = decode(html.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+  // Прибираємо посилання РАЗОМ із їхнім текстом: сам URL уже взято окремо,
+  // а його текст інакше приклеюється до назви компанії.
+  const withoutLinks = html.replace(/<a\b[^>]*>[\s\S]*?<\/a>/gi, " ");
+  const flat = decode(withoutLinks.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
   const parts = flat.split("|").map((s) => s.trim()).filter(Boolean);
   if (parts.length === 0) return null;
   const company = parts[0]!.split(/https?:\/\//)[0]!.trim();

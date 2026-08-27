@@ -1,0 +1,10 @@
+[Unit]
+Description=Запуск скану вакансій у будні зранку
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 05:00:00
+Persistent=true
+Unit=nextrole-scan.service
+
+[Install]
+WantedBy=timers.target

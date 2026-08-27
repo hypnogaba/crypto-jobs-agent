@@ -11,12 +11,20 @@ const out = (jobs: RawJob[] = [], broken: string[] = []) => ({
   jobs, results: broken.map((s) => ({ source: s, ok: false, jobs: [], broken: true })) });
 
 describe("climbLadder", () => {
-  it("зупиняється на R1, щойно ціль досягнута", async () => {
+  it("зупиняється після обов'язкових рівнів, щойно ціль досягнута", async () => {
     const r = { R1: vi.fn(async () => out(many(8))), R2: vi.fn(async () => out()),
       R3: vi.fn(async () => out()), R4: vi.fn(async () => out()), R5: vi.fn(async () => out()) };
     const o = await climbLadder(r, { distinctCompanyTarget: 7, freshnessDays: 14 });
-    expect(o.reached).toBe("R1");
+    expect(o.reached).toBe("R2");        // R2 обов'язковий навіть при досягнутій цілі
     expect(o.distinctCompanies).toBe(8);
+    expect(r.R3).not.toHaveBeenCalled();
+  });
+
+  it("із порожнім alwaysRun гейт спрацьовує одразу після R1", async () => {
+    const r = { R1: vi.fn(async () => out(many(8))), R2: vi.fn(async () => out()),
+      R3: vi.fn(async () => out()), R4: vi.fn(async () => out()), R5: vi.fn(async () => out()) };
+    const o = await climbLadder(r, { distinctCompanyTarget: 7, freshnessDays: 14, alwaysRun: [] });
+    expect(o.reached).toBe("R1");
     expect(r.R2).not.toHaveBeenCalled();
   });
 
@@ -63,5 +71,17 @@ describe("climbLadder", () => {
       R3: vi.fn(async () => out([job("C")])), R4, R5: vi.fn(async () => out()) };
     await climbLadder(r, { distinctCompanyTarget: 99, freshnessDays: 14 });
     expect(R4.mock.calls[0]![0]).toHaveLength(3);
+  });
+});
+
+describe("обов'язкові рівні", () => {
+  it("R2 виконується навіть коли R1 уже взяв поріг", async () => {
+    const R2 = vi.fn(async () => out([job("Extra")]));
+    const r = { R1: vi.fn(async () => out(many(20))), R2,
+      R3: vi.fn(async () => out()), R4: vi.fn(async () => out()), R5: vi.fn(async () => out()) };
+    const o = await climbLadder(r, { distinctCompanyTarget: 7, freshnessDays: 14 });
+    expect(R2).toHaveBeenCalled();
+    expect(r.R3).not.toHaveBeenCalled();
+    expect(o.reached).toBe("R2");
   });
 });

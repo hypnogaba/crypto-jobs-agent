@@ -1,0 +1,10 @@
+[Unit]
+Description=Перевірка результату скану через три години після нього
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 08:00:00
+Persistent=true
+Unit=nextrole-watchdog.service
+
+[Install]
+WantedBy=timers.target

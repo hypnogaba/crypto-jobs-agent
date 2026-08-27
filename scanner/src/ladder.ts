@@ -16,6 +16,12 @@ export interface LadderOptions {
   freshnessDays: number;
   now?: Date;
   onRung?: (line: string) => void;
+  /**
+   * Рівні, що виконуються завжди, незалежно від порога. R1 і R2 дешеві й дають
+   * ширину; якби гейт спиняв драбину після R1, агрегатори переставали б
+   * оновлюватись назавжди, щойно список компаній стає багатим.
+   */
+  alwaysRun?: Rung[];
 }
 
 export interface LadderOutcome {
@@ -61,7 +67,9 @@ export async function climbLadder(rungs: LadderRungs, o: LadderOptions): Promise
     trace.push(line);
     o.onRung?.(line);
 
-    if (distinct >= o.distinctCompanyTarget) break;
+    const mandatory = new Set(o.alwaysRun ?? ["R1", "R2"]);
+    const remainingMandatory = ORDER.slice(ORDER.indexOf(rung) + 1).some((r) => mandatory.has(r));
+    if (distinct >= o.distinctCompanyTarget && !remainingMandatory) break;
   }
 
   return { jobs: prepared, distinctCompanies: distinct, reached, results, proofOfWork: trace.join("\n") };

@@ -17,6 +17,8 @@ const SPHERE_RULES: Array<[string, RegExp]> = [
   ["sales",        /\b(sales|account executives?|account managers?|customer success|solutions engineers?)\b/i],
   ["security",     /\b(security|appsec|infosec|penetration|compliance|grc)\b/i],
   ["qa",           /\b(qa engineers?|quality assurance|test engineers?|sdet)\b/i],
+  ["support",      /\b(support|technical support|helpdesk|customer service)\b/i],
+  ["finance-legal",/\b(finance|accountant|controller|legal|counsel|compliance officer|tax)\b/i],
 ];
 
 const INDUSTRY_RULES: Array<[string, RegExp]> = [
