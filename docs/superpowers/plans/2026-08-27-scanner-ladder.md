@@ -10,6 +10,38 @@
 
 ---
 
+---
+
+## ⚠ Ревізія 2026-08-27 (після застосування схеми)
+
+Цей план написаний **до** того, як була ухвалена продуктова модель і застосована
+канонічна схема. Що змінилось і що робити виконавцю:
+
+1. **Таблиця `companies` більше не існує — тепер `companies`**, і в неї
+   додані `tags`, `discovered_via`, `last_scanned_at`, `dry_scans`. Скрізь у цьому
+   плані читати `companies` як `companies` і мапити поля відповідно.
+2. **Task 2 (створення схеми) вже виконаний.** Схема лежить у `db/migrations/0001_schema.sql`
+   і застосована до віддаленої D1 — десять таблиць. Task 2 пропустити повністю.
+3. **`jobs_cache` тепер має `tags`, `salary_min`, `salary_max`, `salary_currency`.**
+   Це основа маршрутизації за нішами: кожна вакансія успадковує теги свого джерела
+   плюс отримує власні з назви посади.
+4. **`sources_state` має `jobs_last_run` і `checked_at`** — їх заповнює адмінка.
+5. **Додати шість ATS-адаптерів**, підтверджених живими запитами й відсутніх у
+   Task 7: Workable, SmartRecruiters, Workday, Breezy, Personio, Rippling. Разом
+   із трьома наявними це дев'ять провайдерів. Workday особливо цінний — розблоковує
+   великий ентерпрайз (NVIDIA віддала 2000 позицій).
+6. **Додати перебір колекцій Getro** окремим кроком у R3. Живих колекцій ~890,
+   у них 80% прямих ATS-лінків — це головне джерело нових компаній.
+7. **R4 (вгадування слага) має виміряну ефективність 45%** і є другим механізмом
+   росту. Пріоритет вищий, ніж передбачав початковий план.
+8. **R5 лишається необов'язковим.** Без `ANTHROPIC_API_KEY` рівень пропускається,
+   драбина зупиняється на R4 — це працює, просто вужче.
+
+Причина «жодних плейсхолдерів» лишається чинною: код у кроках нижче робочий,
+змінюються лише імена таблиць і додаються джерела.
+
+---
+
 ## Context the implementer needs
 
 Read `docs/reference/job-search-engine-spec.md` first — it is the behavioural contract this plan implements. Key rules that shape the code:
@@ -18,7 +50,7 @@ Read `docs/reference/job-search-engine-spec.md` first — it is the behavioural 
 - **A broken source is not an empty source.** HTTP 401/403/404/406/410/429 or a Cloudflare challenge means *unavailable*; it must never be counted as "0 vacancies found".
 - **Every job needs a live URL.** A row without a usable URL is dropped.
 - **Geo-clones collapse.** The same role posted in five countries is one row.
-- **The company list grows itself.** Any company that produces a fit is appended to `standing_companies` and swept on every later run.
+- **The company list grows itself.** Any company that produces a fit is appended to `companies` and swept on every later run.
 
 Three findings from live probing done while writing this plan — they are already baked into the code below, do not "fix" them back:
 
@@ -37,7 +69,7 @@ scanner/
   vitest.config.ts
   .env.example              — documents every required variable
   migrations/
-    0002_scanner.sql        — jobs_cache, sources_state, standing_companies, scan_runs
+    0002_scanner.sql        — jobs_cache, sources_state, companies, scan_runs
   deploy/
     jobs-scanner.service    — oneshot unit running the scan
     jobs-scanner.timer      — Mon–Fri 05:00
@@ -186,7 +218,7 @@ export interface SourceResult {
 
 export type AtsProvider = "greenhouse" | "lever" | "ashby";
 
-export interface StandingCompany {
+export interface Company {
   slug: string;
   name: string;
   atsProvider: AtsProvider | null;
@@ -347,7 +379,7 @@ CREATE TABLE IF NOT EXISTS sources_state (
 );
 
 -- Auto-growing company list. Any company that yields a fit is swept forever after.
-CREATE TABLE IF NOT EXISTS standing_companies (
+CREATE TABLE IF NOT EXISTS companies (
     slug         TEXT PRIMARY KEY,
     name         TEXT NOT NULL,
     ats_provider TEXT,
@@ -372,7 +404,7 @@ CREATE TABLE IF NOT EXISTS scan_runs (
 CREATE INDEX IF NOT EXISTS idx_scan_runs_started ON scan_runs(started_at);
 
 -- Seed the standing list from the working engine's proven set.
-INSERT OR IGNORE INTO standing_companies (slug, name, ats_provider, ats_slug, track, added_at) VALUES
+INSERT OR IGNORE INTO companies (slug, name, ats_provider, ats_slug, track, added_at) VALUES
     ('datadog',           'Datadog',           NULL, NULL, 'A', datetime('now')),
     ('remote-com',        'Remote.com',        NULL, NULL, 'A', datetime('now')),
     ('elastic',           'Elastic',           NULL, NULL, 'A', datetime('now')),
@@ -423,7 +455,7 @@ Expected: wrangler reports the commands executed successfully.
 
 ```bash
 npx wrangler d1 execute crypto-jobs-agent --remote \
-  --command "SELECT track, COUNT(*) AS n FROM standing_companies GROUP BY track"
+  --command "SELECT track, COUNT(*) AS n FROM companies GROUP BY track"
 ```
 Expected: two rows — track `A` with 14, track `B` with 8.
 
@@ -1163,7 +1195,7 @@ Expected: FAIL — `Failed to resolve import "./repo.js"`.
 
 ```typescript
 import type { D1Client, D1Statement } from "./d1.js";
-import type { NormalizedJob, SourceStatus, StandingCompany, AtsProvider } from "./types.js";
+import type { NormalizedJob, SourceStatus, Company, AtsProvider } from "./types.js";
 
 interface StandingRow {
   slug: string;
@@ -1236,9 +1268,9 @@ export class Repo {
     return new Set(rows.map((r) => r.dedupe_key));
   }
 
-  async listStandingCompanies(): Promise<StandingCompany[]> {
+  async listCompanies(): Promise<Company[]> {
     const rows = await this.d1.query<StandingRow>(
-      "SELECT * FROM standing_companies ORDER BY added_at"
+      "SELECT * FROM companies ORDER BY added_at"
     );
     return rows.map((row) => ({
       slug: row.slug,
@@ -1254,13 +1286,13 @@ export class Repo {
   /** AUTO-GROW: remember which ATS a company actually uses so later runs skip probing. */
   async rememberAts(slug: string, provider: AtsProvider, atsSlug: string): Promise<void> {
     await this.d1.execute(
-      "UPDATE standing_companies SET ats_provider = ?, ats_slug = ?, last_fit_at = ? WHERE slug = ?",
+      "UPDATE companies SET ats_provider = ?, ats_slug = ?, last_fit_at = ? WHERE slug = ?",
       [provider, atsSlug, new Date().toISOString(), slug]
     );
   }
 
   /** AUTO-GROW: a company that produced a fit joins the standing sweep permanently. */
-  async addStandingCompany(company: {
+  async addCompany(company: {
     slug: string;
     name: string;
     provider: AtsProvider;
@@ -1269,7 +1301,7 @@ export class Repo {
   }): Promise<void> {
     const now = new Date().toISOString();
     await this.d1.execute(
-      `INSERT INTO standing_companies (slug, name, ats_provider, ats_slug, track, added_at, last_fit_at)
+      `INSERT INTO companies (slug, name, ats_provider, ats_slug, track, added_at, last_fit_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(slug) DO UPDATE SET
          ats_provider = excluded.ats_provider,
@@ -1690,10 +1722,10 @@ Most seeded companies have no known ATS yet. The rung probes the three providers
 ```typescript
 import { describe, expect, it, vi } from "vitest";
 import { resolveAts, runR1 } from "./r1-standing.js";
-import type { StandingCompany } from "../types.js";
+import type { Company } from "../types.js";
 import { SourceUnavailableError } from "../http.js";
 
-function company(overrides: Partial<StandingCompany> = {}): StandingCompany {
+function company(overrides: Partial<Company> = {}): Company {
   return {
     slug: "acme",
     name: "Acme",
@@ -1783,7 +1815,7 @@ Expected: FAIL — cannot resolve `./r1-standing.js`.
 - [ ] **Step 3: Write the implementation**
 
 ```typescript
-import type { AtsProvider, RawJob, StandingCompany } from "../types.js";
+import type { AtsProvider, RawJob, Company } from "../types.js";
 import { fetchGreenhouse } from "../sources/greenhouse.js";
 import { fetchLever } from "../sources/lever.js";
 import { fetchAshby } from "../sources/ashby.js";
@@ -1819,7 +1851,7 @@ const PROBE_ORDER: AtsProvider[] = ["greenhouse", "lever", "ashby"];
  * postings. A provider that 404s simply does not host this company.
  */
 export async function resolveAts(
-  company: StandingCompany,
+  company: Company,
   probes: AtsProbes
 ): Promise<{ provider: AtsProvider; slug: string; jobs: RawJob[] } | null> {
   const candidateSlug = company.atsSlug ?? company.slug;
@@ -1839,7 +1871,7 @@ export async function resolveAts(
 }
 
 export async function runR1(
-  companies: StandingCompany[],
+  companies: Company[],
   probes: AtsProbes,
   deps: R1Deps
 ): Promise<RungResult> {
@@ -2499,7 +2531,7 @@ describe("findNewCompanies", () => {
 
 describe("runR4", () => {
   it("adds a discovered company only after its own ATS confirms it", async () => {
-    const addStandingCompany = vi.fn();
+    const addCompany = vi.fn();
     const probes = {
       greenhouse: vi.fn(async () => { throw new Error("404"); }),
       lever: vi.fn(async () => [job("FreshCo", "Partnerships Manager")]),
@@ -2511,17 +2543,17 @@ describe("runR4", () => {
       ["partnerships"],
       new Set(),
       probes,
-      { addStandingCompany }
+      { addCompany }
     );
 
-    expect(addStandingCompany).toHaveBeenCalledWith(
+    expect(addCompany).toHaveBeenCalledWith(
       expect.objectContaining({ provider: "lever", name: "FreshCo" })
     );
     expect(result.jobs).toHaveLength(1);
   });
 
   it("does not add a company whose ATS cannot be found", async () => {
-    const addStandingCompany = vi.fn();
+    const addCompany = vi.fn();
     const fail = vi.fn(async () => { throw new Error("404"); });
 
     const result = await runR4(
@@ -2529,10 +2561,10 @@ describe("runR4", () => {
       ["partnerships"],
       new Set(),
       { greenhouse: fail, lever: fail, ashby: fail },
-      { addStandingCompany }
+      { addCompany }
     );
 
-    expect(addStandingCompany).not.toHaveBeenCalled();
+    expect(addCompany).not.toHaveBeenCalled();
     expect(result.jobs).toHaveLength(0);
   });
 });
@@ -2607,7 +2639,7 @@ export function findNewCompanies(
 }
 
 export interface R4Deps {
-  addStandingCompany: (company: {
+  addCompany: (company: {
     slug: string;
     name: string;
     provider: AtsProvider;
@@ -2637,7 +2669,7 @@ export async function runR4(
         if (found.length === 0) continue;
 
         jobs.push(...found);
-        await deps.addStandingCompany({
+        await deps.addCompany({
           slug: candidate.slug,
           name: candidate.company,
           provider,
@@ -3329,7 +3361,7 @@ async function main(): Promise<void> {
 
   const rungs: LadderRungs = {
     r1: async () => {
-      const companies = await repo.listStandingCompanies();
+      const companies = await repo.listCompanies();
       const result = await runR1(companies, defaultProbes, {
         rememberAts: (slug, provider, atsSlug) => repo.rememberAts(slug, provider, atsSlug),
       });
@@ -3352,12 +3384,12 @@ async function main(): Promise<void> {
     },
 
     r4: async (poolSoFar: RawJob[]) => {
-      const companies = await repo.listStandingCompanies();
+      const companies = await repo.listCompanies();
       const known = new Set(companies.map((company) => company.slug.replace(/-/g, " ")));
       const keywords = rotateKeywords(dayNumber(now));
 
       const result = await runR4(poolSoFar, keywords, known, defaultProbes, {
-        addStandingCompany: (company) => repo.addStandingCompany(company),
+        addCompany: (company) => repo.addCompany(company),
       });
 
       console.log(`R4 discovered ${result.added} new companies`);
