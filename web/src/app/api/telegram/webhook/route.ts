@@ -16,11 +16,12 @@ export async function POST(request: Request): Promise<Response> {
   const env = getCloudflareContext().env as unknown as Record<string, string | undefined>;
   const expected = env.TELEGRAM_WEBHOOK_SECRET;
 
-  if (expected) {
-    const got = request.headers.get("x-telegram-bot-api-secret-token");
-    if (got !== expected) {
-      return NextResponse.json({ ok: false }, { status: 401 });
-    }
+  // Закриваємось за замовчуванням: поки секрет не заданий, вебхук не приймає
+  // НІЧОГО. Умовна перевірка тут була б дірою — на свіжому деплої без секрету
+  // будь-хто міг би слати оновлення від імені Telegram.
+  const got = request.headers.get("x-telegram-bot-api-secret-token");
+  if (!expected || got !== expected) {
+    return NextResponse.json({ ok: false }, { status: 401 });
   }
 
   const update = (await request.json()) as {

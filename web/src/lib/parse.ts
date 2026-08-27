@@ -1,4 +1,4 @@
-import { INDUSTRIES, SPHERES, type IndustryId, type RemoteModeId, type SeniorityId, type SphereId } from "./vocab.js";
+import { INDUSTRIES, SPHERES, type IndustryId, type RemoteModeId, type SeniorityId, type SphereId } from "./vocab";
 
 /**
  * Розбирає вільний текст або резюме в ТІ САМІ чотири поля, що й форма.

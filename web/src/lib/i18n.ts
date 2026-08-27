@@ -1,4 +1,4 @@
-import type { Locale } from "./vocab.js";
+import type { Locale } from "./vocab";
 
 /**
  * Чотири локалі, написані заздалегідь. Свідомо не машинний переклад у рантаймі:

@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import { all, one, run, uuid } from "./db.js";
+import { all, one, run, uuid } from "./db";
 
 /**
  * Аутентифікація на власних силах: PBKDF2 із WebCrypto (доступний у Workers)
