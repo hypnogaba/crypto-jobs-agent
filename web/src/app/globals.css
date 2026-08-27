@@ -1,19 +1,57 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --ink: #12161c;
+  --ink-2: #4a5563;
+  --muted: #6b7684;
+  --line: #e2e6ec;
+  --accent: #c4552c;
+  --ok: #1f7a5e;
+  --warn: #8a6316;
+  --bad: #a8403c;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1317;
+    --surface: #171d24;
+    --ink: #e8ecf1;
+    --ink-2: #b6c0cb;
+    --muted: #8a949f;
+    --line: #262e37;
+    --accent: #e5794c;
+    --ok: #4fbf97;
+    --warn: #d5a44a;
+    --bad: #e07a74;
+  }
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
+
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+.field {
+  width: 100%; border: 1px solid var(--line); border-radius: 10px;
+  padding: 0.65rem 0.85rem; background: var(--surface); color: var(--ink);
+}
+.field:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
+.btn {
+  border-radius: 10px; padding: 0.65rem 1.1rem; font-weight: 500;
+  background: var(--accent); color: #fff; border: 1px solid var(--accent);
+}
+.btn:hover { filter: brightness(1.08); }
+.btn-ghost { background: transparent; color: var(--ink-2); border-color: var(--line); }
+.btn-ghost:hover { color: var(--ink); border-color: var(--accent); filter: none; }
+.chip {
+  display: inline-flex; align-items: center; gap: .4rem;
+  border: 1px solid var(--line); border-radius: 999px;
+  padding: .4rem .8rem; cursor: pointer; font-size: .9rem; color: var(--ink-2);
+}
+.chip:has(input:checked) { border-color: var(--accent); color: var(--ink); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.chip input { accent-color: var(--accent); }

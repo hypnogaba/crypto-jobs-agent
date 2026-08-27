@@ -1,0 +1,12 @@
+[Unit]
+Description=Щогодинна перевірка, кому саме зараз час надсилати добірку
+
+[Timer]
+# Щогодини: кожен користувач має власну годину у власному поясі,
+# тому обходимо всіх раз на годину й беремо тих, кому саме зараз сьома.
+OnCalendar=*-*-* *:05:00
+Persistent=true
+Unit=nextrole-digest.service
+
+[Install]
+WantedBy=timers.target
