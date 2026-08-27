@@ -4,22 +4,38 @@ import { t } from "@/lib/i18n";
 import type { Locale } from "@/lib/vocab";
 import { logout } from "./actions";
 
-export default async function Nav({ locale }: { locale: Locale }) {
+/** `onNight` — навігація поверх темної смуги на головній. */
+export default async function Nav({ locale, onNight = false }: { locale: Locale; onNight?: boolean }) {
   const user = await currentUser();
+  const line = onNight ? "var(--night-rule)" : "var(--rule)";
+  const dim = onNight ? "var(--night-2)" : "var(--muted)";
+
   return (
-    <header className="border-b" style={{ borderColor: "var(--line)" }}>
-      <nav className="mx-auto flex max-w-3xl items-center justify-between px-6 py-4">
-        <Link href="/" className="font-semibold tracking-tight">{t(locale, "brand")}</Link>
-        <div className="flex items-center gap-4 text-sm" style={{ color: "var(--muted)" }}>
+    <header style={{ borderBottom: `1px solid ${line}` }}>
+      <nav className="mx-auto flex max-w-5xl items-center justify-between px-6 py-5">
+        <Link href="/" className="flex items-baseline gap-2.5">
+          <span className="display text-lg tracking-tight">NextRole</span>
+          <span className="eyebrow hidden sm:inline" style={{ color: dim }}>
+            {t(locale, "nav.strap")}
+          </span>
+        </Link>
+
+        <div className="flex items-center gap-5 text-sm" style={{ color: dim }}>
           {user ? (
             <>
-              <Link href="/dashboard" className="hover:underline">{t(locale, "dash.title")}</Link>
-              <Link href="/settings" className="hover:underline">{t(locale, "dash.settings")}</Link>
-              {user.isAdmin && <Link href="/admin" className="hover:underline">{t(locale, "nav.admin")}</Link>}
-              <form action={logout}><button type="submit" className="hover:underline">{t(locale, "auth.logout")}</button></form>
+              <Link href="/dashboard" className="hover:opacity-70">{t(locale, "dash.title")}</Link>
+              <Link href="/settings" className="hover:opacity-70">{t(locale, "dash.settings")}</Link>
+              {user.isAdmin && (
+                <Link href="/admin" className="mono text-xs hover:opacity-70" style={{ color: "var(--ember)" }}>
+                  {t(locale, "nav.admin")}
+                </Link>
+              )}
+              <form action={logout}>
+                <button type="submit" className="hover:opacity-70">{t(locale, "auth.logout")}</button>
+              </form>
             </>
           ) : (
-            <Link href="/login" className="hover:underline">{t(locale, "auth.login")}</Link>
+            <Link href="/login" className="hover:opacity-70">{t(locale, "auth.login")}</Link>
           )}
         </div>
       </nav>

@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import Nav from "../nav";
+import Shell from "../shell";
 import { detectLocale, readDraft, saveProfile } from "../actions";
 import { currentUser } from "@/lib/auth";
 import { one } from "@/lib/db";
@@ -10,12 +10,28 @@ const parseList = (v: string | null): string[] => {
   try { const p = JSON.parse(v ?? "[]"); return Array.isArray(p) ? p : []; } catch { return []; }
 };
 
+function Question({ n, title, hint, children }: {
+  n: number; title: string; hint?: string; children: React.ReactNode;
+}) {
+  return (
+    <fieldset className="grid grid-cols-[2.5rem_1fr] gap-4 px-6 py-7">
+      <span className="mono pt-1 text-sm" style={{ color: "var(--ember)" }}>
+        {String(n).padStart(2, "0")}
+      </span>
+      <div>
+        <legend className="font-medium">{title}</legend>
+        {hint && <p className="mt-1 text-xs" style={{ color: "var(--muted)" }}>{hint}</p>}
+        <div className="mt-4">{children}</div>
+      </div>
+    </fieldset>
+  );
+}
+
 export default async function Onboarding() {
   const locale = await detectLocale();
   const user = await currentUser();
   const draft = await readDraft();
 
-  // Дані беремо з чернетки (щойно написаного) або з уже збереженого профілю
   let pre = draft?.parsed as Record<string, unknown> | undefined;
   if (!pre && user) {
     const row = await one<{ spheres: string; industries: string; seniority: string | null;
@@ -32,16 +48,11 @@ export default async function Onboarding() {
   const industries = new Set(pre.industries as string[]);
 
   return (
-    <>
-      <Nav locale={locale} />
-      <main className="mx-auto w-full max-w-2xl flex-1 px-6 py-14">
-        <h1 className="text-2xl font-semibold tracking-tight">{t(locale, "onboarding.title")}</h1>
-        <p className="mt-2 text-sm" style={{ color: "var(--ink-2)" }}>{t(locale, "onboarding.lede")}</p>
-
-        <form action={saveProfile} className="mt-9 flex flex-col gap-8">
-          <fieldset>
-            <legend className="text-sm font-medium">{t(locale, "onboarding.spheres")}</legend>
-            <div className="mt-3 flex flex-wrap gap-2">
+    <Shell locale={locale} eyebrow="02 / 02" title={t(locale, "onboarding.title")} lede={t(locale, "onboarding.lede")}>
+      <form action={saveProfile}>
+        <div className="ruled card">
+          <Question n={1} title={t(locale, "onboarding.spheres")}>
+            <div className="flex flex-wrap gap-2">
               {SPHERES.map((s) => (
                 <label key={s.id} className="chip">
                   <input type="checkbox" name="spheres" value={s.id} defaultChecked={spheres.has(s.id)} />
@@ -49,23 +60,21 @@ export default async function Onboarding() {
                 </label>
               ))}
             </div>
-          </fieldset>
-
-          <fieldset>
-            <legend className="text-sm font-medium">{t(locale, "onboarding.industries")}</legend>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {INDUSTRIES.map((i) => (
-                <label key={i.id} className="chip">
-                  <input type="checkbox" name="industries" value={i.id} defaultChecked={industries.has(i.id)} />
-                  {label(i, locale)}
-                </label>
-              ))}
+            <div className="mt-5">
+              <p className="eyebrow">{t(locale, "onboarding.industries")}</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {INDUSTRIES.map((i) => (
+                  <label key={i.id} className="chip">
+                    <input type="checkbox" name="industries" value={i.id} defaultChecked={industries.has(i.id)} />
+                    {label(i, locale)}
+                  </label>
+                ))}
+              </div>
             </div>
-          </fieldset>
+          </Question>
 
-          <fieldset>
-            <legend className="text-sm font-medium">{t(locale, "onboarding.seniority")}</legend>
-            <div className="mt-3 flex flex-wrap gap-2">
+          <Question n={2} title={t(locale, "onboarding.seniority")}>
+            <div className="flex flex-wrap gap-2">
               {SENIORITY.map((s) => (
                 <label key={s.id} className="chip">
                   <input type="radio" name="seniority" value={s.id} defaultChecked={pre.seniority === s.id} />
@@ -73,11 +82,10 @@ export default async function Onboarding() {
                 </label>
               ))}
             </div>
-          </fieldset>
+          </Question>
 
-          <fieldset>
-            <legend className="text-sm font-medium">{t(locale, "onboarding.remote")}</legend>
-            <div className="mt-3 flex flex-wrap gap-2">
+          <Question n={3} title={t(locale, "onboarding.remote")}>
+            <div className="flex flex-wrap gap-2">
               {REMOTE_MODES.map((m) => (
                 <label key={m.id} className="chip">
                   <input type="radio" name="remoteMode" value={m.id} defaultChecked={pre.remoteMode === m.id} />
@@ -85,29 +93,27 @@ export default async function Onboarding() {
                 </label>
               ))}
             </div>
-            <label className="mt-3 flex flex-col gap-1.5">
-              <span className="text-sm" style={{ color: "var(--muted)" }}>{t(locale, "onboarding.location")}</span>
-              <input type="text" name="location" className="field" defaultValue={(pre.location as string) ?? ""} />
+            <label className="mt-4 block">
+              <span className="eyebrow">{t(locale, "onboarding.location")}</span>
+              <input type="text" name="location" className="field mt-2"
+                defaultValue={(pre.location as string) ?? ""} />
             </label>
-          </fieldset>
+          </Question>
 
-          <fieldset>
-            <legend className="text-sm font-medium">{t(locale, "onboarding.salary")}</legend>
-            <p className="mt-1 text-xs" style={{ color: "var(--muted)" }}>{t(locale, "onboarding.salaryHint")}</p>
-            <div className="mt-3 flex gap-3">
-              <input type="number" name="salaryMin" className="field" placeholder="90000"
+          <Question n={4} title={t(locale, "onboarding.salary")} hint={t(locale, "onboarding.salaryHint")}>
+            <div className="flex gap-3">
+              <input type="number" name="salaryMin" className="field mono" placeholder="90000"
                 defaultValue={(pre.salaryMin as number) ?? ""} />
-              <select name="salaryCurrency" className="field" defaultValue={(pre.salaryCurrency as string) ?? "EUR"}
-                style={{ maxWidth: "8rem" }}>
-                <option value="EUR">EUR</option><option value="USD">USD</option>
-                <option value="GBP">GBP</option><option value="PLN">PLN</option>
+              <select name="salaryCurrency" className="field mono" style={{ maxWidth: "7rem" }}
+                defaultValue={(pre.salaryCurrency as string) ?? "EUR"}>
+                {["EUR", "USD", "GBP", "PLN", "CHF"].map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
-          </fieldset>
+          </Question>
+        </div>
 
-          <button type="submit" className="btn self-start">{t(locale, "onboarding.save")}</button>
-        </form>
-      </main>
-    </>
+        <button type="submit" className="btn mt-8">{t(locale, "onboarding.save")}</button>
+      </form>
+    </Shell>
   );
 }

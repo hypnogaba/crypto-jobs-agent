@@ -1,57 +1,255 @@
 @import "tailwindcss";
 
+/* Наші шрифти — єдине джерело правди. Без цього дефолтна тема Tailwind
+   визначає --font-mono вдруге, і хто переможе, залежить від порядку правил. */
+@theme inline {
+  --font-sans: var(--nr-ui), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--nr-display), Georgia, serif;
+  --font-mono: var(--nr-mono), ui-monospace, monospace;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   NextRole — «табло відправлень на світанку»
+   Продукт про час і рахунок: тонкі лінійки, табличні цифри,
+   точні колонки. Ніч угорі, ранок унизу.
+   ═══════════════════════════════════════════════════════════ */
+
 :root {
-  --bg: #f7f8fa;
-  --surface: #ffffff;
-  --ink: #12161c;
-  --ink-2: #4a5563;
-  --muted: #6b7684;
-  --line: #e2e6ec;
-  --accent: #c4552c;
-  --ok: #1f7a5e;
-  --warn: #8a6316;
-  --bad: #a8403c;
+  /* Ранок: холодний папір */
+  --paper:      #edf0f2;
+  --surface:    #ffffff;
+  --surface-2:  #f5f7f8;
+  --ink:        #0d1620;
+  --ink-2:      #3b4855;
+  --muted:      #6b7986;
+  --rule:       #d7dee4;
+  --rule-2:     #bcc7d0;
+
+  /* Ніч: смуга, що лишається темною в обох темах */
+  --night:      #0d1b26;
+  --night-ink:  #e8eef3;
+  --night-2:    #93a5b3;
+  --night-rule: #1e2f3d;
+
+  /* Один теплий акцент. Використовується скупо. */
+  --ember:      #b34a1e;
+  --ember-soft: #fbeae2;
+  --ember-ink:  #ffffff;
+
+  --ok:   #1c6b52;  --ok-soft:   #e3f0eb;
+  --warn: #8a6011;  --warn-soft: #f8efdc;
+  --bad:  #a33c37;  --bad-soft:  #f9e8e6;
+
+  --shadow: 0 1px 2px rgb(13 22 32 / 4%), 0 12px 32px -20px rgb(13 22 32 / 22%);
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0f1317;
-    --surface: #171d24;
-    --ink: #e8ecf1;
-    --ink-2: #b6c0cb;
-    --muted: #8a949f;
-    --line: #262e37;
-    --accent: #e5794c;
-    --ok: #4fbf97;
-    --warn: #d5a44a;
-    --bad: #e07a74;
+  :root:not([data-theme="light"]) {
+    --paper:     #0a1219;
+    --surface:   #101a23;
+    --surface-2: #16222c;
+    --ink:       #e4ebf1;
+    --ink-2:     #afbdc8;
+    --muted:     #77868f;
+    --rule:      #1c2833;
+    --rule-2:    #2a3947;
+
+    --night:      #060d12;
+    --night-ink:  #e4ebf1;
+    --night-2:    #8697a4;
+    --night-rule: #17242f;
+
+    --ember:      #e58650;
+    --ember-soft: #2a1710;
+    --ember-ink:  #120a06;
+
+    --ok:   #4cbb94;  --ok-soft:   #10241d;
+    --warn: #d3a047;  --warn-soft: #251d0d;
+    --bad:  #e0776f;  --bad-soft:  #2a1513;
+
+    --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 12px 32px -20px rgb(0 0 0 / 80%);
   }
 }
 
-body {
-  background: var(--bg);
-  color: var(--ink);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  -webkit-font-smoothing: antialiased;
+:root[data-theme="dark"] {
+  --paper: #0a1219; --surface: #101a23; --surface-2: #16222c;
+  --ink: #e4ebf1; --ink-2: #afbdc8; --muted: #77868f;
+  --rule: #1c2833; --rule-2: #2a3947;
+  --night: #060d12; --night-ink: #e4ebf1; --night-2: #8697a4; --night-rule: #17242f;
+  --ember: #e58650; --ember-soft: #2a1710; --ember-ink: #120a06;
+  --ok: #4cbb94; --ok-soft: #10241d; --warn: #d3a047; --warn-soft: #251d0d;
+  --bad: #e0776f; --bad-soft: #2a1513;
+  --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 12px 32px -20px rgb(0 0 0 / 80%);
 }
 
-.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+* { box-sizing: border-box; }
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--nr-ui), ui-sans-serif, system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ── Типографіка ─────────────────────────────────────────── */
+.display {
+  font-family: var(--nr-display), Georgia, serif;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1.04;
+  text-wrap: balance;
+}
+.mono {
+  font-family: var(--nr-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+.eyebrow {
+  font-family: var(--nr-mono), ui-monospace, monospace;
+  font-size: 0.68rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.lede { color: var(--ink-2); font-size: 1.06rem; line-height: 1.6; max-width: 62ch; }
+
+/* ── Нічна смуга: лишається темною в обох темах ──────────── */
+.night {
+  background: var(--night);
+  color: var(--night-ink);
+  position: relative;
+  overflow: hidden;
+}
+/* Ледь помітне світло на горизонті — перший промінь */
+.night::after {
+  content: "";
+  position: absolute; inset: auto 0 -60% 0; height: 120%;
+  background: radial-gradient(60% 60% at 50% 100%, rgb(179 74 30 / 20%), transparent 70%);
+  pointer-events: none;
+}
+.night .eyebrow, .night .muted-on-night { color: var(--night-2); }
+
+/* ── Поверхні ─────────────────────────────────────────────── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 4px;                /* майже прямий кут: інструмент, не іграшка */
+}
+.card-raised { box-shadow: var(--shadow); }
+
+/* Лінійки як у розкладі: гострі, тонкі, без заокруглень */
+.ruled > * + * { border-top: 1px solid var(--rule); }
+
+/* ── Поля вводу ───────────────────────────────────────────── */
 .field {
-  width: 100%; border: 1px solid var(--line); border-radius: 10px;
-  padding: 0.65rem 0.85rem; background: var(--surface); color: var(--ink);
+  width: 100%;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--rule-2);
+  border-radius: 3px;
+  padding: 0.7rem 0.9rem;
+  font: inherit;
+  transition: border-color .15s ease, box-shadow .15s ease;
 }
-.field:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
+.field::placeholder { color: var(--muted); }
+.field:focus {
+  outline: none;
+  border-color: var(--ember);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ember) 18%, transparent);
+}
+.field-night {
+  background: transparent; color: var(--night-ink);
+  border-color: var(--night-rule);
+}
+.field-night::placeholder { color: var(--night-2); }
+
+/* ── Кнопки ───────────────────────────────────────────────── */
 .btn {
-  border-radius: 10px; padding: 0.65rem 1.1rem; font-weight: 500;
-  background: var(--accent); color: #fff; border: 1px solid var(--accent);
+  display: inline-flex; align-items: center; gap: .5rem;
+  background: var(--ember); color: var(--ember-ink);
+  border: 1px solid var(--ember); border-radius: 3px;
+  padding: 0.7rem 1.3rem; font-weight: 500; font-size: 0.95rem;
+  cursor: pointer; transition: transform .12s ease, filter .15s ease;
 }
-.btn:hover { filter: brightness(1.08); }
-.btn-ghost { background: transparent; color: var(--ink-2); border-color: var(--line); }
-.btn-ghost:hover { color: var(--ink); border-color: var(--accent); filter: none; }
+.btn:hover { filter: brightness(1.09); }
+.btn:active { transform: translateY(1px); }
+.btn:focus-visible { outline: 2px solid var(--ember); outline-offset: 3px; }
+
+.btn-quiet {
+  background: transparent; color: var(--ink-2); border-color: var(--rule-2);
+}
+.btn-quiet:hover { color: var(--ink); border-color: var(--ember); filter: none; }
+
+.btn-danger { background: transparent; color: var(--bad); border-color: var(--bad); }
+.btn-danger:hover { background: var(--bad); color: var(--surface); filter: none; }
+
+.link { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+.link:hover { color: var(--ember); }
+
+/* ── Чипи вибору ──────────────────────────────────────────── */
 .chip {
-  display: inline-flex; align-items: center; gap: .4rem;
-  border: 1px solid var(--line); border-radius: 999px;
-  padding: .4rem .8rem; cursor: pointer; font-size: .9rem; color: var(--ink-2);
+  display: inline-flex; align-items: center; gap: .45rem;
+  border: 1px solid var(--rule-2); border-radius: 999px;
+  padding: .45rem .9rem; font-size: .9rem; color: var(--ink-2);
+  cursor: pointer; user-select: none;
+  transition: border-color .15s ease, color .15s ease, background .15s ease;
 }
-.chip:has(input:checked) { border-color: var(--accent); color: var(--ink); background: color-mix(in srgb, var(--accent) 10%, transparent); }
-.chip input { accent-color: var(--accent); }
+.chip:hover { border-color: var(--ember); color: var(--ink); }
+.chip:has(input:checked) {
+  border-color: var(--ember); color: var(--ink);
+  background: var(--ember-soft);
+}
+.chip input { accent-color: var(--ember); margin: 0; }
+.chip:focus-within { outline: 2px solid var(--ember); outline-offset: 2px; }
+
+/* ── Статуси ──────────────────────────────────────────────── */
+.tag {
+  display: inline-block;
+  font-family: var(--nr-mono), monospace;
+  font-size: .68rem; letter-spacing: .04em;
+  padding: .18rem .5rem; border-radius: 2px; white-space: nowrap;
+}
+.tag-ok   { background: var(--ok-soft);   color: var(--ok); }
+.tag-warn { background: var(--warn-soft); color: var(--warn); }
+.tag-bad  { background: var(--bad-soft);  color: var(--bad); }
+.tag-flat { background: var(--surface-2); color: var(--muted); }
+
+/* Смуга серйозності зліва — стан видно, не читаючи */
+.stripe { box-shadow: inset 3px 0 0 0 var(--c); }
+
+/* ── Таблиця-табло ────────────────────────────────────────── */
+.board { width: 100%; border-collapse: collapse; font-size: .875rem; }
+.board thead th {
+  font-family: var(--nr-mono), monospace;
+  font-size: .66rem; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--muted); font-weight: 400; text-align: left;
+  padding: .6rem .9rem; border-bottom: 1px solid var(--rule-2);
+  background: var(--surface-2);
+}
+.board td { padding: .65rem .9rem; border-bottom: 1px solid var(--rule); vertical-align: middle; }
+.board tbody tr:last-child td { border-bottom: 0; }
+.board tbody tr:hover td { background: var(--surface-2); }
+.board .num { text-align: right; font-family: var(--nr-mono), monospace; font-variant-numeric: tabular-nums; }
+
+/* ── Стрічка годин ────────────────────────────────────────── */
+.clockstrip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--rule); border: 1px solid var(--rule); }
+.clockstrip > div { background: var(--surface); padding: 1.1rem 1.2rem; }
+.clockstrip .hour {
+  font-family: var(--nr-mono), monospace; font-size: 1.5rem;
+  color: var(--ember); letter-spacing: -.02em; font-variant-numeric: tabular-nums;
+}
+
+/* ── Поява при завантаженні: одна оркестрована хвиля ─────── */
+@keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+.rise { animation: rise .7s cubic-bezier(.22,.8,.3,1) both; }
+.rise-1 { animation-delay: .05s } .rise-2 { animation-delay: .14s }
+.rise-3 { animation-delay: .23s } .rise-4 { animation-delay: .32s }
+.rise-5 { animation-delay: .41s }
+
+@media (prefers-reduced-motion: reduce) {
+  .rise { animation: none; }
+  * { transition: none !important; }
+}
