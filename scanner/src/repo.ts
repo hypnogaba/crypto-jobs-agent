@@ -78,7 +78,10 @@ export class Repo {
        ON CONFLICT(slug) DO UPDATE SET
          ats_provider=COALESCE(excluded.ats_provider, companies.ats_provider),
          ats_slug=COALESCE(excluded.ats_slug, companies.ats_slug),
-         name=excluded.name`,
+         name=excluded.name,
+         -- Теги оновлюємо, але лише коли є що записати: інакше повторна
+         -- розвідка з порожнім результатом стерла б правильну нішу.
+         tags=CASE WHEN excluded.tags != '[]' THEN excluded.tags ELSE companies.tags END`,
       [c.slug, c.name, c.provider, c.atsSlug, JSON.stringify(c.tags ?? []), c.discoveredVia ?? "manual"]);
   }
 

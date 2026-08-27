@@ -10,6 +10,12 @@ export interface RawJob {
   salaryMin?: number | null;
   salaryMax?: number | null;
   salaryCurrency?: string | null;
+  /**
+   * Теги, успадковані від компанії. Потрібні, бо коли фірму з крипто-колекції
+   * Getro забирають у постійний список, далі її опитують через власний ATS —
+   * і ніша губиться, якщо не передати її явно.
+   */
+  inheritedTags?: string[];
 }
 
 export interface NormalizedJob extends RawJob {

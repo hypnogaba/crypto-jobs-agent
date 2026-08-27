@@ -3,9 +3,32 @@ import type { RawJob } from "../types.js";
 
 interface GetroJob {
   title: string; url: string;
-  organization?: { name?: string };
+  organization?: { name?: string; industry_tags?: string[]; topics?: string[] };
   searchable_locations?: string[];
   work_mode?: string; created_at?: number;
+}
+
+/**
+ * Getro віддає справжні industry_tags по кожній компанії — «Blockchain and
+ * Cryptocurrency», «Health Care», «Artificial Intelligence». Це набагато
+ * надійніше за вгадування ніші з назви посади: колекції фондів охоплюють
+ * усі галузі, і тегувати їх скопом означає зробити тег безглуздим.
+ */
+const INDUSTRY_MAP: Array<[string, RegExp]> = [
+  ["web3",      /blockchain|cryptocurrenc|crypto|web3|\bnft\b|defi/i],
+  ["ai",        /artificial intelligence|machine learning|computer vision|deep learning|generative/i],
+  ["fintech",   /financial|fintech|payments|banking|insurance/i],
+  ["health",    /health ?care|medical|biotech|pharma|life scien/i],
+  ["games",     /gaming|video game/i],
+  ["ecommerce", /e-?commerce|retail|marketplace/i],
+  ["defence",   /defen[cs]e|aerospace|military/i],
+  ["nonprofit", /non-?profit|social impact|philanthrop/i],
+];
+
+export function mapIndustries(org: GetroJob["organization"]): string[] {
+  const text = [...(org?.industry_tags ?? []), ...(org?.topics ?? [])].join(" ");
+  if (!text) return [];
+  return INDUSTRY_MAP.filter(([, rx]) => rx.test(text)).map(([id]) => id);
 }
 
 /**
@@ -27,12 +50,14 @@ export async function fetchGetro(collectionId: number, o: FetchOptions = {}, pag
     if (batch.length === 0) break;
     for (const j of batch) {
       if (!j.url || !j.title) continue;
+      const inheritedTags = mapIndustries(j.organization);
       jobs.push({
         url: j.url, company: j.organization?.name ?? "Unknown company", title: j.title,
         location: j.searchable_locations?.[0] ?? null,
         remote: (j.work_mode ?? "").toLowerCase() === "remote",
         postedAt: j.created_at ? new Date(j.created_at * 1000).toISOString() : null,
-        source: `getro:${collectionId}` });
+        source: `getro:${collectionId}`,
+        ...(inheritedTags.length ? { inheritedTags } : {}) });
     }
   }
   return jobs;

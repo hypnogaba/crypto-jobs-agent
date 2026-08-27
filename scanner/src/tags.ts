@@ -53,7 +53,7 @@ const SOURCE_TAGS: Array<[string, string[]]> = [
 ];
 
 export function deriveTags(job: RawJob): string[] {
-  const tags = new Set<string>();
+  const tags = new Set<string>(job.inheritedTags ?? []);
   const title = job.title ?? "";
 
   for (const [tag, rx] of SPHERE_RULES) if (rx.test(title)) tags.add(tag);

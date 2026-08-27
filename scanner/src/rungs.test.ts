@@ -29,3 +29,4 @@ describe("harvestAtsFromJobs — 80% лінків Getro ведуть в ATS", ()
     ])).toHaveLength(1);
   });
 });
+

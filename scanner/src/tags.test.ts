@@ -29,3 +29,15 @@ describe("deriveTags — маршрутизація за нішами", () => {
     expect(deriveTags(j({ title: "Zookeeper" })).length).toBeGreaterThan(0);
   });
 });
+
+describe("успадковані теги компанії", () => {
+  it("ніша компанії доживає до вакансії", () => {
+    const t = deriveTags(j({ title: "Backend Engineer", source: "greenhouse:alchemy",
+      inheritedTags: ["web3"] }));
+    expect(t).toContain("web3");
+    expect(t).toContain("engineering");
+  });
+  it("без успадкування нічого не ламається", () => {
+    expect(deriveTags(j({ title: "Backend Engineer" }))).toContain("engineering");
+  });
+});

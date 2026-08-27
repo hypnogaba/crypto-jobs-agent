@@ -36,11 +36,13 @@ async function main(): Promise<void> {
       for (const c of companies) {
         await repo.upsertCompany({
           slug: c.slug, name: c.name, provider: c.provider, atsSlug: c.slug,
-          tags: ["web3"], discoveredVia: `getro:${id}`,
+          tags: c.tags, discoveredVia: `getro:${id}`,
         });
         added++;
       }
-      console.log(`  колекція ${id}: ${jobs.length} вакансій → ${companies.length} компаній з ATS`);
+      const niches = [...new Set(companies.flatMap((c) => c.tags))];
+      console.log(`  колекція ${id}: ${jobs.length} вакансій → ${companies.length} компаній` +
+                  (niches.length ? ` · ${niches.join(", ")}` : ""));
     } catch (e) {
       console.log(`  колекція ${id}: помилка — ${e instanceof Error ? e.message : e}`);
     }

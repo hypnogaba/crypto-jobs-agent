@@ -44,7 +44,18 @@ export class D1Client {
       headers: { Authorization: `Bearer ${this.creds.token}`, "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (!res.ok) throw new Error(`D1 HTTP ${res.status}: ${await res.text()}`);
+    if (!res.ok) {
+      const body = await res.text();
+      // Найчастіша причина мовчазної смерті скану: у /etc покладено тимчасовий
+      // OAuth-токен wrangler, який живе близько години. Кажемо це прямо.
+      if (res.status === 401 || res.status === 403) {
+        throw new Error(
+          "D1 відмовив у доступі. Найімовірніше, CF_API_TOKEN — це тимчасовий " +
+          "OAuth-токен wrangler, який протух. Потрібен постійний API-токен " +
+          "із правом D1:Edit у /etc/nextrole-scanner.env.");
+      }
+      throw new Error(`D1 HTTP ${res.status}: ${body}`);
+    }
     const env = (await res.json()) as D1Envelope<T>;
     if (!env.success) {
       throw new Error(`D1 помилка: ${env.errors.map((e) => e.message).join("; ") || "невідома"}`);

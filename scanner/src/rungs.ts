@@ -17,7 +17,10 @@ export async function runR1(companies: Company[], deps: R1Deps, concurrency = 6)
   const results = await mapLimit(companies, concurrency, async (c): Promise<SourceResult> => {
     if (c.atsProvider && c.atsSlug) {
       const source = `${c.atsProvider}:${c.atsSlug}`;
-      const r = await runSource(source, () => ATS[c.atsProvider!](c.atsSlug!, c.name));
+      const r = await runSource(source, async () => {
+        const jobs = await ATS[c.atsProvider!](c.atsSlug!, c.name);
+        return c.tags.length ? jobs.map((j) => ({ ...j, inheritedTags: c.tags })) : jobs;
+      });
       await deps.markScanned(c.slug, r.jobs.length > 0);
       return r;
     }
@@ -28,7 +31,8 @@ export async function runR1(companies: Company[], deps: R1Deps, concurrency = 6)
         if (jobs.length > 0) {
           await deps.learnAts(c.slug, c.name, provider, c.atsSlug ?? c.slug);
           await deps.markScanned(c.slug, true);
-          return { source: `${provider}:${c.slug}`, ok: true, jobs };
+          return { source: `${provider}:${c.slug}`, ok: true,
+                   jobs: c.tags.length ? jobs.map((j) => ({ ...j, inheritedTags: c.tags })) : jobs };
         }
       } catch { /* не на цьому провайдері — пробуємо наступний */ }
     }
@@ -118,13 +122,19 @@ export async function runR4(
 }
 
 /** Витягує компанії з ATS-лінків у вже зібраних вакансіях (Getro дає 80%). */
-export function harvestAtsFromJobs(jobs: RawJob[]): Array<{ slug: string; name: string; provider: AtsProvider }> {
-  const out = new Map<string, { slug: string; name: string; provider: AtsProvider }>();
+export function harvestAtsFromJobs(
+  jobs: RawJob[]
+): Array<{ slug: string; name: string; provider: AtsProvider; tags: string[] }> {
+  const out = new Map<string, { slug: string; name: string; provider: AtsProvider; tags: string[] }>();
   for (const j of jobs) {
     const hit = extractAts(j.url);
     if (!hit) continue;
     if (!out.has(hit.slug)) {
-      out.set(hit.slug, { slug: hit.slug, name: j.company, provider: hit.provider as AtsProvider });
+      // Ніша береться з даних самого джерела, не вгадується
+      out.set(hit.slug, {
+        slug: hit.slug, name: j.company,
+        provider: hit.provider as AtsProvider, tags: j.inheritedTags ?? [],
+      });
     }
   }
   return [...out.values()];
