@@ -1,8 +1,8 @@
-# hypnosit Hosting — Node.js Deployment Findings
+# Shared Hosting — Node.js Deployment Findings
 
 **Date:** 2026-07-29
-**Goal:** Deploy the Next.js app (`web/`) directly on the `hypnosit` shared hosting account (CloudLinux/CageFS, ADM.TOOLS panel), instead of Vercel.
-**Server:** `hypnosit.mysql.tools` / `hypnosit.ftp.tools`, IP `91.206.200.151`. Paid account (not a trial), CloudLinux with CageFS isolation.
+**Goal:** Deploy the Next.js app (`web/`) directly on the shared hosting account (CloudLinux/CageFS, ADM.TOOLS panel), instead of Vercel.
+**Server:** The account's MySQL/FTP hosts (redacted). Paid account (not a trial), CloudLinux with CageFS isolation.
 
 ## Summary
 
@@ -59,7 +59,7 @@ This is a server-side misconfiguration/bug, not something fixable from the accou
 
 ## What does work here
 
-- **MySQL** (`hypnosit.mysql.tools`, port 3306) — fast, stable, externally reachable, verified via Prisma from both a local machine and the server itself (test connection: 106ms).
+- **MySQL** (port 3306) — fast, stable, externally reachable, verified via Prisma from both a local machine and the server itself (test connection: 106ms).
 - **PHP 8.2** — the natively supported stack for this hosting plan.
 - **Static file serving** via the existing Apache/PHP web root.
 - **One-shot / short-lived scripts** (SSH-invoked, git, npm install, build tooling that doesn't need to stay resident) — these complete fine, just slowly for CPU-heavy steps.

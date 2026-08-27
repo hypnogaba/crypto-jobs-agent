@@ -642,7 +642,7 @@ export default async function OnboardingDetails() {
               type="text"
               name="location"
               defaultValue={profile.location ?? ""}
-              placeholder="e.g. Paris, or leave blank if fully remote"
+              placeholder="e.g. your city, or leave blank if fully remote"
               className="rounded-lg border border-zinc-200 px-3.5 py-2.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-zinc-400 focus:outline-none"
             />
           </label>
