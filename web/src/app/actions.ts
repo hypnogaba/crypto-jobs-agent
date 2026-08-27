@@ -7,6 +7,7 @@ import { all, one, run, uuid } from "@/lib/db";
 import { createSession, currentUser, destroySession, hashPassword, requireUser, verifyPassword } from "@/lib/auth";
 import { parseProfile, type ParsedProfile } from "@/lib/parse";
 import { isLocale, localeFromHeader } from "@/lib/i18n";
+import { checkRate, clearRate, recordFailure } from "@/lib/ratelimit";
 import type { Locale } from "@/lib/vocab";
 
 const DRAFT_COOKIE = "nr_draft";
@@ -98,11 +99,15 @@ async function persistProfile(
 export async function register(formData: FormData): Promise<void> {
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
-  if (!email.includes("@")) redirect("/register?error=badCredentials");
+
+  const ip = (await headers()).get("cf-connecting-ip") ?? "unknown";
+  if (!(await checkRate(`register:${ip}`)).allowed) redirect("/register?error=tooMany");
+
+  if (!email.includes("@")) { await recordFailure(`register:${ip}`); redirect("/register?error=badCredentials"); }
   if (password.length < 8) redirect("/register?error=weakPassword");
 
   const existing = await one<{ id: string }>("SELECT id FROM users WHERE email=?", email);
-  if (existing) redirect("/register?error=emailTaken");
+  if (existing) { await recordFailure(`register:${ip}`); redirect("/register?error=emailTaken"); }
 
   const id = uuid();
   const locale = await detectLocale();
@@ -123,11 +128,18 @@ export async function register(formData: FormData): Promise<void> {
 export async function login(formData: FormData): Promise<void> {
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
+  const key = `login:${email}`;
+
+  const verdict = await checkRate(key);
+  if (!verdict.allowed) redirect(`/login?error=tooMany&min=${verdict.retryAfterMinutes}`);
+
   const row = await one<{ id: string; password_hash: string | null }>(
     "SELECT id,password_hash FROM users WHERE email=?", email);
   if (!row?.password_hash || !(await verifyPassword(password, row.password_hash))) {
+    await recordFailure(key);
     redirect("/login?error=badCredentials");
   }
+  await clearRate(key);
   await run("UPDATE users SET last_interaction_at=datetime('now') WHERE id=?", row.id);
   await createSession(row.id);
   redirect("/dashboard");
@@ -187,3 +199,13 @@ export const listMatches = async (userId: string) =>
     `SELECT s.id,j.company,j.title,j.location,j.url,s.why_fits,s.created_at,s.digest_id
      FROM sent s JOIN jobs_cache j ON j.id = s.job_id
      WHERE s.user_id=? ORDER BY s.created_at DESC LIMIT 50`, userId);
+
+/** Перемикач мови в навігації. Для зареєстрованих зберігається в профіль. */
+export async function switchLocale(formData: FormData): Promise<void> {
+  const chosen = String(formData.get("locale") ?? "en");
+  if (!isLocale(chosen)) return;
+  (await cookies()).set("nr_locale", chosen, { path: "/", maxAge: 31_536_000, sameSite: "lax" });
+  const user = await currentUser();
+  if (user) await run("UPDATE users SET locale=? WHERE id=?", chosen, user.id);
+  redirect((await headers()).get("referer")?.replace(/^https?:\/\/[^/]+/, "") || "/");
+}

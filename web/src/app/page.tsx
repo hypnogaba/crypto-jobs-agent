@@ -1,5 +1,6 @@
 import Link from "next/link";
 import Nav from "./nav";
+import Footer from "./footer";
 import { detectLocale, startOnboarding } from "./actions";
 import { one } from "@/lib/db";
 import { t } from "@/lib/i18n";
@@ -129,13 +130,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
         </div>
       </section>
 
-      <footer className="mt-auto border-t" style={{ borderColor: "var(--rule)" }}>
-        <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-4 px-6 py-8 text-sm"
-             style={{ color: "var(--muted)" }}>
-          <span className="display text-base" style={{ color: "var(--ink)" }}>NextRole</span>
-          <span className="eyebrow">{t(locale, "nav.strap")}</span>
-        </div>
-      </footer>
+      <Footer locale={locale} />
     </>
   );
 }
