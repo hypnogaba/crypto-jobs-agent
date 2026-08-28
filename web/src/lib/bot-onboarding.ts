@@ -23,6 +23,10 @@ export interface Draft {
   spheres: string[];
   /** Своя назва ролі, коли жодна сфера не підійшла. */
   customRole?: string | null;
+  /** Своя індустрія, свій рівень, своя локація — те саме для решти питань. */
+  customIndustry?: string | null;
+  customSeniority?: string | null;
+  customWhere?: string | null;
   industries: string[];
   seniority: string | null;
   remoteMode: string | null;
@@ -31,7 +35,8 @@ export interface Draft {
 }
 
 export const emptyDraft = (): Draft => ({
-  spheres: [], customRole: null, industries: [], seniority: null,
+  spheres: [], customRole: null, industries: [], customIndustry: null,
+  customSeniority: null, customWhere: null, seniority: null,
   remoteMode: null, salaryMin: null, salaryCurrency: null,
 });
 
@@ -99,10 +104,28 @@ const WORD = {
     ru: "Напиши годовую сумму и валюту, например: 90000 EUR",
   },
   mine: {
-    en: "My own",
-    uk: "Мій варіант",
-    fr: "Le mien",
-    ru: "Мой вариант",
+    en: "Not in the list",
+    uk: "Немає в списку",
+    fr: "Pas dans la liste",
+    ru: "Нет в списке",
+  },
+  askIndustry: {
+    en: "Write the industry in your own words, for example: climate tech, logistics, esports.",
+    uk: "Напиши індустрію своїми словами — наприклад: кліматтех, логістика, кіберспорт.",
+    fr: "Écrivez le secteur avec vos mots, par exemple : climat, logistique, esport.",
+    ru: "Напиши индустрию своими словами — например: климаттех, логистика, киберспорт.",
+  },
+  askLevel: {
+    en: "Write your level in your own words, for example: founder, head of, C-level, first job.",
+    uk: "Напиши свій рівень своїми словами — наприклад: засновник, керівник напряму, C-level, перша робота.",
+    fr: "Écrivez votre niveau avec vos mots : fondateur, responsable, C-level, premier emploi.",
+    ru: "Напиши свой уровень своими словами — например: основатель, руководитель направления, C-level, первая работа.",
+  },
+  askWhere: {
+    en: "Write where you want to work, for example: Berlin only, EU time zones, anywhere but the US.",
+    uk: "Напиши, де хочеш працювати — наприклад: тільки Берлін, часові пояси ЄС, будь-де крім США.",
+    fr: "Écrivez où vous voulez travailler : Berlin uniquement, fuseaux UE, partout sauf les États-Unis.",
+    ru: "Напиши, где хочешь работать — например: только Берлин, часовые пояса ЕС, где угодно кроме США.",
   },
   askMine: {
     en: "Write your role in your own words, for example: technical recruiting, grant writing, smart contract audit.",
@@ -111,10 +134,10 @@ const WORD = {
     ru: "Напиши свою роль своими словами — например: технический рекрутинг, grant writing, аудит смартконтрактов.",
   },
   ready: {
-    en: "All set. The first digest arrives tomorrow morning.",
-    uk: "Готово. Перша добірка прийде завтра вранці.",
-    fr: "C'est prêt. La première sélection arrive demain matin.",
-    ru: "Готово. Первая подборка придёт завтра утром.",
+    en: "All set. The first five roles arrive tomorrow at 09:00.",
+    uk: "Готово. Перші п'ять вакансій прийдуть завтра о 09:00.",
+    fr: "C'est prêt. Les cinq premières offres arrivent demain à 09h00.",
+    ru: "Готово. Первые пять вакансий придут завтра в 09:00.",
   },
   commands: {
     en: "/profile — your profile\n/time — delivery hour\n/pause and /resume\n/site — sign in on the web",
@@ -148,14 +171,13 @@ export function keyboard(step: Step, draft: Draft, locale: Locale): Button[][] {
       text: `${chosen.includes(it.id) ? "✓ " : ""}${label(it, locale)}`,
       callback_data: `ob:${step}:${it.id}`,
     })));
-    if (step === "spheres") {
-      // Десять сфер покривають більшість, але не все. Ця кнопка справжня:
-      // написане шукається в назвах вакансій (див. matchesCustomRole).
-      rows.push([{
-        text: `${draft.customRole ? "✓ " : ""}${say(WORD.mine, locale)}`,
-        callback_data: "ob:spheres:__mine",
-      }]);
-    }
+    // Ця кнопка справжня: написане шукається в назвах вакансій
+    // (див. matchesCustomRole у сканері), а не лежить мертвим текстом.
+    const written = step === "spheres" ? draft.customRole : draft.customIndustry;
+    rows.push([{
+      text: `${written ? "✓ " : ""}${say(WORD.mine, locale)}`,
+      callback_data: `ob:${step}:__mine`,
+    }]);
     const canFinish = step === "industries" || chosen.length > 0 || Boolean(draft.customRole);
     rows.push([{
       text: canFinish
@@ -166,8 +188,11 @@ export function keyboard(step: Step, draft: Draft, locale: Locale): Button[][] {
     return rows;
   }
 
+  // «Немає в списку» стоїть під кожним питанням: жоден словник не покриває
+  // всіх, а мовчазний вибір «найближчого» псує підбір гірше за порожнє поле.
   if (step === "seniority") {
     pair(SENIORITY.map((it) => ({ text: label(it, locale), callback_data: `ob:seniority:${it.id}` })));
+    rows.push([{ text: say(WORD.mine, locale), callback_data: "ob:seniority:__mine" }]);
     return rows;
   }
 
@@ -175,6 +200,7 @@ export function keyboard(step: Step, draft: Draft, locale: Locale): Button[][] {
     for (const it of REMOTE_MODES) {
       rows.push([{ text: label(it, locale), callback_data: `ob:where:${it.id}` }]);
     }
+    rows.push([{ text: say(WORD.mine, locale), callback_data: "ob:where:__mine" }]);
     return rows;
   }
 
@@ -188,6 +214,10 @@ export function keyboard(step: Step, draft: Draft, locale: Locale): Button[][] {
 export const questionText = (step: Step, locale: Locale): string => say(ASK[step], locale);
 export const askOtherAmount = (locale: Locale): string => say(WORD.askOther, locale);
 export const askCustomRole = (locale: Locale): string => say(WORD.askMine, locale);
+export const askCustomFor = (step: Step, locale: Locale): string => say(
+  step === "industries" ? WORD.askIndustry
+  : step === "seniority" ? WORD.askLevel
+  : step === "where" ? WORD.askWhere : WORD.askMine, locale);
 
 /** Що вийшло — людськими словами, а не ідентифікаторами. */
 export function summary(draft: Draft, locale: Locale): string {
@@ -200,12 +230,15 @@ export function summary(draft: Draft, locale: Locale): string {
     ? `${draft.salaryMin.toLocaleString("uk-UA")} ${draft.salaryCurrency ?? "EUR"}`
     : say(WORD.noMatter, locale);
 
+  const both = (ids: string[], src: readonly { id: string; en: string; uk: string; fr: string; ru: string }[],
+                own: string | null | undefined): string | null =>
+    [ids.length ? names(ids, src) : null, own].filter(Boolean).join(" · ") || null;
+
   return [
-    [names(draft.spheres, SPHERES) === "—" ? null : names(draft.spheres, SPHERES),
-     draft.customRole].filter(Boolean).join(" · ") || "—",
-    draft.industries.length ? names(draft.industries, INDUSTRIES) : null,
-    level ? label(level, locale) : null,
-    where ? label(where, locale) : null,
+    both(draft.spheres, SPHERES, draft.customRole) ?? "—",
+    both(draft.industries, INDUSTRIES, draft.customIndustry),
+    draft.customSeniority ?? (level ? label(level, locale) : null),
+    draft.customWhere ?? (where ? label(where, locale) : null),
     money,
   ].filter(Boolean).join(" · ");
 }

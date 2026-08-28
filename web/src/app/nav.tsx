@@ -37,7 +37,11 @@ export default async function Nav({ locale }: { locale: Locale }) {
 
   return (
     <header className="topbar">
-      <nav className="mx-auto flex max-w-5xl items-center justify-between px-6 py-5">
+      {/* Переноситься на два рядки, коли не вміщається. Виміряно: без цього
+          шапці потрібно 590px, а на iPhone є 390 — переповнення 200px, і це
+          ще для незалогіненого. Меню-гамбургер тут зайвий: посилань мало,
+          два рядки чесніші за приховану кнопку. */}
+      <nav className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-5 py-4 sm:flex-nowrap sm:px-6 sm:py-5">
         <Link href="/" className="flex items-center gap-2.5">
           <Logomark />
           <span className="flex items-baseline gap-2.5">
@@ -48,7 +52,7 @@ export default async function Nav({ locale }: { locale: Locale }) {
           </span>
         </Link>
 
-        <div className="flex items-center gap-5 text-sm" style={{ color: dim }}>
+        <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2 text-sm sm:gap-5" style={{ color: dim }}>
           <form action={switchLocale} className="flex gap-2">
             {LOCALES.map((l) => (
               <button key={l.id} name="locale" value={l.id} type="submit"

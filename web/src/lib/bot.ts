@@ -1,6 +1,7 @@
 import { one, run, uuid } from "./db";
 import {
-  emptyDraft, keyboard, nextStep, questionText, askOtherAmount, askCustomRole, readyText,
+  emptyDraft, keyboard, nextStep, questionText, askOtherAmount, askCustomFor, readyText,
+  STEPS,
   summary, toggle, type Draft, type Step,
 } from "./bot-onboarding";
 import { isLocale } from "./i18n";
@@ -91,8 +92,13 @@ export async function startBotOnboarding(env: Env, chatId: number, locale: Local
 
   await send(env, chatId, say("greeting", locale));
 
+  // Порожній чернетці передує пропозиція написати одним реченням: тоді
+  // галочки на першому екрані вже стоять, і людині лишається їх підтвердити,
+  // а не збирати профіль із нуля. На сайті так і працює — тепер і тут.
   const draft = emptyDraft();
-  const id = await sendKeyboard(env, chatId, questionText("spheres", locale), keyboard("spheres", draft, locale));
+  const id = await sendKeyboard(env, chatId,
+    `${questionText("spheres", locale)}\n\n${say("orWrite", locale)}`,
+    keyboard("spheres", draft, locale));
   await saveState(chatId, "spheres", draft, id);
 }
 
@@ -112,10 +118,12 @@ export async function handleOnboardingButton(
   const draft = readDraft(row.draft);
   const step = row.step as Step;
 
-  // «Мій варіант» — єдина кнопка, що веде до вільного тексту
-  if (step === "spheres" && value === "__mine") {
-    await run("UPDATE bot_state SET step='role', updated_at=datetime('now') WHERE chat_id=?", String(chatId));
-    await send(env, chatId, askCustomRole(locale));
+  // «Немає в списку» — єдина кнопка, що веде до вільного тексту. Крок
+  // запам'ятовуємо, щоб знати, куди покласти написане й куди повернутись.
+  if (value === "__mine") {
+    await run("UPDATE bot_state SET step=?, updated_at=datetime('now') WHERE chat_id=?",
+      `own:${step}`, String(chatId));
+    await send(env, chatId, askCustomFor(step, locale));
     return true;
   }
 
@@ -177,6 +185,28 @@ export async function handleOnboardingText(
     return true;
   }
 
+  // Вільний текст просто посеред питань: людина написала, ким хоче бути.
+  // Розбираємо тим самим парсером, що й сайт, і ставимо галочки — далі вона
+  // лише підтверджує. Це і є «підтягнути з того, що можна написати текстом».
+  if (STEPS.includes(row.step as Step) && text.length >= 8) {
+    const parsed = await parseProfile(text, env.ANTHROPIC_API_KEY ?? null);
+    const draft = readDraft(row.draft);
+    if (parsed.spheres.length) draft.spheres = parsed.spheres;
+    if (parsed.industries.length) draft.industries = parsed.industries;
+    if (parsed.seniority) draft.seniority = parsed.seniority;
+    if (parsed.remoteMode) draft.remoteMode = parsed.remoteMode;
+    if (parsed.salaryMin) { draft.salaryMin = parsed.salaryMin; draft.salaryCurrency = parsed.salaryCurrency; }
+
+    const step = row.step as Step;
+    await saveState(chatId, step, draft, null);
+    if (row.message_id) {
+      await editKeyboard(env, chatId, row.message_id,
+        `${questionText(step, locale)}\n\n${say("prefilled", locale)}`,
+        keyboard(step, draft, locale));
+    }
+    return true;
+  }
+
   if (row.step === "feedback") {
     const user = await one<{ id: string }>("SELECT id FROM users WHERE telegram_chat_id=?", String(chatId));
     await run(
@@ -193,15 +223,27 @@ export async function handleOnboardingText(
     return true;
   }
 
-  // Своя роль: записуємо й повертаємось до того самого питання про сфери,
-  // щоб людина могла ще й дообрати щось зі списку.
-  if (row.step === "role") {
+  // Написане своїми словами: кладемо в поле того питання, на якому стояли,
+  // і повертаємось до нього — щоб можна було ще й дообрати щось зі списку.
+  if (row.step.startsWith("own:")) {
+    const back = row.step.slice(4) as Step;
     const draft = readDraft(row.draft);
-    draft.customRole = text.slice(0, 120);
-    await saveState(chatId, "spheres", draft, null);
+    const own = text.slice(0, 120);
+    if (back === "spheres") draft.customRole = own;
+    else if (back === "industries") draft.customIndustry = own;
+    else if (back === "seniority") draft.customSeniority = own;
+    else if (back === "where") draft.customWhere = own;
+
+    // Питання з однією відповіддю після свого варіанта йдуть далі самі:
+    // вертатись до списку, з якого людина щойно відмовилась, безглуздо.
+    const single = back === "seniority" || back === "where";
+    const goto = single ? nextStep(back) : back;
+    if (!goto) { await finishOnboarding(env, chatId, draft, locale, row.message_id); return true; }
+
+    await saveState(chatId, goto, draft, null);
     if (row.message_id) {
       await editKeyboard(env, chatId, row.message_id,
-        questionText("spheres", locale), keyboard("spheres", draft, locale));
+        questionText(goto, locale), keyboard(goto, draft, locale));
     }
     return true;
   }

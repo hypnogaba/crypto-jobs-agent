@@ -24,10 +24,10 @@ const P = {
     ru: "Привет. Я каждое утро присылаю пять вакансий, подобранных под тебя.\nЧетыре вопроса, тридцать секунд.",
   },
   linked: {
-    en: "Done. The first digest arrives tomorrow morning at your chosen hour.",
-    uk: "Готово. Перша добірка прийде завтра вранці о твоїй годині.",
-    fr: "C'est fait. La première sélection arrive demain matin à votre heure.",
-    ru: "Готово. Первая подборка придёт завтра утром в твой час.",
+    en: "Done. The first five roles arrive tomorrow at 09:00. Send /time to move it.",
+    uk: "Готово. Перші п'ять вакансій прийдуть завтра о 09:00. Щоб змінити годину — /time.",
+    fr: "C'est fait. Les cinq premières offres arrivent demain à 09h00. Pour changer l'heure : /time.",
+    ru: "Готово. Первые пять вакансий придут завтра в 09:00. Чтобы изменить час — /time.",
   },
   linkExpired: {
     en: "That link has expired. Refresh the connect page and try again.",
@@ -194,6 +194,18 @@ const P = {
     uk: "Щоб змінити: /start — чотири питання заново, або просто надішли резюме файлом.",
     fr: "Pour modifier : /start pour refaire les quatre questions, ou envoyez votre CV en fichier.",
     ru: "Чтобы изменить: /start — четыре вопроса заново, или просто пришли резюме файлом.",
+  },
+  orWrite: {
+    en: "Or just write it in one sentence — I will tick the boxes for you. A CV file works too.",
+    uk: "Або просто напиши одним реченням — я сам проставлю галочки. Резюме файлом теж підійде.",
+    fr: "Ou écrivez-le en une phrase — je cocherai pour vous. Un CV en fichier fonctionne aussi.",
+    ru: "Или просто напиши одним предложением — я сам проставлю галочки. Резюме файлом тоже подойдёт.",
+  },
+  prefilled: {
+    en: "I ticked what I understood. Fix anything that is wrong.",
+    uk: "Я проставив те, що зрозумів. Виправ те, що не так.",
+    fr: "J'ai coché ce que j'ai compris. Corrigez ce qui ne va pas.",
+    ru: "Я отметил то, что понял. Исправь то, что не так.",
   },
   cvReading: {
     en: "Reading it — a moment.", uk: "Читаю — хвилинку.",
