@@ -22,7 +22,7 @@
   --ink:        #202123;
   --ink-2:      #3f4348;
   --muted:      #565b60;
-  --faint:      #969b9f;
+  --faint:      #6e7377;   /* 4.6:1 на папері — третій рівень, але читний */
   --rule:       rgb(32 33 35 / 10%);
   --rule-2:     rgb(32 33 35 / 16%);
 
@@ -57,7 +57,7 @@
     --ink:       #fafafa;
     --ink-2:     #d4d4d8;
     --muted:     #a1a1aa;
-    --faint:     #71717a;
+    --faint:     #868b90;
     --rule:      rgb(255 255 255 / 8%);
     --rule-2:    rgb(255 255 255 / 14%);
 
@@ -80,7 +80,7 @@
 
 :root[data-theme="dark"] {
   --paper: #09090b; --surface: #0f0f11; --surface-2: #16161a;
-  --ink: #fafafa; --ink-2: #d4d4d8; --muted: #a1a1aa; --faint: #71717a;
+  --ink: #fafafa; --ink-2: #d4d4d8; --muted: #a1a1aa; --faint: #868b90;
   --rule: rgb(255 255 255 / 8%); --rule-2: rgb(255 255 255 / 14%);
   --grid: rgb(255 255 255 / 5.8%); --grid-fine: rgb(255 255 255 / 2.4%);
   --wash: rgb(255 255 255 / 3.5%); --wash-2: rgb(255 255 255 / 7%);

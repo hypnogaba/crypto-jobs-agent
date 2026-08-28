@@ -3,7 +3,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { one, run, uuid } from "@/lib/db";
 import { parseProfile } from "@/lib/parse";
 import { handleCommand, startBotOnboarding, continueBotOnboarding,
-         handleOnboardingButton, handleOnboardingText } from "@/lib/bot";
+         handleOnboardingButton, handleOnboardingText, handleWhyButton } from "@/lib/bot";
 import { isLocale } from "@/lib/i18n";
 import { t as botCopy } from "@/lib/bot-copy";
 
@@ -87,6 +87,9 @@ export async function POST(request: Request): Promise<Response> {
   if (callback) {
     // Кнопки онбордингу йдуть першими: реакції на добірку мають префікс fb:
     if (await handleOnboardingButton(env, chatId, callback, update.callback_query?.id, locale)) {
+      return NextResponse.json({ ok: true });
+    }
+    if (await handleWhyButton(env, chatId, callback, update.callback_query?.id, locale)) {
       return NextResponse.json({ ok: true });
     }
     await continueBotOnboarding(env, chatId, callback, locale);

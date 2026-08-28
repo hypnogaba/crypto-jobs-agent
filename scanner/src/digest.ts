@@ -7,6 +7,7 @@
 import { loadConfig } from "./config.js";
 import { D1Client } from "./d1.js";
 import { explainWithClaude, pickTop, type CandidateJob, type Profile } from "./match.js";
+import { asLocale, intlOf, say, scanned as scannedLine, thin, type Locale } from "./digest-copy.js";
 
 const DIGEST_SIZE = 5;
 
@@ -16,6 +17,9 @@ interface UserRow {
   spheres: string; industries: string; seniority: string | null;
   remote_mode: string; location: string | null; salary_min: number | null;
   custom_role: string | null;
+  seniority_weight: number | null;
+  location_weight: number | null;
+  salary_weight: number | null;
 }
 
 const list = (raw: string | null): string[] => {
@@ -33,41 +37,58 @@ function hourIn(timezone: string, now: Date): number {
 }
 
 function formatDigest(
-  jobs: Array<CandidateJob & { why: string }>, scanned: { jobs: number; companies: number }
+  jobs: Array<CandidateJob & { why: string }>,
+  scanned: { jobs: number; companies: number },
+  locale: Locale
 ): string {
-  const lines = ["Доброго ранку. Ось що знайшлось сьогодні.", ""];
+  const lines = [say(locale, "greeting"), ""];
   jobs.forEach((j, i) => {
-    lines.push("━━━━━━━━━━━━━━━━━━━━");
+    if (i > 0) { lines.push("─────────────"); lines.push(""); }
+
+    // Компанія окремим рядком: очі шукають саме її, а не назву посади.
+    lines.push(`${i + 1}. ${j.company}`);
+    lines.push(j.title);
+
+    // Другий рядок збираємо лише з того, що справді відоме. «Вилку не вказано»
+    // п'ять разів поспіль — це не інформація, а шум: у першій справжній
+    // добірці так було в усіх п'яти вакансіях.
+    const facts = [
+      j.location ?? (j.remote ? say(locale, "remote") : null),
+      j.remote && j.location ? say(locale, "remote") : null,
+      j.salaryMin
+        ? `${say(locale, "from")} ${j.salaryMin.toLocaleString(intlOf(locale))} ${j.salaryCurrency ?? ""}`.trim()
+        : null,
+    ].filter(Boolean);
+    if (facts.length) lines.push(facts.join(" · "));
+
     lines.push("");
-    lines.push(`${i + 1} · ${j.company} — ${j.title}`);
-    const money = j.salaryMin ? `${j.salaryMin.toLocaleString("uk-UA")} ${j.salaryCurrency ?? ""}`.trim() : "вилку не вказано";
-    lines.push(`${j.location ?? (j.remote ? "віддалено" : "локація не вказана")} · ${money}`);
-    lines.push("");
-    lines.push(`Чому ти: ${j.why}`);
+    lines.push(`${say(locale, "why")}: ${j.why}`);
     lines.push("");
     // Голе посилання окремим рядком: частина клієнтів Telegram ріже markdown-лінки
     lines.push(j.url);
     lines.push("");
   });
-  lines.push("━━━━━━━━━━━━━━━━━━━━");
+  lines.push("─────────────");
   lines.push("");
   if (jobs.length < DIGEST_SIZE) {
-    lines.push(`Сьогодні менше ніж зазвичай — ${jobs.length} замість ${DIGEST_SIZE}. Ми копали глибше, але кращого не знайшли.`);
+    lines.push(thin(locale, jobs.length, DIGEST_SIZE));
     lines.push("");
   }
-  lines.push(`Переглянуто ${scanned.jobs.toLocaleString("uk-UA")} вакансій у ${scanned.companies} компаніях.`);
+  lines.push(scannedLine(locale, scanned.jobs, scanned.companies));
   return lines.join("\n");
 }
 
-async function sendTelegram(token: string, chatId: string, text: string, digestId: string): Promise<boolean> {
+async function sendTelegram(
+  token: string, chatId: string, text: string, digestId: string, locale: Locale
+): Promise<boolean> {
   const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       chat_id: chatId, text, disable_web_page_preview: true,
       reply_markup: { inline_keyboard: [[
-        { text: "Не те, що треба", callback_data: `fb:${digestId}:not_relevant` },
-        { text: "Ще п'ять", callback_data: `fb:${digestId}:more` },
+        { text: say(locale, "notRelevant"), callback_data: `fb:${digestId}:not_relevant` },
+        { text: say(locale, "more"), callback_data: `fb:${digestId}:more` },
       ]] },
     }),
   });
@@ -100,8 +121,10 @@ async function main(): Promise<void> {
   const d1 = new D1Client({ accountId: cfg.cfAccountId, databaseId: cfg.cfDatabaseId, token: cfg.cfApiToken });
 
   const users = await d1.query<UserRow>(
-    `SELECT u.*, p.spheres,p.industries,p.seniority,p.remote_mode,p.location,p.salary_min,p.custom_role
+    `SELECT u.*, p.spheres,p.industries,p.seniority,p.remote_mode,p.location,p.salary_min,p.custom_role,
+            t.seniority_weight,t.location_weight,t.salary_weight
      FROM users u JOIN profiles p ON p.user_id = u.id
+     LEFT JOIN user_tuning t ON t.user_id = u.id
      WHERE u.status = 'active'` + (onlyUser ? " AND u.id = ?" : ""),
     onlyUser ? [onlyUser] : []);
 
@@ -131,8 +154,7 @@ async function main(): Promise<void> {
       }
       if (silentDays > 14 && silentDays <= 15 && botToken && u.telegram_chat_id) {
         await sendTelegram(botToken, u.telegram_chat_id,
-          "Ти ще шукаєш роботу? Якщо так — просто натисни будь-яку кнопку або напиши щось. " +
-          "Якщо ні, я поставлю добірки на паузу за кілька днів.", "checkin");
+          say(asLocale(u.locale), "checkin"), "checkin", asLocale(u.locale));
       }
     }
 
@@ -153,7 +175,9 @@ async function main(): Promise<void> {
         id: "", companyKey: "", tags: [], postedAt: null,
         company: r.company, title: r.title, location: r.location, remote: r.remote === 1,
         url: r.url, salaryMin: r.salary_min, salaryCurrency: r.salary_currency, why: r.why_fits }));
-      const ok = await sendTelegram(botToken, u.telegram_chat_id, formatDigest(retry, scanned), digestId);
+      const loc = asLocale(u.locale);
+      const ok = await sendTelegram(
+        botToken, u.telegram_chat_id, formatDigest(retry, scanned, loc), digestId, loc);
       if (ok) {
         await d1.execute("UPDATE sent SET status='sent', sent_at=? WHERE digest_id=?", [now.toISOString(), digestId]);
         delivered++;
@@ -165,6 +189,12 @@ async function main(): Promise<void> {
     const profile: Profile = {
       userId: u.id, spheres: list(u.spheres), industries: list(u.industries),
       customRole: u.custom_role,
+      // Вивчене зі скарг. Немає рядка — усі ваги одиничні, поведінка як була.
+      tuning: {
+        seniority: u.seniority_weight ?? 1,
+        location: u.location_weight ?? 1,
+        salary: u.salary_weight ?? 1,
+      },
       seniority: u.seniority, remoteMode: u.remote_mode, location: u.location, salaryMin: u.salary_min,
     };
 
@@ -221,7 +251,7 @@ async function main(): Promise<void> {
           [u.id]);
         if (botToken && u.telegram_chat_id) {
           await sendTelegram(botToken, u.telegram_chat_id,
-            "Поки що більше нічого нового під твій профіль. Наступна добірка — вранці.", "none");
+            say(asLocale(u.locale), "nothingNew"), "none", asLocale(u.locale));
         }
       }
       console.log(`  ${u.id.slice(0, 8)}: нічого не підійшло`);
@@ -242,9 +272,10 @@ async function main(): Promise<void> {
                dedupeById.get(j.id) ?? null],
     })));
 
-    const text = formatDigest(withWhy, scanned);
+    const locale = asLocale(u.locale);
+    const text = formatDigest(withWhy, scanned, locale);
     if (botToken && u.telegram_chat_id) {
-      const ok = await sendTelegram(botToken, u.telegram_chat_id, text, digestId);
+      const ok = await sendTelegram(botToken, u.telegram_chat_id, text, digestId, locale);
       if (!ok) {
         await d1.execute("UPDATE sent SET status='pending', sent_at=NULL WHERE digest_id=?", [digestId]);
         console.log(`  ${u.id.slice(0, 8)}: доставка не вдалась, спробуємо наступного прогону`);

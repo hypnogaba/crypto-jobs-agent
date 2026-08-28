@@ -16,6 +16,11 @@ export interface Profile {
   remoteMode: string;
   location: string | null;
   salaryMin: number | null;
+  /**
+   * Ваги правил, вивчені з відповідей людини. Одиниця — як у всіх.
+   * Кожна скарга на цей вимір робить невідповідність дорожчою саме для неї.
+   */
+  tuning?: { seniority: number; location: number; salary: number };
 }
 
 export interface CandidateJob {
@@ -80,12 +85,14 @@ export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): Score
   if (industryHits.length) reasons.push(`індустрія: ${industryHits.join(", ")}`);
 
   // Рівень: збіг тягне вгору, розрив у два щаблі — сильно вниз
+  const w = p.tuning ?? { seniority: 1, location: 1, salary: 1 };
+
   if (p.seniority) {
     const jobLevel = SENIORITY_ORDER.find((l) => tags.has(l));
     if (jobLevel === p.seniority) { score += 3; reasons.push("рівень збігається"); }
     else if (jobLevel) {
       const gap = Math.abs(SENIORITY_ORDER.indexOf(jobLevel) - SENIORITY_ORDER.indexOf(p.seniority));
-      score -= gap * 2;
+      score -= gap * 2 * w.seniority;
     }
   }
 
@@ -96,14 +103,18 @@ export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): Score
     score += 1;
   }
 
-  if (p.location && job.location?.toLowerCase().includes(p.location.toLowerCase())) {
-    score += 3; reasons.push(`локація: ${p.location}`);
+  if (p.location) {
+    const hit = job.location?.toLowerCase().includes(p.location.toLowerCase()) ?? false;
+    if (hit) { score += 3; reasons.push(`локація: ${p.location}`); }
+    // Скарга на локацію робить невідповідність дорогою. Без скарг вага 1,
+    // і поведінка така сама, як була: просто немає бонусу.
+    else if (w.location > 1) score -= 3 * (w.location - 1);
   }
 
   // Зарплата — м'який пріоритет: вакансія без вилки НЕ карається
   if (p.salaryMin && job.salaryMin) {
     if (job.salaryMin >= p.salaryMin) { score += 2; reasons.push("зарплата підходить"); }
-    else score -= 2;
+    else score -= 2 * w.salary;
   }
 
   if (job.postedAt) {
@@ -137,9 +148,16 @@ export function linksToAggregator(url: string): boolean {
 }
 
 /**
- * Топ-5 із двома правилами анти-концентрації: одна роль на компанію
- * і схлопування однакових ролей. П'ять позицій в одній фірмі — це одна
- * можливість, а не п'ять.
+ * Топ-5 із трьома правилами проти одноманітності.
+ *
+ * 1. Одна роль на компанію. П'ять позицій в одній фірмі — це одна можливість.
+ * 2. Спершу по одній вакансії з кожної сфери, яку людина обрала. Без цього
+ *    добірка сповзає в найсильнішу сферу: перша справжня доставка дала п'ять
+ *    вакансій із двох сфер і однієї індустрії, хоча профіль ширший.
+ * 3. Решту місць добираємо за балом, як раніше.
+ *
+ * Сортування за балом лишається всередині кожного кола, тож різноманітність
+ * не купується ціною доречності: з кожної сфери береться її найкраще.
  */
 export function pickTop(jobs: CandidateJob[], p: Profile, limit = 5, now = new Date()): ScoredJob[] {
   const scored = jobs
@@ -150,13 +168,29 @@ export function pickTop(jobs: CandidateJob[], p: Profile, limit = 5, now = new D
 
   const picked: ScoredJob[] = [];
   const seenCompanies = new Set<string>();
-  for (const job of scored) {
-    if (seenCompanies.has(job.companyKey)) continue;
+  const take = (job: ScoredJob): boolean => {
+    if (seenCompanies.has(job.companyKey)) return false;
     seenCompanies.add(job.companyKey);
     picked.push(job);
+    return true;
+  };
+
+  // Коло перше: найкраще з кожної обраної сфери.
+  for (const sphere of p.spheres) {
     if (picked.length >= limit) break;
+    const best = scored.find((j) => !picked.includes(j) && j.tags.includes(sphere));
+    if (best) take(best);
   }
-  return picked;
+
+  // Коло друге: добираємо за балом.
+  for (const job of scored) {
+    if (picked.length >= limit) break;
+    if (picked.includes(job)) continue;
+    take(job);
+  }
+
+  // Порядок у повідомленні — за силою збігу, а не за тим, як добирали.
+  return picked.sort((a, b) => b.score - a.score);
 }
 
 /** Пояснення без моделі — шаблон із реальних причин, а не переказ вакансії. */

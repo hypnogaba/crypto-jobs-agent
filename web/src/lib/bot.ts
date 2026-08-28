@@ -162,6 +162,19 @@ export async function handleOnboardingText(
   const row = await one<StateRow>("SELECT step,draft,message_id FROM bot_state WHERE chat_id=?", String(chatId));
   if (!row) return false;
 
+  if (row.step === "why") {
+    const user = await one<{ id: string }>("SELECT id FROM users WHERE telegram_chat_id=?", String(chatId));
+    const digestId = (JSON.parse(row.draft || "{}") as { digestId?: string }).digestId ?? "";
+    if (user) {
+      await run(
+        "UPDATE feedback SET reason='other', note=? WHERE user_id=? AND digest_id=? AND reaction='not_relevant'",
+        text.slice(0, 1000), user.id, digestId);
+    }
+    await run("DELETE FROM bot_state WHERE chat_id=?", String(chatId));
+    await send(env, chatId, say("noted", locale));
+    return true;
+  }
+
   if (row.step === "feedback") {
     const user = await one<{ id: string }>("SELECT id FROM users WHERE telegram_chat_id=?", String(chatId));
     await run(
@@ -241,6 +254,67 @@ async function finishOnboarding(
   else await send(env, chatId, done);
 }
 
+/**
+ * Причина, чому добірка не підійшла.
+ *
+ * Кожна причина, крім «інше» й «не та сфера», піднімає вагу свого правила
+ * саме для цієї людини: наступного разу невідповідність цього виміру
+ * коштуватиме дорожче. Пів бала за скаргу, стеля — три: без стелі одна
+ * роздратована людина зробила б собі порожню добірку.
+ *
+ * «Не та сфера» вагою не лікується — там треба міняти самі сфери, тож бот
+ * чесно каже це, а не вдає, що щось підкрутив.
+ */
+const TUNED: Record<string, string> = {
+  level: "seniority_weight", place: "location_weight", money: "salary_weight",
+};
+
+export async function handleWhyButton(
+  env: Env, chatId: number, data: string, callbackId: string | undefined, locale: Locale
+): Promise<boolean> {
+  if (!data.startsWith("wh:")) return false;
+  if (callbackId) await ackButton(env, callbackId);
+
+  const [, digestId, reason] = data.split(":");
+  if (!digestId || !reason) return true;
+
+  const user = await one<{ id: string }>("SELECT id FROM users WHERE telegram_chat_id=?", String(chatId));
+  if (!user) return true;
+
+  await run("UPDATE feedback SET reason=? WHERE user_id=? AND digest_id=? AND reaction='not_relevant'",
+    reason, user.id, digestId);
+  await run(
+    "INSERT INTO user_tuning (user_id) VALUES (?) ON CONFLICT(user_id) DO NOTHING", user.id);
+
+  const column = TUNED[reason];
+  if (column) {
+    await run(
+      `UPDATE user_tuning SET ${column} = MIN(${column} + 0.5, 3.0),
+                              updated_at = datetime('now') WHERE user_id=?`, user.id);
+    await send(env, chatId, say(
+      reason === "level" ? "learnedLevel" : reason === "place" ? "learnedPlace" : "learnedMoney",
+      locale));
+    return true;
+  }
+
+  if (reason === "sphere") {
+    await run(
+      `UPDATE user_tuning SET sphere_complaints = sphere_complaints + 1,
+                              updated_at = datetime('now') WHERE user_id=?`, user.id);
+    await send(env, chatId, say("learnedSphere", locale));
+    return true;
+  }
+
+  // «Інше» — просимо написати словами; текст ловить handleOnboardingText
+  await run(
+    `INSERT INTO bot_state (chat_id,step,draft,updated_at)
+     VALUES (?,'why','{}',datetime('now'))
+     ON CONFLICT(chat_id) DO UPDATE SET step='why', draft=?, updated_at=datetime('now')`,
+    String(chatId), JSON.stringify({ digestId }));
+  await send(env, chatId, say("whyWrite", locale));
+  return true;
+}
+
 export const botLocale = (code: string | undefined): Locale => {
   const two = (code ?? "en").slice(0, 2).toLowerCase();
   return isLocale(two) ? two : "en";
@@ -264,7 +338,15 @@ export async function continueBotOnboarding(
         await run("INSERT INTO delivery_requests (id,user_id) VALUES (?,?)", uuid(), user.id);
         await send(env, chatId, say("moreQueued", locale));
       } else {
-        await send(env, chatId, say("noted", locale));
+        // «Дякую, врахую» було неправдою: реакція нікуди не впливала.
+        // Тепер питаємо, ЩО саме не так — з цього можна вчитись.
+        await sendKeyboard(env, chatId, say("askWhy", locale), [
+          [{ text: say("whySphere", locale), callback_data: `wh:${digestId}:sphere` },
+           { text: say("whyLevel", locale),  callback_data: `wh:${digestId}:level` }],
+          [{ text: say("whyPlace", locale),  callback_data: `wh:${digestId}:place` },
+           { text: say("whyMoney", locale),  callback_data: `wh:${digestId}:money` }],
+          [{ text: say("whyOther", locale),  callback_data: `wh:${digestId}:other` }],
+        ]);
       }
     }
   }

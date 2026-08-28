@@ -99,3 +99,62 @@ describe("посилання має вести на роботодавця", () 
     expect(top.map((t) => t.id)).toEqual(["b"]);
   });
 });
+
+describe("різноманітність добірки", () => {
+  const wide: Profile = { ...p, spheres: ["partnerships", "devrel", "marketing"] };
+
+  it("бере найкраще з кожної обраної сфери, а не п'ять із найсильнішої", () => {
+    // Перша справжня доставка дала п'ять вакансій із двох сфер, хоча профіль
+    // був ширший: добірка сповзала в ту сферу, де балів більше.
+    const jobs = [
+      job({ id: "p1", companyKey: "c1", tags: ["partnerships", "senior"] }),
+      job({ id: "p2", companyKey: "c2", tags: ["partnerships", "senior"] }),
+      job({ id: "p3", companyKey: "c3", tags: ["partnerships", "senior"] }),
+      job({ id: "d1", companyKey: "c4", tags: ["devrel"] }),
+      job({ id: "m1", companyKey: "c5", tags: ["marketing"] }),
+    ];
+    const top = pickTop(jobs, wide, 3);
+    const spheres = top.map((t) => t.tags.find((x) => wide.spheres.includes(x)));
+    expect(new Set(spheres).size).toBe(3);
+  });
+
+  it("не бере двічі одну компанію навіть заради різноманітності", () => {
+    const jobs = [
+      job({ id: "a", companyKey: "same", tags: ["partnerships"] }),
+      job({ id: "b", companyKey: "same", tags: ["devrel"] }),
+      job({ id: "c", companyKey: "other", tags: ["marketing"] }),
+    ];
+    expect(pickTop(jobs, wide, 5).map((t) => t.companyKey)).toEqual(["same", "other"]);
+  });
+
+  it("порядок у повідомленні — за силою збігу", () => {
+    const top = pickTop([
+      job({ id: "weak", companyKey: "c1", tags: ["devrel"] }),
+      job({ id: "strong", companyKey: "c2", tags: ["partnerships", "web3", "senior"] }),
+    ], wide, 5);
+    expect(top[0]!.id).toBe("strong");
+  });
+});
+
+describe("навчання на скаргах", () => {
+  it("скарга на рівень робить розрив дорожчим", () => {
+    const junior = job({ tags: ["partnerships", "junior"] });
+    const plain = scoreJob(junior, p).score;
+    const tuned = scoreJob(junior, { ...p, tuning: { seniority: 3, location: 1, salary: 1 } }).score;
+    expect(tuned).toBeLessThan(plain);
+  });
+
+  it("без скарг поведінка така сама, як була", () => {
+    const j = job({ location: "Berlin" });
+    const withLoc = { ...p, location: "Lisbon" };
+    expect(scoreJob(j, withLoc).score)
+      .toBe(scoreJob(j, { ...withLoc, tuning: { seniority: 1, location: 1, salary: 1 } }).score);
+  });
+
+  it("скарга на локацію карає невідповідність, якої раніше просто не помічали", () => {
+    const j = job({ location: "Berlin" });
+    const withLoc = { ...p, location: "Lisbon" };
+    expect(scoreJob(j, { ...withLoc, tuning: { seniority: 1, location: 3, salary: 1 } }).score)
+      .toBeLessThan(scoreJob(j, withLoc).score);
+  });
+});

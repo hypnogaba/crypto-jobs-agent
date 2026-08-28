@@ -31,7 +31,7 @@ export default function GlobalError({ reset }: { error: Error; reset: () => void
           <p style={{ margin: "12px 0 0", fontSize: "0.95rem", color: "#565b60" }}>
             Це не твоя провина. Спробуй ще раз — якщо повторюється, лагодити нам.
           </p>
-          <p style={{ margin: "6px 0 0", fontSize: "0.85rem", color: "#969b9f" }}>
+          <p style={{ margin: "6px 0 0", fontSize: "0.85rem", color: "#6e7377" }}>
             Something broke on our side. Not your fault — try again.
           </p>
           <button type="button" onClick={reset} style={{

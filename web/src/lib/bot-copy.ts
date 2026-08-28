@@ -41,6 +41,57 @@ const P = {
     fr: "Compris. La prochaine sélection arrive dans l'heure.",
     ru: "Принял. Следующая подборка придёт в течение часа.",
   },
+  askWhy: {
+    en: "What was wrong with them?",
+    uk: "Що з ними було не так?",
+    fr: "Qu'est-ce qui n'allait pas ?",
+    ru: "Что с ними было не так?",
+  },
+  whySphere: {
+    en: "Wrong kind of work", uk: "Не та сфера", fr: "Mauvais domaine", ru: "Не та сфера",
+  },
+  whyLevel: {
+    en: "Wrong level", uk: "Не той рівень", fr: "Mauvais niveau", ru: "Не тот уровень",
+  },
+  whyPlace: {
+    en: "Wrong place", uk: "Не та локація", fr: "Mauvais lieu", ru: "Не та локация",
+  },
+  whyMoney: {
+    en: "Pay too low", uk: "Зарплата замала", fr: "Salaire trop bas", ru: "Зарплата мала",
+  },
+  whyOther: {
+    en: "Something else", uk: "Інше", fr: "Autre chose", ru: "Другое",
+  },
+  whyWrite: {
+    en: "Tell me in one message what was wrong.",
+    uk: "Напиши одним повідомленням, що саме не так.",
+    fr: "Dites-moi en un message ce qui n'allait pas.",
+    ru: "Напиши одним сообщением, что именно не так.",
+  },
+  learnedLevel: {
+    en: "Noted. Level mismatches will cost more for you from now on.",
+    uk: "Прийняв. Невідповідність рівня тепер каратиметься сильніше саме для тебе.",
+    fr: "Noté. Les écarts de niveau compteront davantage pour vous.",
+    ru: "Принял. Несоответствие уровня теперь будет наказываться сильнее именно для тебя.",
+  },
+  learnedPlace: {
+    en: "Noted. Jobs outside your place will sink for you from now on.",
+    uk: "Прийняв. Вакансії поза твоєю локацією тепер опускатимуться нижче.",
+    fr: "Noté. Les offres hors de votre zone descendront désormais.",
+    ru: "Принял. Вакансии вне твоей локации теперь будут опускаться ниже.",
+  },
+  learnedMoney: {
+    en: "Noted. Pay below your floor will cost more for you from now on.",
+    uk: "Прийняв. Зарплата нижча за твій поріг тепер каратиметься сильніше.",
+    fr: "Noté. Un salaire sous votre seuil comptera davantage.",
+    ru: "Принял. Зарплата ниже твоего порога теперь будет наказываться сильнее.",
+  },
+  learnedSphere: {
+    en: "Noted. Weights will not fix this one — the spheres themselves need changing. Send /start to redo them.",
+    uk: "Прийняв. Вагами це не лікується — треба міняти самі сфери. Напиши /start, щоб перезібрати профіль.",
+    fr: "Noté. Les pondérations n'y changeront rien — il faut modifier les domaines. Envoyez /start.",
+    ru: "Принял. Весами это не лечится — нужно менять сами сферы. Напиши /start, чтобы пересобрать профиль.",
+  },
   noted: {
     en: "Thanks, noted. Tomorrow's digest will be closer.",
     uk: "Дякую, врахую. Завтрашня добірка буде точнішою.",
