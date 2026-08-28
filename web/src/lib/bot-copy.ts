@@ -124,10 +124,10 @@ const P = {
     ru: "Спасибо, учту. Завтрашняя подборка будет точнее.",
   },
   startFirst: {
-    en: "Send /start first, so I know what to look for.",
-    uk: "Спершу /start, щоб я знав, кого шукати.",
+    en: "Send /start first, so I know what work to look for.",
+    uk: "Спершу /start, щоб я знав, яку роботу шукати.",
     fr: "Envoyez d'abord /start, que je sache quoi chercher.",
-    ru: "Сначала /start, чтобы я знал, кого искать.",
+    ru: "Сначала /start, чтобы я знал, какую работу искать.",
   },
   paused: {
     en: "Paused. /resume whenever you want them back.",
