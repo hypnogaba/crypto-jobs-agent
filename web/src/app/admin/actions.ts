@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth";
-import { run } from "@/lib/db";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
+import { one, run } from "@/lib/db";
 
 /** Перевірка джерела живцем — не чекаючи ранкового прогону. */
 export async function checkSource(formData: FormData): Promise<void> {
@@ -67,5 +68,46 @@ export async function addCompany(formData: FormData): Promise<void> {
      VALUES (?,?,?,?,'[]','manual',datetime('now'))
      ON CONFLICT(slug) DO UPDATE SET name=excluded.name, ats_provider=excluded.ats_provider`,
     slug, name, provider, slug);
+  revalidatePath("/admin");
+}
+
+/**
+ * Відповідь на відгук просто в Telegram людини.
+ *
+ * Контакт зберігається як `tg:<chat_id>`, коли відгук прийшов із бота, — тож
+ * відповісти можна тим самим ботом, без пошти й без окремого каналу.
+ */
+export async function replyToFeedback(formData: FormData): Promise<void> {
+  await requireAdmin();
+  const id = String(formData.get("id") ?? "");
+  const text = String(formData.get("reply") ?? "").trim();
+  if (!id || text.length < 2) return;
+
+  const row = await one<{ contact: string | null }>(
+    "SELECT contact FROM site_feedback WHERE id=?", id);
+  const chat = row?.contact?.startsWith("tg:") ? row.contact.slice(3) : null;
+
+  const { env } = getCloudflareContext();
+  const token = (env as unknown as Record<string, string | undefined>).TELEGRAM_BOT_TOKEN;
+
+  if (chat && token) {
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chat, text: `Відповідь на твій відгук:\n\n${text}` }),
+    });
+  }
+
+  // Позначаємо розібраним у будь-якому разі: якщо контакту немає, власник
+  // усе одно прочитав і вирішив.
+  await run("UPDATE site_feedback SET handled_at=datetime('now') WHERE id=?", id);
+  revalidatePath("/admin");
+}
+
+/** Прочитано й нічого відповідати. */
+export async function dismissFeedback(formData: FormData): Promise<void> {
+  await requireAdmin();
+  const id = String(formData.get("id") ?? "");
+  if (!id) return;
+  await run("UPDATE site_feedback SET handled_at=datetime('now') WHERE id=?", id);
   revalidatePath("/admin");
 }

@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import Nav from "../nav";
 import { detectLocale } from "../actions";
-import { addCompany, reviveSource, saveSourceKey } from "./actions";
+import { addCompany, reviveSource, saveSourceKey, replyToFeedback, dismissFeedback } from "./actions";
 import { currentUser } from "@/lib/auth";
 import { all, one } from "@/lib/db";
 
@@ -40,7 +40,10 @@ export default async function Admin() {
   if (!user.isAdmin) redirect("/dashboard");
 
   const s = await one<{ jobs: number; companies: number; sources: number; withAts: number;
-    users: number; paused: number; broken: number; sent: number }>(`
+    users: number; paused: number; broken: number; sent: number;
+    allUsers: number; connected: number; newToday: number; newWeek: number;
+    sentToday: number; openFeedback: number; thumbsDown: number; wantedMore: number;
+    liveJobs: number }>(`
     SELECT (SELECT COUNT(*) FROM jobs_cache) jobs,
            (SELECT COUNT(DISTINCT company_key) FROM jobs_cache) companies,
            (SELECT COUNT(*) FROM companies) sources,
@@ -48,7 +51,16 @@ export default async function Admin() {
            (SELECT COUNT(*) FROM users WHERE status='active') users,
            (SELECT COUNT(*) FROM users WHERE status='paused') paused,
            (SELECT COUNT(*) FROM sources_state WHERE status!='ok') broken,
-           (SELECT COUNT(*) FROM sent WHERE status='sent') sent`);
+           (SELECT COUNT(*) FROM sent WHERE status='sent') sent,
+           (SELECT COUNT(*) FROM users) allUsers,
+           (SELECT COUNT(*) FROM users WHERE telegram_chat_id IS NOT NULL) connected,
+           (SELECT COUNT(*) FROM users WHERE date(created_at) = date('now')) newToday,
+           (SELECT COUNT(*) FROM users WHERE date(created_at) >= date('now','-7 day')) newWeek,
+           (SELECT COUNT(*) FROM sent WHERE date(created_at) = date('now')) sentToday,
+           (SELECT COUNT(*) FROM site_feedback WHERE handled_at IS NULL) openFeedback,
+           (SELECT COUNT(*) FROM feedback WHERE reaction='not_relevant') thumbsDown,
+           (SELECT COUNT(*) FROM feedback WHERE reaction='more') wantedMore,
+           (SELECT COUNT(*) FROM jobs_cache WHERE fetched_at >= datetime('now','-3 day')) liveJobs`);
 
   const sources = await all<{ source_name: string; status: string; last_ok_at: string | null;
     consecutive_fail_days: number; last_error: string | null; jobs_last_run: number }>(
@@ -77,13 +89,31 @@ export default async function Admin() {
         <p className="eyebrow">Панель власника</p>
         <h1 className="display mt-2 text-3xl">Стан системи</h1>
 
-        <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
-          <Tile n={s?.jobs ?? 0} label="вакансій" />
+        <p className="eyebrow mt-10">Люди</p>
+        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          <Tile n={s?.allUsers ?? 0} label="усього" />
+          <Tile n={s?.users ?? 0} label="активних" />
+          <Tile n={s?.connected ?? 0} label="з Telegram" />
+          <Tile n={s?.paused ?? 0} label="на паузі" />
+          <Tile n={s?.newToday ?? 0} label="нових сьогодні" />
+          <Tile n={s?.newWeek ?? 0} label="нових за тиждень" />
+        </div>
+
+        <p className="eyebrow mt-8">Доставка й реакції</p>
+        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          <Tile n={s?.sent ?? 0} label="надіслано всього" />
+          <Tile n={s?.sentToday ?? 0} label="сьогодні" />
+          <Tile n={s?.wantedMore ?? 0} label="просили ще" />
+          <Tile n={s?.thumbsDown ?? 0} label="«не те»" accent={(s?.thumbsDown ?? 0) > 0} />
+          <Tile n={s?.openFeedback ?? 0} label="відгуків чекає" accent={(s?.openFeedback ?? 0) > 0} />
+        </div>
+
+        <p className="eyebrow mt-8">Вакансії та джерела</p>
+        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          <Tile n={s?.jobs ?? 0} label="у кеші" />
+          <Tile n={s?.liveJobs ?? 0} label="придатні до добірки" />
           <Tile n={s?.companies ?? 0} label="компаній" />
           <Tile n={s?.sources ?? 0} label="джерел" />
-          <Tile n={s?.withAts ?? 0} label="з ATS" />
-          <Tile n={s?.users ?? 0} label="активних" />
-          <Tile n={s?.sent ?? 0} label="надіслано" />
           <Tile n={s?.broken ?? 0} label="зламано" accent={(s?.broken ?? 0) > 0} />
         </div>
 
@@ -107,6 +137,22 @@ export default async function Admin() {
                   <p className="mt-2 whitespace-pre-line text-sm" style={{ color: "var(--ink)" }}>
                     {f.message}
                   </p>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <form action={replyToFeedback} className="flex flex-1 items-center gap-2">
+                      <input type="hidden" name="id" value={f.id} />
+                      <input name="reply" className="field flex-1 text-sm"
+                             placeholder={f.contact?.startsWith("tg:")
+                               ? "Відповісти в Telegram…"
+                               : "Контакту немає — можна лише позначити розібраним"}
+                             disabled={!f.contact?.startsWith("tg:")} />
+                      <button type="submit" className="btn px-3 py-2 text-xs"
+                              disabled={!f.contact?.startsWith("tg:")}>Надіслати</button>
+                    </form>
+                    <form action={dismissFeedback}>
+                      <input type="hidden" name="id" value={f.id} />
+                      <button type="submit" className="btn btn-quiet px-3 py-2 text-xs">Розібрано</button>
+                    </form>
+                  </div>
                 </article>
               ))}
             </div>

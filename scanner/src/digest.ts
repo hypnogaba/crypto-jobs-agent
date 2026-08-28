@@ -15,6 +15,7 @@ interface UserRow {
   timezone: string; delivery_hour: number; status: string; last_interaction_at: string | null;
   spheres: string; industries: string; seniority: string | null;
   remote_mode: string; location: string | null; salary_min: number | null;
+  custom_role: string | null;
 }
 
 const list = (raw: string | null): string[] => {
@@ -99,7 +100,7 @@ async function main(): Promise<void> {
   const d1 = new D1Client({ accountId: cfg.cfAccountId, databaseId: cfg.cfDatabaseId, token: cfg.cfApiToken });
 
   const users = await d1.query<UserRow>(
-    `SELECT u.*, p.spheres,p.industries,p.seniority,p.remote_mode,p.location,p.salary_min
+    `SELECT u.*, p.spheres,p.industries,p.seniority,p.remote_mode,p.location,p.salary_min,p.custom_role
      FROM users u JOIN profiles p ON p.user_id = u.id
      WHERE u.status = 'active'` + (onlyUser ? " AND u.id = ?" : ""),
     onlyUser ? [onlyUser] : []);
@@ -163,6 +164,7 @@ async function main(): Promise<void> {
 
     const profile: Profile = {
       userId: u.id, spheres: list(u.spheres), industries: list(u.industries),
+      customRole: u.custom_role,
       seniority: u.seniority, remoteMode: u.remote_mode, location: u.location, salaryMin: u.salary_min,
     };
 

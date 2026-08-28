@@ -21,6 +21,8 @@ export const STEPS: Step[] = ["spheres", "industries", "seniority", "where", "sa
 
 export interface Draft {
   spheres: string[];
+  /** Своя назва ролі, коли жодна сфера не підійшла. */
+  customRole?: string | null;
   industries: string[];
   seniority: string | null;
   remoteMode: string | null;
@@ -29,7 +31,7 @@ export interface Draft {
 }
 
 export const emptyDraft = (): Draft => ({
-  spheres: [], industries: [], seniority: null,
+  spheres: [], customRole: null, industries: [], seniority: null,
   remoteMode: null, salaryMin: null, salaryCurrency: null,
 });
 
@@ -76,10 +78,10 @@ const ASK: Record<Step, Phrase> = {
     ru: "4 из 4 · Где хочешь работать?",
   },
   salary: {
-    en: "Last one · Salary floor?\nA soft preference, not a hard filter — most postings show no range at all.",
-    uk: "Останнє · Зарплата від?\nМ'який пріоритет, не жорсткий фільтр — більшість вакансій вилку взагалі не вказує.",
-    fr: "Dernière · Salaire minimum ?\nUne préférence, pas un filtre — la plupart des offres n'affichent aucune fourchette.",
-    ru: "Последнее · Зарплата от?\nМягкий приоритет, не жёсткий фильтр — большинство вакансий вилку не указывает.",
+    en: "Last one · Salary floor, per year, before tax?\nA soft preference, not a hard filter — most postings show no range at all.",
+    uk: "Останнє · Зарплата від, за рік, до податків?\nМ'який пріоритет, не жорсткий фільтр — більшість вакансій вилку взагалі не вказує.",
+    fr: "Dernière · Salaire minimum, par an, avant impôts ?\nUne préférence, pas un filtre — la plupart des offres n'affichent aucune fourchette.",
+    ru: "Последнее · Зарплата от, за год, до налогов?\nМягкий приоритет, не жёсткий фильтр — большинство вакансий вилку не указывает.",
   },
 };
 
@@ -89,11 +91,24 @@ const WORD = {
   pickOne:  { en: "Pick at least one", uk: "Обери хоча б одне", fr: "Choisissez au moins un", ru: "Выбери хотя бы одно" },
   noMatter: { en: "Does not matter", uk: "Не важливо", fr: "Peu importe", ru: "Не важно" },
   other:    { en: "Another amount", uk: "Інша сума", fr: "Autre montant", ru: "Другая сумма" },
+  perYear:  { en: "yr", uk: "рік", fr: "an", ru: "год" },
   askOther: {
-    en: "Write the amount and currency, for example: 90000 EUR",
-    uk: "Напиши суму й валюту, наприклад: 90000 EUR",
-    fr: "Écrivez le montant et la devise, par exemple : 90000 EUR",
-    ru: "Напиши сумму и валюту, например: 90000 EUR",
+    en: "Write the yearly amount and currency, for example: 90000 EUR",
+    uk: "Напиши річну суму й валюту, наприклад: 90000 EUR",
+    fr: "Écrivez le montant annuel et la devise, par exemple : 90000 EUR",
+    ru: "Напиши годовую сумму и валюту, например: 90000 EUR",
+  },
+  mine: {
+    en: "My own",
+    uk: "Мій варіант",
+    fr: "Le mien",
+    ru: "Мой вариант",
+  },
+  askMine: {
+    en: "Write your role in your own words, for example: technical recruiting, grant writing, smart contract audit.",
+    uk: "Напиши свою роль своїми словами — наприклад: технічний рекрутинг, grant writing, аудит смартконтрактів.",
+    fr: "Écrivez votre rôle avec vos mots, par exemple : recrutement technique, rédaction de subventions, audit de smart contracts.",
+    ru: "Напиши свою роль своими словами — например: технический рекрутинг, grant writing, аудит смартконтрактов.",
   },
   ready: {
     en: "All set. The first digest arrives tomorrow morning.",
@@ -133,7 +148,15 @@ export function keyboard(step: Step, draft: Draft, locale: Locale): Button[][] {
       text: `${chosen.includes(it.id) ? "✓ " : ""}${label(it, locale)}`,
       callback_data: `ob:${step}:${it.id}`,
     })));
-    const canFinish = step === "industries" || chosen.length > 0;
+    if (step === "spheres") {
+      // Десять сфер покривають більшість, але не все. Ця кнопка справжня:
+      // написане шукається в назвах вакансій (див. matchesCustomRole).
+      rows.push([{
+        text: `${draft.customRole ? "✓ " : ""}${say(WORD.mine, locale)}`,
+        callback_data: "ob:spheres:__mine",
+      }]);
+    }
+    const canFinish = step === "industries" || chosen.length > 0 || Boolean(draft.customRole);
     rows.push([{
       text: canFinish
         ? say(step === "industries" && chosen.length === 0 ? WORD.skip : WORD.done, locale)
@@ -156,7 +179,7 @@ export function keyboard(step: Step, draft: Draft, locale: Locale): Button[][] {
   }
 
   // salary
-  pair(SALARY_STEPS.map((n) => ({ text: `€${n / 1000}k`, callback_data: `ob:salary:${n}` })));
+  pair(SALARY_STEPS.map((n) => ({ text: `€${n / 1000}k / ${say(WORD.perYear, locale)}`, callback_data: `ob:salary:${n}` })));
   rows.push([{ text: say(WORD.noMatter, locale), callback_data: "ob:salary:0" }]);
   rows.push([{ text: say(WORD.other, locale), callback_data: "ob:salary:__other" }]);
   return rows;
@@ -164,6 +187,7 @@ export function keyboard(step: Step, draft: Draft, locale: Locale): Button[][] {
 
 export const questionText = (step: Step, locale: Locale): string => say(ASK[step], locale);
 export const askOtherAmount = (locale: Locale): string => say(WORD.askOther, locale);
+export const askCustomRole = (locale: Locale): string => say(WORD.askMine, locale);
 
 /** Що вийшло — людськими словами, а не ідентифікаторами. */
 export function summary(draft: Draft, locale: Locale): string {
@@ -177,7 +201,8 @@ export function summary(draft: Draft, locale: Locale): string {
     : say(WORD.noMatter, locale);
 
   return [
-    names(draft.spheres, SPHERES),
+    [names(draft.spheres, SPHERES) === "—" ? null : names(draft.spheres, SPHERES),
+     draft.customRole].filter(Boolean).join(" · ") || "—",
     draft.industries.length ? names(draft.industries, INDUSTRIES) : null,
     level ? label(level, locale) : null,
     where ? label(where, locale) : null,

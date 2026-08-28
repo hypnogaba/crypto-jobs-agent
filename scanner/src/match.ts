@@ -10,6 +10,8 @@ export interface Profile {
   userId: string;
   spheres: string[];
   industries: string[];
+  /** Своя назва ролі, якщо жодна сфера зі словника не підійшла. */
+  customRole?: string | null;
   seniority: string | null;
   remoteMode: string;
   location: string | null;
@@ -37,6 +39,21 @@ export interface ScoredJob extends CandidateJob {
 
 const SENIORITY_ORDER = ["junior", "middle", "senior", "lead"];
 
+/**
+ * Збіг своєї ролі з назвою вакансії.
+ *
+ * Слова довші за два символи, усі мають бути в назві. Так «технічний рекрутер»
+ * не збігається з «Recruiter» випадково, а «solidity audit» знаходить
+ * «Solidity Auditor». Коротких слів не беремо — «ai» ловило б усе підряд.
+ */
+export function matchesCustomRole(title: string, role: string | null | undefined): boolean {
+  if (!role) return false;
+  const words = role.toLowerCase().split(/[^\p{L}\p{N}+#]+/u).filter((w) => w.length > 2);
+  if (words.length === 0) return false;
+  const t = title.toLowerCase();
+  return words.every((w) => t.includes(w));
+}
+
 export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): ScoredJob {
   let score = 0;
   const reasons: string[] = [];
@@ -49,7 +66,14 @@ export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): Score
   const sphereHits = p.spheres.filter((s) => tags.has(s));
   score += sphereHits.length * 6;
   if (sphereHits.length) reasons.push(`сфера: ${sphereHits.join(", ")}`);
-  else if (p.spheres.length > 0) score -= 8;
+
+  // Своя назва ролі шукається в НАЗВІ вакансії, бо тегів під неї не існує.
+  // Це і є те, що робить кнопку «мій варіант» справжньою, а не декоративною.
+  const roleHit = matchesCustomRole(job.title, p.customRole);
+  if (roleHit) { score += 6; reasons.push(`роль: ${p.customRole}`); }
+
+  // Штраф лише тоді, коли людина щось назвала й нічого не збіглося.
+  if (!sphereHits.length && !roleHit && (p.spheres.length > 0 || p.customRole)) score -= 8;
 
   const industryHits = p.industries.filter((i) => tags.has(i));
   score += industryHits.length * 2;
@@ -140,6 +164,7 @@ export function explainLocally(job: ScoredJob, p: Profile): string {
   const bits: string[] = [];
   const sphere = p.spheres.find((s) => job.tags.includes(s));
   if (sphere) bits.push(`це ${sphere}, одна з твоїх сфер`);
+  else if (matchesCustomRole(job.title, p.customRole)) bits.push(`це ${p.customRole}, як ти й просив`);
   const industry = p.industries.find((i) => job.tags.includes(i));
   if (industry) bits.push(`індустрія ${industry}`);
   if (job.remote && p.remoteMode === "remote_only") bits.push("повністю віддалено");

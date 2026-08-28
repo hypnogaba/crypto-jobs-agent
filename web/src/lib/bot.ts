@@ -1,6 +1,6 @@
 import { one, run, uuid } from "./db";
 import {
-  emptyDraft, keyboard, nextStep, questionText, askOtherAmount, readyText,
+  emptyDraft, keyboard, nextStep, questionText, askOtherAmount, askCustomRole, readyText,
   summary, toggle, type Draft, type Step,
 } from "./bot-onboarding";
 import { isLocale } from "./i18n";
@@ -110,6 +110,13 @@ export async function handleOnboardingButton(
   const draft = readDraft(row.draft);
   const step = row.step as Step;
 
+  // «Мій варіант» — єдина кнопка, що веде до вільного тексту
+  if (step === "spheres" && value === "__mine") {
+    await run("UPDATE bot_state SET step='role', updated_at=datetime('now') WHERE chat_id=?", String(chatId));
+    await send(env, chatId, askCustomRole(locale));
+    return true;
+  }
+
   // Кілька відповідей: перемикаємо й перемальовуємо те саме питання
   if ((step === "spheres" || step === "industries") && value !== "__next") {
     if (step === "spheres") draft.spheres = toggle(draft.spheres, value);
@@ -171,6 +178,19 @@ export async function handleOnboardingText(
     return true;
   }
 
+  // Своя роль: записуємо й повертаємось до того самого питання про сфери,
+  // щоб людина могла ще й дообрати щось зі списку.
+  if (row.step === "role") {
+    const draft = readDraft(row.draft);
+    draft.customRole = text.slice(0, 120);
+    await saveState(chatId, "spheres", draft, null);
+    if (row.message_id) {
+      await editKeyboard(env, chatId, row.message_id,
+        questionText("spheres", locale), keyboard("spheres", draft, locale));
+    }
+    return true;
+  }
+
   if (row.step !== "salary") return false;
 
   const m = /(\d[\d\s.,]*)\s*([a-zA-Z€$£]{1,4})?/.exec(text);
@@ -201,15 +221,16 @@ async function finishOnboarding(
   }
 
   await run(
-    `INSERT INTO profiles (user_id,mode,raw_input,spheres,industries,seniority,remote_mode,location,salary_min,salary_currency,updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,datetime('now'))
+    `INSERT INTO profiles (user_id,mode,raw_input,spheres,custom_role,industries,seniority,remote_mode,location,salary_min,salary_currency,updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
      ON CONFLICT(user_id) DO UPDATE SET
        mode=excluded.mode, raw_input=excluded.raw_input, spheres=excluded.spheres,
-       industries=excluded.industries, seniority=excluded.seniority,
-       remote_mode=excluded.remote_mode, salary_min=excluded.salary_min,
-       salary_currency=excluded.salary_currency, updated_at=datetime('now')`,
+       custom_role=excluded.custom_role, industries=excluded.industries,
+       seniority=excluded.seniority, remote_mode=excluded.remote_mode,
+       salary_min=excluded.salary_min, salary_currency=excluded.salary_currency,
+       updated_at=datetime('now')`,
     userId, "bot", null,
-    JSON.stringify(draft.spheres), JSON.stringify(draft.industries),
+    JSON.stringify(draft.spheres), draft.customRole ?? null, JSON.stringify(draft.industries),
     draft.seniority, draft.remoteMode ?? "remote_only", null,
     draft.salaryMin, draft.salaryCurrency);
 
