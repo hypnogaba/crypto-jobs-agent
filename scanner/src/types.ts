@@ -20,6 +20,12 @@ export interface RawJob {
   team?: string | null;
   /** Повна зайнятість, контракт, стажування. */
   commitment?: string | null;
+  /**
+   * Сирий текст оголошення. У базу НЕ потрапляє: із нього роблять витяг
+   * (`summary.ts`) і зберігають лише його. Заповнюють ті джерела, що
+   * віддають текст разом зі списком — Ashby, Lever.
+   */
+  description?: string | null;
 }
 
 export interface NormalizedJob extends RawJob {

@@ -25,6 +25,8 @@ export async function fetchLever(slug: string, name: string, o: FetchOptions = {
     text: string; hostedUrl?: string; applyUrl?: string; workplaceType?: string; createdAt?: number;
     categories?: { location?: string; team?: string; department?: string; commitment?: string };
     salaryRange?: { min?: number; max?: number; currency?: string; interval?: string };
+    descriptionPlain?: string; descriptionBodyPlain?: string;
+    lists?: Array<{ text?: string; content?: string }>;
   }>>(`https://api.lever.co/v0/postings/${slug}?mode=json`, {}, o);
 
   return posts.map((j) => {
@@ -42,18 +44,38 @@ export async function fetchLever(slug: string, name: string, o: FetchOptions = {
       salaryMin: sr?.min ?? null, salaryMax: sr?.max ?? null, salaryCurrency: sr?.currency ?? null,
       team: j.categories?.team ?? j.categories?.department ?? null,
       commitment: j.categories?.commitment ?? null,
+      description: leverText(j),
     };
   });
 }
 
+/**
+ * Текст вакансії Lever.
+ *
+ * `openingPlain` навмисно не беремо: це загальний блурб компанії, однаковий
+ * на всіх її вакансіях. `lists` — обов'язки й вимоги — навпаки, найконкретніше,
+ * що Lever знає про роль. На живій вибірці саме вони підняли покриття з 7/10
+ * до 10/10 і виправили випадки, де опис ролі підмінявся рекламою.
+ */
+function leverText(j: {
+  descriptionBodyPlain?: string; descriptionPlain?: string;
+  lists?: Array<{ text?: string; content?: string }>;
+}): string | null {
+  const body = j.descriptionBodyPlain ?? j.descriptionPlain ?? "";
+  const lists = (j.lists ?? []).slice(0, 2)
+    .map((x) => `${x.text ?? ""}\n${x.content ?? ""}`).join("\n\n");
+  return [body, lists].filter((x) => x.trim()).join("\n\n") || null;
+}
+
 // ── Ashby ─── посилання в полі `jobUrl`
 export async function fetchAshby(slug: string, name: string, o: FetchOptions = {}): Promise<RawJob[]> {
-  const p = await fetchJson<{ jobs?: Array<{ title: string; location?: string; isRemote?: boolean; publishedAt?: string; jobUrl: string; isListed?: boolean }> }>(
+  const p = await fetchJson<{ jobs?: Array<{ title: string; location?: string; isRemote?: boolean; publishedAt?: string; jobUrl: string; isListed?: boolean; descriptionPlain?: string }> }>(
     `https://api.ashbyhq.com/posting-api/job-board/${slug}`, {}, o);
   return (p.jobs ?? []).filter((j) => j.isListed !== false).map((j) => ({
     url: j.jobUrl, company: name, title: j.title, location: j.location ?? null,
     remote: j.isRemote === true || REMOTE.test(j.location ?? ""),
-    postedAt: iso(j.publishedAt), source: `ashby:${slug}` }));
+    postedAt: iso(j.publishedAt), source: `ashby:${slug}`,
+    description: j.descriptionPlain ?? null }));
 }
 
 // ── Workable ──────────────────────────────────────────────────

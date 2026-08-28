@@ -394,7 +394,32 @@ export async function fetchAshby(slug: string, name: string, o: FetchOptions = {
 У `fetchLever` додати `descriptionPlain?: string; descriptionBodyPlain?: string` у тип і в результат:
 
 ```ts
-      description: j.descriptionBodyPlain ?? j.descriptionPlain ?? null,
+      description: leverText(j),
+```
+
+І поруч у файлі — складання тексту. Перевірено на живому Lever: саме
+`lists` піднімають покриття з 7/10 до 10/10 і додатково виправляють
+неправильні вибори (вакансія Android-інженера більше не отримує блурб
+про продажі, а справжній опис ролі).
+
+```ts
+/**
+ * Текст вакансії Lever.
+ *
+ * `openingPlain` навмисно не беремо: це загальний блурб компанії, який
+ * повторюється на всіх вакансіях. `lists` — обов'язки й вимоги — навпаки,
+ * найконкретніше, що Lever знає про роль, і в третини вакансій це єдине,
+ * що взагалі є.
+ */
+function leverText(j: {
+  descriptionBodyPlain?: string; descriptionPlain?: string;
+  lists?: Array<{ text?: string; content?: string }>;
+}): string | null {
+  const body = j.descriptionBodyPlain ?? j.descriptionPlain ?? "";
+  const lists = (j.lists ?? []).slice(0, 2)
+    .map((x) => `${x.text ?? ""}\n${x.content ?? ""}`).join("\n\n");
+  return [body, lists].filter((x) => x.trim()).join("\n\n") || null;
+}
 ```
 
 - [ ] **Step 5: Запустити — мають пройти**
