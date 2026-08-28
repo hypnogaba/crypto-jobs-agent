@@ -33,7 +33,11 @@ export default async function Sources() {
   const locale = await detectLocale();
 
   const stats = await one<{ sources: number; withAts: number }>(
-    "SELECT COUNT(*) sources, COUNT(ats_provider) withAts FROM companies").catch(() => null);
+    `SELECT COUNT(*) sources, COUNT(ats_provider) withAts FROM companies c
+      WHERE NOT EXISTS (
+        SELECT 1 FROM sources_state s
+         WHERE s.source_name = c.ats_provider || ':' || c.ats_slug
+           AND s.status = 'deprecated')`).catch(() => null);
 
   const providers = await all<{ ats_provider: string; n: number }>(
     "SELECT ats_provider, COUNT(*) n FROM companies WHERE ats_provider IS NOT NULL GROUP BY ats_provider ORDER BY n DESC"

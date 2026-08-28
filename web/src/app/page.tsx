@@ -15,7 +15,13 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
   const stats = await one<{ jobs: number; companies: number; sources: number }>(`
     SELECT (SELECT COUNT(*) FROM jobs_cache) jobs,
            (SELECT COUNT(DISTINCT company_key) FROM jobs_cache) companies,
-           (SELECT COUNT(*) FROM companies) sources`).catch(() => null);
+           -- Рахуємо лише ті джерела, які справді опитуються. Мертві
+           -- лишаються в таблиці як історія, але обіцяти їх людині нечесно.
+           (SELECT COUNT(*) FROM companies c
+              WHERE NOT EXISTS (
+                SELECT 1 FROM sources_state s
+                 WHERE s.source_name = c.ats_provider || ':' || c.ats_slug
+                   AND s.status = 'deprecated')) sources`).catch(() => null);
 
   const steps = [1, 2, 3, 4].map((n) => ({
     n, title: t(locale, `home.step${n}`), body: t(locale, `home.step${n}d`),
