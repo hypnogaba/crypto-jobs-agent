@@ -6,7 +6,6 @@ import { cookies } from "next/headers";
 import { logout, switchLocale, switchTheme } from "./actions";
 import { LOCALES } from "@/lib/i18n";
 
-/** `onNight` — навігація поверх темної смуги на головній. */
 /** Три стани теми: світло, темрява, як у системі. Порожнє значення — системна. */
 const THEMES = [
   { id: "light",  key: "theme.light",  icon: <circle cx="12" cy="12" r="4" /> },
@@ -14,17 +13,16 @@ const THEMES = [
   { id: "system", key: "theme.system", icon: <rect x="3" y="5" width="18" height="12" rx="1.5" /> },
 ] as const;
 
-export default async function Nav({ locale, onNight = false }: { locale: Locale; onNight?: boolean }) {
+export default async function Nav({ locale }: { locale: Locale }) {
   const user = await currentUser();
   const theme = (await cookies()).get("nr_theme")?.value ?? "system";
-  const line = onNight ? "var(--night-rule)" : "var(--rule)";
-  const dim = onNight ? "var(--night-2)" : "var(--muted)";
+  const dim = "var(--muted)";
 
   return (
-    <header style={{ borderBottom: `1px solid ${line}` }}>
+    <header className="topbar">
       <nav className="mx-auto flex max-w-5xl items-center justify-between px-6 py-5">
         <Link href="/" className="flex items-baseline gap-2.5">
-          <span className="display text-lg tracking-tight">NextRole</span>
+          <span className="display text-lg">NextRole</span>
           <span className="eyebrow hidden sm:inline" style={{ color: dim }}>
             {t(locale, "nav.strap")}
           </span>

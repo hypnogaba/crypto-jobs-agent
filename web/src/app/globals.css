@@ -4,32 +4,34 @@
    визначає --font-mono вдруге, і хто переможе, залежить від порядку правил. */
 @theme inline {
   --font-sans: var(--nr-ui), ui-sans-serif, system-ui, sans-serif;
-  --font-serif: var(--nr-display), Georgia, serif;
   --font-mono: var(--nr-mono), ui-monospace, monospace;
 }
 
 /* ═══════════════════════════════════════════════════════════
-   NextRole — «табло відправлень на світанку»
+   NextRole — «міліметрівка»
    Продукт про час і рахунок: тонкі лінійки, табличні цифри,
-   точні колонки. Ніч угорі, ранок унизу.
+   точні колонки. Полотно біле й розкреслене, як аркуш, на якому
+   ведуть облік. Один теплий акцент — і більше нічого кольорового.
    ═══════════════════════════════════════════════════════════ */
 
 :root {
-  /* Ранок: холодний папір */
-  --paper:      #edf0f2;
+  /* Папір */
+  --paper:      #fbfbfa;
   --surface:    #ffffff;
-  --surface-2:  #f5f7f8;
-  --ink:        #0d1620;
-  --ink-2:      #3b4855;
-  --muted:      #6b7986;
-  --rule:       #d7dee4;
-  --rule-2:     #bcc7d0;
+  --surface-2:  #f4f4f2;
+  --ink:        #202123;
+  --ink-2:      #3f4348;
+  --muted:      #565b60;
+  --faint:      #969b9f;
+  --rule:       rgb(32 33 35 / 10%);
+  --rule-2:     rgb(32 33 35 / 16%);
 
-  /* Ніч: смуга, що лишається темною в обох темах */
-  --night:      #0d1b26;
-  --night-ink:  #e8eef3;
-  --night-2:    #93a5b3;
-  --night-rule: #1e2f3d;
+  /* Розкреслення полотна. Дві шкали: велика клітинка і дрібна. */
+  --grid:       rgb(32 33 35 / 7%);
+  --grid-fine:  rgb(32 33 35 / 3.5%);
+  /* Змив: хвиля-скан по герою і підсвітка найсвіжішого рядка стрічки. */
+  --wash:       rgb(32 33 35 / 3.5%);
+  --wash-2:     rgb(32 33 35 / 6%);
 
   /* Один теплий акцент. Використовується скупо. */
   --ember:      #b34a1e;
@@ -40,24 +42,29 @@
   --warn: #8a6011;  --warn-soft: #f8efdc;
   --bad:  #a33c37;  --bad-soft:  #f9e8e6;
 
-  --shadow: 0 1px 2px rgb(13 22 32 / 4%), 0 12px 32px -20px rgb(13 22 32 / 22%);
+  --shadow: 0 1px 2px rgb(32 33 35 / 4%), 0 12px 32px -20px rgb(32 33 35 / 18%);
+
+  /* Радіуси. Дві сходинки: панель і контрол. Композер має власний. */
+  --r-card:    12px;
+  --r-control:  6px;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --paper:     #0a1219;
-    --surface:   #101a23;
-    --surface-2: #16222c;
-    --ink:       #e4ebf1;
-    --ink-2:     #afbdc8;
-    --muted:     #77868f;
-    --rule:      #1c2833;
-    --rule-2:    #2a3947;
+    --paper:     #09090b;
+    --surface:   #0f0f11;
+    --surface-2: #16161a;
+    --ink:       #fafafa;
+    --ink-2:     #d4d4d8;
+    --muted:     #a1a1aa;
+    --faint:     #71717a;
+    --rule:      rgb(255 255 255 / 8%);
+    --rule-2:    rgb(255 255 255 / 14%);
 
-    --night:      #060d12;
-    --night-ink:  #e4ebf1;
-    --night-2:    #8697a4;
-    --night-rule: #17242f;
+    --grid:      rgb(255 255 255 / 5.8%);
+    --grid-fine: rgb(255 255 255 / 2.4%);
+    --wash:      rgb(255 255 255 / 3.5%);
+    --wash-2:    rgb(255 255 255 / 7%);
 
     --ember:      #e58650;
     --ember-soft: #2a1710;
@@ -72,10 +79,11 @@
 }
 
 :root[data-theme="dark"] {
-  --paper: #0a1219; --surface: #101a23; --surface-2: #16222c;
-  --ink: #e4ebf1; --ink-2: #afbdc8; --muted: #77868f;
-  --rule: #1c2833; --rule-2: #2a3947;
-  --night: #060d12; --night-ink: #e4ebf1; --night-2: #8697a4; --night-rule: #17242f;
+  --paper: #09090b; --surface: #0f0f11; --surface-2: #16161a;
+  --ink: #fafafa; --ink-2: #d4d4d8; --muted: #a1a1aa; --faint: #71717a;
+  --rule: rgb(255 255 255 / 8%); --rule-2: rgb(255 255 255 / 14%);
+  --grid: rgb(255 255 255 / 5.8%); --grid-fine: rgb(255 255 255 / 2.4%);
+  --wash: rgb(255 255 255 / 3.5%); --wash-2: rgb(255 255 255 / 7%);
   --ember: #e58650; --ember-soft: #2a1710; --ember-ink: #120a06;
   --ok: #4cbb94; --ok-soft: #10241d; --warn: #d3a047; --warn-soft: #251d0d;
   --bad: #e0776f; --bad-soft: #2a1513;
@@ -93,15 +101,17 @@ body {
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
-
 /* ── Типографіка ─────────────────────────────────────────── */
 .display {
-  font-family: var(--nr-display), Georgia, serif;
-  font-weight: 400;
-  letter-spacing: -0.02em;
+  font-family: var(--nr-ui), ui-sans-serif, system-ui, sans-serif;
+  font-weight: 560;
+  letter-spacing: -0.035em;
   line-height: 1.04;
   text-wrap: balance;
 }
+/* На великому кеглі трекінг має бути тіснішим, ніж на малому, інакше
+   заголовок героя розсипається на окремі слова. */
+.display-xl { letter-spacing: -0.042em; }
 .mono {
   font-family: var(--nr-mono), ui-monospace, monospace;
   font-variant-numeric: tabular-nums;
@@ -116,29 +126,12 @@ body {
 }
 .lede { color: var(--ink-2); font-size: 1.06rem; line-height: 1.6; max-width: 62ch; }
 
-/* ── Нічна смуга: лишається темною в обох темах ──────────── */
-.night {
-  background: var(--night);
-  color: var(--night-ink);
-  position: relative;
-  overflow: hidden;
-}
-/* Ледь помітне світло на горизонті — перший промінь */
-.night::after {
-  content: "";
-  position: absolute; inset: auto 0 -60% 0; height: 120%;
-  background: radial-gradient(60% 60% at 50% 100%, rgb(179 74 30 / 20%), transparent 70%);
-  pointer-events: none;
-}
-.night .eyebrow, .night .muted-on-night { color: var(--night-2); }
-
 /* ── Поверхні ─────────────────────────────────────────────── */
 .card {
   background: var(--surface);
   border: 1px solid var(--rule);
-  border-radius: 4px;                /* майже прямий кут: інструмент, не іграшка */
+  border-radius: var(--r-card);      /* м'якше, ніж було: на білому гострий кут сухий */
 }
-.card-raised { box-shadow: var(--shadow); }
 
 /* Лінійки як у розкладі: гострі, тонкі, без заокруглень */
 .ruled > * + * { border-top: 1px solid var(--rule); }
@@ -149,7 +142,7 @@ body {
   background: var(--surface);
   color: var(--ink);
   border: 1px solid var(--rule-2);
-  border-radius: 3px;
+  border-radius: var(--r-control);
   padding: 0.7rem 0.9rem;
   font: inherit;
   transition: border-color .15s ease, box-shadow .15s ease;
@@ -160,17 +153,12 @@ body {
   border-color: var(--ember);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--ember) 18%, transparent);
 }
-.field-night {
-  background: transparent; color: var(--night-ink);
-  border-color: var(--night-rule);
-}
-.field-night::placeholder { color: var(--night-2); }
 
 /* ── Кнопки ───────────────────────────────────────────────── */
 .btn {
   display: inline-flex; align-items: center; gap: .5rem;
   background: var(--ember); color: var(--ember-ink);
-  border: 1px solid var(--ember); border-radius: 3px;
+  border: 1px solid var(--ember); border-radius: var(--r-control);
   padding: 0.7rem 1.3rem; font-weight: 500; font-size: 0.95rem;
   cursor: pointer; transition: transform .12s ease, filter .15s ease;
 }
@@ -210,7 +198,7 @@ body {
   display: inline-block;
   font-family: var(--nr-mono), monospace;
   font-size: .68rem; letter-spacing: .04em;
-  padding: .18rem .5rem; border-radius: 2px; white-space: nowrap;
+  padding: .18rem .5rem; border-radius: 3px; white-space: nowrap;
 }
 .tag-ok   { background: var(--ok-soft);   color: var(--ok); }
 .tag-warn { background: var(--warn-soft); color: var(--warn); }
@@ -235,11 +223,73 @@ body {
 .board .num { text-align: right; font-family: var(--nr-mono), monospace; font-variant-numeric: tabular-nums; }
 
 /* ── Стрічка годин ────────────────────────────────────────── */
-.clockstrip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--rule); border: 1px solid var(--rule); }
+.clockstrip {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px;
+  background: var(--rule); border: 1px solid var(--rule);
+  border-radius: var(--r-card); overflow: hidden;
+}
 .clockstrip > div { background: var(--surface); padding: 1.1rem 1.2rem; }
 .clockstrip .hour {
   font-family: var(--nr-mono), monospace; font-size: 1.5rem;
   color: var(--ember); letter-spacing: -.02em; font-variant-numeric: tabular-nums;
+}
+
+/* ── Полотно ──────────────────────────────────────────────────
+   Розкреслений аркуш під усім вмістом. Псевдоелемент, а не div:
+   так він існує рівно один раз на кожному маршруті, включно з
+   404 і сторінкою помилки, і його неможливо забути в новій сторінці.
+
+   z-index: -1, а не 0. У body немає власного контексту накладання,
+   а його фон малюється на канві сторінки, тож сітка лягає над
+   папером і під усім текстом — і сторінкам не потрібен `relative
+   z-10` на <main>. Це важливо: у /admin, /404 і error.tsx його немає.
+
+   УВАГА: не задавати background на html. Тоді фон body перестане
+   переходити на канву, намалюється поверх сітки, і вона зникне. */
+body::before {
+  content: "";
+  position: fixed; inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px),
+    linear-gradient(var(--grid-fine) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-fine) 1px, transparent 1px);
+  background-size: 72px 72px, 72px 72px, 12px 12px, 12px 12px;
+  -webkit-mask-image: linear-gradient(rgb(0 0 0 / 92%) 0%, rgb(0 0 0 / 62%) 42%,
+                                      rgb(0 0 0 / 18%) 72%, transparent 92%);
+  mask-image: linear-gradient(rgb(0 0 0 / 92%) 0%, rgb(0 0 0 / 62%) 42%,
+                              rgb(0 0 0 / 18%) 72%, transparent 92%);
+  animation: grid-breathe 18s ease-in-out infinite;
+}
+@keyframes grid-breathe { 0%, 100% { opacity: 1 } 50% { opacity: .64 } }
+
+/* Повільна хвиля світла по героях. На всю ширину вікна, а не колонки:
+   обмежена контентом, вона в темній темі малює видимий прямокутник. */
+.scanfield { position: relative; overflow: hidden; }
+.scanfield > * { position: relative; }
+.scanfield::after {
+  content: "";
+  position: absolute; left: 0; right: 0; height: 46%;
+  z-index: 0; pointer-events: none;
+  background: linear-gradient(transparent 0%, var(--wash) 48%, transparent 100%);
+  animation: hero-scan 16s linear infinite;
+}
+@keyframes hero-scan {
+  from { transform: translateY(-100%) }
+  to   { transform: translateY(320%) }
+}
+
+/* ── Шапка ────────────────────────────────────────────────────
+   Липка й напівпрозора: сітка під нею лишається нерухомою, бо вона
+   fixed, а шапка sticky — саме звідси береться відчуття скла. */
+.topbar {
+  position: sticky; top: 0; z-index: 20;
+  background: color-mix(in srgb, var(--paper) 82%, transparent);
+  -webkit-backdrop-filter: saturate(1.4) blur(10px);
+  backdrop-filter: saturate(1.4) blur(10px);
+  border-bottom: 1px solid var(--rule);
 }
 
 /* ── Поява при завантаженні: одна оркестрована хвиля ─────── */
@@ -251,6 +301,9 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .rise { animation: none; }
+  body::before, .feed li, .live-dot { animation: none !important; }
+  .scanfield::after { display: none; }
+  .feed-scroll { animation: none !important; }
   * { transition: none !important; }
 }
 
@@ -260,8 +313,8 @@ body {
    одна кнопка, решта тихо під ним. Радіус більший, ніж деінде в
    системі, — це єдине місце, де хочеться писати, а не заповнювати. */
 .composer {
-  background: color-mix(in srgb, var(--night-ink) 6%, transparent);
-  border: 1px solid var(--night-rule);
+  background: var(--surface);
+  border: 1px solid var(--rule-2);
   border-radius: 14px;
   padding: 0.9rem 1rem 0.65rem;
   transition: border-color .15s ease, box-shadow .15s ease;
@@ -272,21 +325,21 @@ body {
 }
 .composer textarea {
   width: 100%; background: transparent; border: 0; outline: none;
-  color: var(--night-ink); font: inherit; font-size: 1.05rem;
+  color: var(--ink); font: inherit; font-size: 1.05rem;
   line-height: 1.55; resize: none; min-height: 3.4rem;
 }
-.composer textarea::placeholder { color: var(--night-2); }
+.composer textarea::placeholder { color: var(--faint); }
 
 .composer-bar { display: flex; align-items: center; gap: .7rem; margin-top: .55rem; }
 
 .icon-btn {
   display: inline-flex; align-items: center; justify-content: center;
   width: 2.15rem; height: 2.15rem; border-radius: 999px;
-  border: 1px solid var(--night-rule); background: transparent;
-  color: var(--night-2); cursor: pointer; flex: none;
+  border: 1px solid var(--rule-2); background: transparent;
+  color: var(--muted); cursor: pointer; flex: none;
   transition: color .15s ease, border-color .15s ease, filter .15s ease;
 }
-.icon-btn:hover { color: var(--night-ink); border-color: var(--ember); }
+.icon-btn:hover { color: var(--ink); border-color: var(--ember); }
 .icon-btn:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; }
 .icon-send {
   margin-left: auto;
@@ -294,28 +347,113 @@ body {
 }
 .icon-send:hover { color: var(--ember-ink); filter: brightness(1.09); }
 
-/* ── Компоненти всередині нічної смуги ────────────────────────
-   Вхідний потік — головна, чотири питання, підключення Telegram — весь
-   темний: людина приходить уночі й лишається в ній, доки не налаштується.
-   Кабінет далі світлий: там уже ранок. Щоб сторінка переїжджала в ніч
-   одним прапорцем, компоненти беруть нічні токени самі, за контекстом,
-   а не через окремий клас на кожному виклику. */
-.night .card { background: color-mix(in srgb, var(--night-ink) 4%, transparent); border-color: var(--night-rule); }
-.night .ruled > * + * { border-top-color: var(--night-rule); }
+/* ── Жива стрічка ─────────────────────────────────────────────
+   Що бачить людина до реєстрації: справжні вакансії, які скан
+   знайшов за останні три доби. Рядки з'являються по черзі —
+   так виглядає прибуття, а не готовий список.
 
-.night .field { background: transparent; color: var(--night-ink); border-color: var(--night-rule); }
-.night .field::placeholder { color: var(--night-2); }
-.night select.field option { color: var(--ink); background: var(--surface); }
+   Чесність: сторінка ISR на 900 с, тож це «оновлюється щочверть
+   години», а не потік. Тому — жодних відносних міток часу
+   («4 хв тому»): вони запеклися б у кеш і почали брехати. */
+.feed {
+  list-style: none; margin: 0; padding: 0;
+  /* Згасає лише низ. Верх не чіпаємо: там найсвіжіший рядок, і ховати
+     його заради симетрії — міняти сенс на візерунок. */
+  -webkit-mask-image: linear-gradient(#000 0%, #000 76%, transparent 100%);
+  mask-image: linear-gradient(#000 0%, #000 76%, transparent 100%);
+}
+/* Два рядки, а не один: компанія й посада в колонку 340px одним рядком
+   перетворюються на суцільні три крапки. Локація — тихим другим рядком. */
+.feed li {
+  padding: .3rem .55rem .35rem;
+  font-family: var(--nr-mono), ui-monospace, monospace;
+  font-size: 12.5px; line-height: 1.45;
+  color: var(--ink-2);
+  border-radius: var(--r-control);
+  animation: feed-in .5s cubic-bezier(.22,.8,.3,1) both;
+  animation-delay: calc(var(--i) * 55ms);
+}
+.feed li + li { margin-top: 1px; }
+.feed li:first-child { background: var(--wash-2); }
+.feed .row { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.feed .co  { color: var(--ink); }
+.feed .sep { color: var(--faint); }
+.feed .loc { display: block; color: var(--faint); font-size: 11px; letter-spacing: .01em;
+             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@keyframes feed-in { from { opacity: 0; transform: translateY(-6px) } to { opacity: 1; transform: none } }
 
-.night .chip { border-color: var(--night-rule); color: var(--night-2); }
-.night .chip:hover { border-color: var(--ember); color: var(--night-ink); }
-.night .chip:has(input:checked) {
-  border-color: var(--ember); color: var(--night-ink);
-  background: color-mix(in srgb, var(--ember) 20%, transparent);
+.live-dot {
+  display: inline-block; width: .4rem; height: .4rem; flex: none;
+  border-radius: 999px; background: var(--ember);
+  animation: live-pulse 1.7s ease-in-out infinite;
+}
+.live-dot-still { animation: none; background: var(--faint); }
+@keyframes live-pulse {
+  0%, 100% { opacity: 1;   transform: scale(1) }
+  50%      { opacity: .3;  transform: scale(.75) }
 }
 
-.night .link { color: var(--night-ink); }
-.night .link:hover { color: var(--ember); }
-.night .lede { color: var(--night-2); }
-.night .btn-quiet { color: var(--night-2); border-color: var(--night-rule); }
-.night .btn-quiet:hover { color: var(--night-ink); border-color: var(--ember); }
+/* ── Макет Telegram ───────────────────────────────────────────
+   Сайт обіцяє доставку в месенджер, тож мусить її показати.
+   Верстка, а не скріншот: перекладається на чотири мови, чітка
+   на retina, живе в обох темах і не важить нічого.
+
+   Формат дослівно повторює formatDigest() зі сканера. Роздільник
+   у справжньому повідомленні — двадцять символів ━ окремим рядком;
+   тут це border, бо двадцять ━ переносяться непередбачувано. */
+.tgmock {
+  border: 1px solid var(--rule); border-radius: 30px;
+  background: var(--surface); padding: 9px;
+  max-width: 380px;
+}
+/* Екран мусить бути помітно темнішим за бабл, інакше три майже однакові
+   білі шари не читаються як чат. */
+.tgmock-screen {
+  border-radius: 22px; overflow: hidden;
+  background: color-mix(in srgb, var(--ink) 6%, var(--paper));
+}
+.tgmock-bar {
+  display: flex; align-items: center; gap: .6rem;
+  padding: .7rem .9rem; border-bottom: 1px solid var(--rule);
+  background: var(--surface);
+}
+.tgmock-avatar {
+  width: 1.9rem; height: 1.9rem; border-radius: 999px; flex: none;
+  background: var(--ember); color: var(--ember-ink);
+  display: grid; place-items: center;
+  font-family: var(--nr-mono), monospace; font-size: .62rem; letter-spacing: .04em;
+}
+.tgmock-name { font-weight: 550; font-size: .88rem; line-height: 1.2; }
+.tgmock-handle { font-family: var(--nr-mono), monospace; font-size: .66rem; color: var(--faint); }
+.tgmock-body { padding: .9rem .8rem 1rem; }
+.tgmock-bubble {
+  background: var(--surface); border: 1px solid var(--rule);
+  border-radius: 14px 14px 14px 4px;
+  padding: .8rem .9rem; font-size: .82rem; line-height: 1.5;
+}
+.tgmock-rule { border: 0; border-top: 1px dashed var(--rule); margin: .75rem 0; }
+.tgmock-jobline { color: var(--ink); }
+.tgmock-jobline b { font-weight: 560; }
+.tgmock-meta { color: var(--muted); font-size: .76rem; margin-top: .15rem; }
+.tgmock-why { margin-top: .5rem; color: var(--ink-2); font-size: .78rem; }
+.tgmock-why i { color: var(--faint); }
+.tgmock-url {
+  margin-top: .5rem; font-family: var(--nr-mono), monospace; font-size: .68rem;
+  color: var(--ok); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tgmock-more { color: var(--faint); font-size: .78rem; }
+.tgmock-scanned { color: var(--muted); font-size: .74rem; margin-top: .35rem; }
+.tgmock-keys {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 1px;
+  margin-top: .5rem; background: var(--rule);
+  border: 1px solid var(--rule); border-radius: 10px; overflow: hidden;
+}
+.tgmock-keys span {
+  background: var(--surface); text-align: center;
+  padding: .5rem; font-size: .76rem; color: var(--ok);
+}
+.tgmock-stamp {
+  display: flex; align-items: center; justify-content: flex-end; gap: .3rem;
+  margin-top: .45rem;
+  font-family: var(--nr-mono), monospace; font-size: .64rem; color: var(--faint);
+}

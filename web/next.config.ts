@@ -1,4 +1,10 @@
 import type { NextConfig } from "next";
+import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
+
+// Без цього getCloudflareContext() кидає в `next dev`, і кожна сторінка, що
+// торкається D1 або env, віддає 500 локально — / і /login зокрема. У проді
+// це no-op: прив'язки там дає сам Worker.
+initOpenNextCloudflareForDev();
 
 const nextConfig: NextConfig = {
   // Shared hosting reports 32 CPUs but the account's LVE resource

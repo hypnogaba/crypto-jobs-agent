@@ -48,7 +48,7 @@ export default async function Onboarding() {
   const industries = new Set(pre.industries as string[]);
 
   return (
-    <Shell locale={locale} night eyebrow="02 / 02" title={t(locale, "onboarding.title")} lede={t(locale, "onboarding.lede")}>
+    <Shell locale={locale} eyebrow="02 / 02" title={t(locale, "onboarding.title")} lede={t(locale, "onboarding.lede")}>
       <form action={saveProfile}>
         <div className="ruled card">
           <Question n={1} title={t(locale, "onboarding.spheres")}>

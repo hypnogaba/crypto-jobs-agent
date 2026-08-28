@@ -16,15 +16,15 @@ export default async function Login() {
   const bot = env.TELEGRAM_BOT_USERNAME ?? "mynextrole_bot";
 
   return (
-    <Shell locale={locale} night center title={t(locale, "auth.login")} lede={t(locale, "auth.viaBotLede")}>
+    <Shell locale={locale} center title={t(locale, "auth.login")} lede={t(locale, "auth.viaBotLede")}>
       <div className="card px-7 py-7">
-        <p className="text-sm" style={{ color: "var(--night-2)" }}>{t(locale, "auth.viaBotStep")}</p>
+        <p className="text-sm" style={{ color: "var(--muted)" }}>{t(locale, "auth.viaBotStep")}</p>
         <a href={`https://t.me/${bot}?start=site`} className="btn mt-6">{t(locale, "auth.openBot")}</a>
-        <p className="mono mt-5 text-xs" style={{ color: "var(--night-2)" }}>@{bot} · /site</p>
+        <p className="mono mt-5 text-xs" style={{ color: "var(--muted)" }}>@{bot} · /site</p>
       </div>
-      <p className="mt-6 text-sm" style={{ color: "var(--night-2)" }}>
+      <p className="mt-6 text-sm" style={{ color: "var(--muted)" }}>
         {t(locale, "auth.newHere")}{" "}
-        <Link href="/" className="link" style={{ color: "var(--night-ink)" }}>
+        <Link href="/" className="link">
           {t(locale, "auth.startHere")}
         </Link>
       </p>

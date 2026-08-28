@@ -1,18 +1,15 @@
 import type { Metadata } from "next";
 import { cookies, headers } from "next/headers";
 import { isLocale, localeFromHeader } from "@/lib/i18n";
-import { Spectral, Commissioner, JetBrains_Mono } from "next/font/google";
+import { Inter_Tight, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
 // Кирилиця обов'язкова: інтерфейс має чотири мови, дві з них кириличні.
-const display = Spectral({
-  subsets: ["latin", "latin-ext", "cyrillic"],
-  weight: ["300", "400", "600"],
-  variable: "--nr-display",
-  display: "swap",
-});
-
-const ui = Commissioner({
+//
+// Одна родина на все — заголовки й інтерфейс. Вага не задана навмисно: без неї
+// береться змінна вісь wght 100–900, і заголовок може стояти на 560, між
+// regular і medium. Спискові ваги (як було в Spectral) такого не дають.
+const ui = Inter_Tight({
   subsets: ["latin", "latin-ext", "cyrillic"],
   variable: "--nr-ui",
   display: "swap",
@@ -67,7 +64,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 
   return (
     <html lang={lang} data-theme={theme}
-          className={`${display.variable} ${ui.variable} ${mono.variable}`}>
+          className={`${ui.variable} ${mono.variable}`}>
       <body className="flex min-h-screen flex-col">{children}</body>
     </html>
   );
