@@ -92,6 +92,11 @@
 
 * { box-sizing: border-box; }
 
+/* Страховка від горизонтального скролу: жоден блок не має права розтягнути
+   сторінку ширше за екран. clip, а не hidden — не створює контекст прокрутки,
+   тож sticky-шапка працює як і раніше. */
+html { overflow-x: clip; }
+
 body {
   background: var(--paper);
   color: var(--ink);
@@ -510,6 +515,39 @@ body::before {
    Наведення має підказувати «тут можна натиснути», а не влаштовувати шоу. */
 .topbar a, .topbar button { transition: color .14s ease, opacity .14s ease; }
 .topbar a:hover, .topbar button:hover { color: var(--ember); opacity: 1; }
+
+/* Вибір мови й теми. Стан живе в data-атрибуті, а не в inline-стилі: inline
+   виграє в будь-якого правила таблиці, тому попередній .topbar button:hover
+   з opacity:1 не спрацьовував жодного разу — наведення на «EN» не робило
+   нічого. Обраний варіант — ember, наведений — повний контраст без ember,
+   інакше наведення й вибір виглядали б однаково. */
+.topbar .pick { opacity: .45; cursor: pointer; }
+.topbar .pick:hover,
+.topbar .pick:focus-visible { opacity: 1; color: var(--ink); }
+.topbar .pick[data-on="true"] { opacity: 1; color: var(--ember); }
+
+/* ── Панель власника ──────────────────────────────────────────
+   Смуга «потребує рішення». Одна на сторінку й тільки коли є що
+   вирішувати: якщо вона висить завжди, її перестають читати. */
+.alert {
+  border: 1px solid var(--rule-2);
+  border-left: 3px solid var(--ember);
+  border-radius: var(--r-card);
+  background: var(--ember-soft);
+  padding: 1rem 1.25rem;
+}
+
+/* Стовпчики зростання. Один ряд, одна величина, один колір — питання
+   «більшає чи ні» не потребує ні осей, ні легенди. Число дня показує
+   рідний підказник браузера, тому JS тут не потрібен. */
+.spark { display: flex; align-items: flex-end; gap: 2px; height: 3rem; }
+.spark-bar {
+  flex: 1; min-width: 2px;
+  background: var(--ember); opacity: .75;
+  border-radius: 2px 2px 0 0;
+  transition: opacity .14s ease;
+}
+.spark-bar:hover { opacity: 1; }
 
 /* Крок у списку «як це працює». Піднімається ледь-ледь: помітно, що блок
    живий, але сусіди не рушать з місця. */

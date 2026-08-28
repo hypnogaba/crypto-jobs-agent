@@ -7,8 +7,29 @@ describe("порядок питань", () => {
   it("веде від сфер до зарплати й зупиняється", () => {
     expect(STEPS[0]).toBe("spheres");
     expect(nextStep("spheres")).toBe("industries");
-    expect(nextStep("where")).toBe("salary");
     expect(nextStep("salary")).toBeNull();
+  });
+
+  // Місто питається лише в того, кому воно щось означає. Саме звідси
+  // береться країна для ботових акаунтів: Telegram поясу не надсилає.
+  it("питає місто в того, хто готовий не тільки віддалено", () => {
+    expect(nextStep("where", { ...emptyDraft(), remoteMode: "remote_or_city" })).toBe("city");
+    expect(nextStep("where", { ...emptyDraft(), remoteMode: "relocate" })).toBe("city");
+  });
+
+  it("не питає міста в того, хто хоче лише віддалено", () => {
+    expect(nextStep("where", { ...emptyDraft(), remoteMode: "remote_only" })).toBe("salary");
+  });
+
+  // Хто вже написав місце своїми словами на попередньому кроці, не має
+  // відповідати на те саме вдруге.
+  it("не питає міста двічі", () => {
+    expect(nextStep("where", { ...emptyDraft(), remoteMode: "relocate", location: "Берлін" })).toBe("salary");
+  });
+
+  it("без чернетки поводиться як раніше", () => {
+    expect(nextStep("where")).toBe("city");
+    expect(nextStep("city")).toBe("salary");
   });
 });
 

@@ -38,6 +38,8 @@ export interface Snapshot {
   totalJobs: number;
   staleJobs: number;
   duplicateRoles: number;
+  /** Країни, звідки є люди, але дошки немає. Так система сама просить нову. */
+  countriesWithoutBoard: Array<{ country: string; people: number }>;
 }
 
 /** Скільки поспіль порожніх сканів робить компанію непотрібною. */
@@ -105,7 +107,20 @@ export function review(s: Snapshot): Proposal[] {
     }
   }
 
-  // 5. Скільки кешу вже мертве.
+  // 5. Країна, з якої є люди, але дошки немає. Двісті дошок наперед — це
+  // 190 мертвих рядків; дошка має з'являтись тоді, коли з'являється людина.
+  // Виконати це кнопкою не можна — адресу стрічки мусить знайти людина.
+  for (const c of s.countriesWithoutBoard) {
+    out.push({
+      kind: "notice", target: `no_board:${c.country}`, severity: "medium",
+      title: `${c.country}: є люди, немає місцевої дошки`,
+      detail: "Ці люди бачать лише глобальні вакансії. Знайди національну дошку з RSS " +
+              "і додай її на цій же сторінці — коду це не потребує.",
+      evidence: `${c.people} ${c.people === 1 ? "людина" : "людей"} з країни ${c.country}`,
+    });
+  }
+
+  // 6. Скільки кешу вже мертве.
   if (s.totalJobs > 0 && s.staleJobs / s.totalJobs > 0.2) {
     out.push({
       kind: "notice", target: "stale_cache", severity: "medium",
@@ -116,7 +131,7 @@ export function review(s: Snapshot): Proposal[] {
     });
   }
 
-  // 6. Дублікати ролей під різними посиланнями.
+  // 7. Дублікати ролей під різними посиланнями.
   if (s.duplicateRoles > 50) {
     out.push({
       kind: "notice", target: "duplicate_roles", severity: "low",
@@ -167,6 +182,13 @@ async function collect(d1: D1Client): Promise<Snapshot> {
             SUM(CASE WHEN fetched_at < datetime('now','-3 day') THEN 1 ELSE 0 END) AS stale
        FROM jobs_cache`))[0] ?? { total: 0, stale: 0 };
 
+  const countriesWithoutBoard = await q<{ country: string; people: number }>(
+    `SELECT p.country, COUNT(*) AS people
+       FROM profiles p
+      WHERE p.country IS NOT NULL
+        AND p.country NOT IN (SELECT country FROM country_boards WHERE enabled=1)
+      GROUP BY p.country ORDER BY people DESC LIMIT 10`);
+
   const dup = (await q<{ n: number }>(
     `SELECT COUNT(*) AS n FROM (
        SELECT dedupe_key FROM jobs_cache GROUP BY dedupe_key HAVING COUNT(*) > 1)`))[0]?.n ?? 0;
@@ -174,6 +196,7 @@ async function collect(d1: D1Client): Promise<Snapshot> {
   return {
     brokenNeverWorked, deprecatedButAlive, dryCompanies, providerShare,
     totalJobs: counts.total, staleJobs: counts.stale ?? 0, duplicateRoles: dup,
+    countriesWithoutBoard,
   };
 }
 

@@ -1,4 +1,5 @@
 import { INDUSTRIES, SPHERES, type IndustryId, type RemoteModeId, type SeniorityId, type SphereId } from "./vocab";
+import { logUsage, readUsage } from "@/lib/usage";
 
 /**
  * Розбирає вільний текст або резюме в ТІ САМІ чотири поля, що й форма.
@@ -100,6 +101,8 @@ industries — з набору: ${INDUSTRIES.map((i) => i.id).join(", ")}
 seniority — junior | middle | senior | lead | null
 remoteMode — remote_only | remote_or_city | relocate`;
 
+const MODEL = "claude-opus-5";
+
 /** Уточнення моделлю. Якщо ключа немає або виклик впав — лишається локальний розбір. */
 export async function parseProfile(text: string, apiKey?: string | null): Promise<ParsedProfile> {
   const local = parseLocally(text);
@@ -114,14 +117,19 @@ export async function parseProfile(text: string, apiKey?: string | null): Promis
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        model: "claude-opus-5",
+        model: MODEL,
         max_tokens: 1024,
         system: SYSTEM,
         messages: [{ role: "user", content: text.slice(0, 12_000) }],
       }),
     });
-    if (!res.ok) return local;
+    if (!res.ok) {
+      await logUsage({ operation: "parse_profile", model: MODEL, inputTokens: 0, outputTokens: 0, ok: false });
+      return local;
+    }
     const data = (await res.json()) as { content?: Array<{ type: string; text?: string }> };
+    const { input, output } = readUsage(data);
+    await logUsage({ operation: "parse_profile", model: MODEL, inputTokens: input, outputTokens: output, ok: true });
     const raw = data.content?.find((b) => b.type === "text")?.text ?? "";
     const json = /\{[\s\S]*\}/.exec(raw)?.[0];
     if (!json) return local;

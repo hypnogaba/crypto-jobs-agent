@@ -234,3 +234,43 @@ export async function applyAllProposals(formData: FormData): Promise<void> {
   }
   revalidatePath("/admin");
 }
+
+// ── національні дошки ────────────────────────────────────────
+
+/**
+ * Додати дошку країни.
+ *
+ * Перевіряємо стрічку ПЕРЕД записом. Дошка, додана наосліп, живе в списку
+ * тижнями й мовчки нічого не дає — саме так у нас з'явилось півтори тисячі
+ * мертвих джерел. Тому адреса, яка не віддає жодного <item>, у базу не
+ * потрапляє взагалі.
+ */
+export async function addBoard(formData: FormData): Promise<void> {
+  await requireAdmin();
+  const country = String(formData.get("country") ?? "").trim().toUpperCase();
+  const label = String(formData.get("label") ?? "").trim();
+  const url = String(formData.get("url") ?? "").trim();
+  if (!/^[A-Z]{2}$/.test(country) || !label || !/^https?:\/\/\S+$/i.test(url)) return;
+
+  let items = 0;
+  try {
+    const res = await fetch(url, { headers: { Accept: "application/rss+xml, application/xml, text/xml" } });
+    if (res.ok) items = ((await res.text()).match(/<item[\s>]/g) ?? []).length;
+  } catch { /* нижче розберемось */ }
+  if (items === 0) return;
+
+  const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
+  await run(
+    `INSERT INTO country_boards (id,country,name,label,feed_url,kind)
+     VALUES (?,?,?,?,?,'rss') ON CONFLICT(name) DO NOTHING`,
+    crypto.randomUUID(), country, `board:${country.toLowerCase()}-${slug}`, label, url);
+  revalidatePath("/admin");
+}
+
+/** Вимкнути або ввімкнути дошку, не втрачаючи її адреси. */
+export async function toggleBoard(formData: FormData): Promise<void> {
+  await requireAdmin();
+  await run("UPDATE country_boards SET enabled = 1 - enabled WHERE id=?",
+    String(formData.get("id") ?? ""));
+  revalidatePath("/admin");
+}

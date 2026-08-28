@@ -26,6 +26,12 @@ export interface RawJob {
    * віддають текст разом зі списком — Ashby, Lever.
    */
   description?: string | null;
+  /**
+   * Кому цю вакансію показувати, ISO-3166 alpha-2. Порожнє означає «всім» і
+   * так виглядає майже весь кеш. Заповнене ставлять національні дошки: те, що
+   * опубліковано на DOU, адресоване Україні — навіть якщо офіс у Лісабоні.
+   */
+  country?: string | null;
 }
 
 export interface NormalizedJob extends RawJob {

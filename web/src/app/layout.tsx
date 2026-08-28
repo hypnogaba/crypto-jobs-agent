@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { cookies, headers } from "next/headers";
 import { isLocale, localeFromHeader } from "@/lib/i18n";
+import Analytics from "./analytics";
 import { Inter_Tight, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -40,6 +41,16 @@ export const metadata: Metadata = {
     siteName: "NextRole",
     title: TITLE,
     description: DESCRIPTION,
+    // Без картки посилання на продукт у Telegram виглядало як голий рядок
+    // тексту — а перший канал поширення тут саме Telegram. Картка
+    // збирається з тих самих величин, що й сайт: brand/og/gen.py.
+    images: [{ url: "/og.png", width: 1200, height: 630, alt: TITLE }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: TITLE,
+    description: DESCRIPTION,
+    images: ["/og.png"],
   },
 };
 
@@ -65,7 +76,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang={lang} data-theme={theme}
           className={`${ui.variable} ${mono.variable}`}>
-      <body className="flex min-h-screen flex-col">{children}</body>
+      <body className="flex min-h-screen flex-col">
+        {children}
+        <Analytics />
+      </body>
     </html>
   );
 }

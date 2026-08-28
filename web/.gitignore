@@ -44,3 +44,7 @@ next-env.d.ts
 
 # wrangler local state
 /.wrangler
+
+# Артефакти збірки для Cloudflare. Збираються локально перед кожним деплоєм,
+# у репозиторії лише шумлять: 1198 файлів, які ламають lint і кожен git status.
+/.open-next/

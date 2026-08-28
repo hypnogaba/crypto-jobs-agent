@@ -10,6 +10,7 @@ import { CvError, extractCvText } from "@/lib/cv";
 import { isLocale, localeFromHeader } from "@/lib/i18n";
 import { checkRate, recordFailure } from "@/lib/ratelimit";
 import type { Locale } from "@/lib/vocab";
+import { persistCountry } from "@/lib/profile-country";
 
 const DRAFT_COOKIE = "nr_draft";
 
@@ -112,10 +113,12 @@ async function persistProfile(
     isCv ? rawInput.slice(0, 20_000) : null,
     JSON.stringify(p.spheres), JSON.stringify(p.industries),
     p.seniority, p.remoteMode, p.location, p.salaryMin, p.salaryCurrency);
+  await persistCountry(userId, p.location);
 
   // Перша добірка поза розкладом. Умова NOT EXISTS принципова: без неї
   // кожне редагування профілю замовляло б позачергову доставку. Таблиця
   // й погодинний розгрібач уже існують (scanner/src/digest.ts).
+  // Країну ставимо ДО запиту: інакше перша ж добірка підбиралася б без неї.
   await run(
     `INSERT INTO delivery_requests (id,user_id)
      SELECT ?,? WHERE NOT EXISTS (SELECT 1 FROM sent WHERE user_id=?)

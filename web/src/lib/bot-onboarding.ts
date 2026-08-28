@@ -15,9 +15,9 @@ import {
   SPHERES, INDUSTRIES, SENIORITY, REMOTE_MODES, label, type Locale,
 } from "./vocab";
 
-export type Step = "spheres" | "industries" | "seniority" | "where" | "salary";
+export type Step = "spheres" | "industries" | "seniority" | "where" | "city" | "salary";
 
-export const STEPS: Step[] = ["spheres", "industries", "seniority", "where", "salary"];
+export const STEPS: Step[] = ["spheres", "industries", "seniority", "where", "city", "salary"];
 
 export interface Draft {
   spheres: string[];
@@ -30,6 +30,13 @@ export interface Draft {
   industries: string[];
   seniority: string | null;
   remoteMode: string | null;
+  /**
+   * Місто. Питається лише в того, хто готовий працювати не тільки віддалено:
+   * саме звідси береться країна для ботових акаунтів. Telegram часового поясу
+   * не надсилає, тож усі вони мають UTC — і без цього питання країни в них не
+   * буде ніколи, а отже й локальних вакансій.
+   */
+  location?: string | null;
   salaryMin: number | null;
   salaryCurrency: string | null;
 }
@@ -37,13 +44,28 @@ export interface Draft {
 export const emptyDraft = (): Draft => ({
   spheres: [], customRole: null, industries: [], customIndustry: null,
   customSeniority: null, customWhere: null, seniority: null,
-  remoteMode: null, salaryMin: null, salaryCurrency: null,
+  remoteMode: null, location: null, salaryMin: null, salaryCurrency: null,
 });
 
-/** Наступне питання, або null якщо це було останнє. */
-export function nextStep(step: Step): Step | null {
+/**
+ * Кому питання про місто не ставиться: тому, хто хоче лише віддалену роботу,
+ * і тому, хто вже назвав місце своїми словами на попередньому кроці.
+ */
+const skipsCity = (draft: Draft): boolean =>
+  draft.remoteMode === "remote_only" || Boolean(draft.location?.trim());
+
+/**
+ * Наступне питання, або null якщо це було останнє.
+ *
+ * Питання про місто умовне: тому, хто хоче лише віддалену роботу, воно
+ * нічого не додає, а зайве питання коштує більше, ніж дає.
+ */
+export function nextStep(step: Step, draft?: Draft): Step | null {
   const i = STEPS.indexOf(step);
-  return i === -1 || i === STEPS.length - 1 ? null : STEPS[i + 1]!;
+  if (i === -1 || i === STEPS.length - 1) return null;
+  const after = STEPS[i + 1]!;
+  if (after === "city" && draft && skipsCity(draft)) return nextStep(after, draft);
+  return after;
 }
 
 /** Перемикач для питань із кількома відповідями. */
@@ -81,6 +103,12 @@ const ASK: Record<Step, Phrase> = {
     uk: "4 з 4 · Де хочеш працювати?",
     fr: "4 sur 4 · Où voulez-vous travailler ?",
     ru: "4 из 4 · Где хочешь работать?",
+  },
+  city: {
+    en: "Which city?\nWrite it however you like — Berlin, Kyiv, Paris. It unlocks local job boards.",
+    uk: "Яке місто?\nНапиши як зручно — Берлін, Київ, Париж. Це відкриває місцеві дошки вакансій.",
+    fr: "Quelle ville ?\nÉcrivez-la comme vous voulez — Berlin, Kyiv, Paris. Cela débloque les sites d'emploi locaux.",
+    ru: "Какой город?\nНапиши как удобно — Берлин, Киев, Париж. Это открывает местные доски вакансий.",
   },
   salary: {
     en: "Last one · Salary floor, per year, before tax?\nA soft preference, not a hard filter — most postings show no range at all.",
@@ -198,6 +226,12 @@ export function keyboard(step: Step, draft: Draft, locale: Locale): Button[][] {
     return rows;
   }
 
+  // Місто — вільний текст: жодного списку міст світу тут бути не може.
+  // Єдина кнопка дозволяє не відповідати.
+  if (step === "city") {
+    return [[{ text: say(WORD.skip, locale), callback_data: "ob:city:__next" }]];
+  }
+
   if (step === "where") {
     for (const it of REMOTE_MODES) {
       rows.push([{ text: label(it, locale), callback_data: `ob:where:${it.id}` }]);
@@ -241,6 +275,7 @@ export function summary(draft: Draft, locale: Locale): string {
     both(draft.industries, INDUSTRIES, draft.customIndustry),
     draft.customSeniority ?? (level ? label(level, locale) : null),
     draft.customWhere ?? (where ? label(where, locale) : null),
+    draft.location ?? null,
     money,
   ].filter(Boolean).join(" · ");
 }
