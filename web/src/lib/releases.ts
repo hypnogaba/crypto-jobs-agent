@@ -11,7 +11,7 @@ export const RELEASES: Release[] = [
     "date": "2026-08-28",
     "changes": [
       {
-        "hash": "7d4ae96",
+        "hash": "6272baa",
         "subject": "Годинник на лендінгу читається за зростанням: 05, 06, 08, 09"
       },
       {
@@ -334,4 +334,4 @@ export const RELEASES: Release[] = [
   }
 ];
 
-export const GENERATED_AT = "2026-08-28 20:32";
+export const GENERATED_AT = "2026-08-28 20:42";
