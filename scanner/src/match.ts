@@ -35,6 +35,8 @@ export interface CandidateJob {
   postedAt: string | null;
   salaryMin: number | null;
   salaryCurrency: string | null;
+  /** Готовий витяг опису зі спільного кешу. Однаковий для всіх людей. */
+  summary?: string | null;
 }
 
 /**

@@ -22,3 +22,49 @@ describe("parseArgs", () => {
     expect(parseArgs(["--user"])).toEqual({ force: false, onlyUser: null });
   });
 });
+
+// ── Лінивий добір опису ───────────────────────────────────────
+import { fillMissingSummaries } from "./digest.js";
+import { vi, afterEach } from "vitest";
+
+afterEach(() => vi.restoreAllMocks());
+
+describe("fillMissingSummaries", () => {
+  it("не ходить у мережу, коли опис уже є", async () => {
+    const f = vi.spyOn(globalThis, "fetch");
+    const out = await fillMissingSummaries([
+      { id: "1", url: "https://boards.greenhouse.io/acme/jobs/7", company: "Acme", summary: "Already here." },
+    ]);
+    expect(f).not.toHaveBeenCalled();
+    expect(out.get("1")).toBe("Already here.");
+  });
+
+  it("довантажує Greenhouse поштучно і робить витяг", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({
+        content: "&lt;p&gt;You will own the ACATS transfer workflow across our partner ecosystem every day.&lt;/p&gt;",
+      }), { status: 200 }) as Response);
+    const out = await fillMissingSummaries([
+      { id: "1", url: "https://boards.greenhouse.io/acme/jobs/7", company: "Acme", summary: null },
+    ]);
+    expect(out.get("1")).toMatch(/^You will own the ACATS/);
+    expect(out.get("1")).not.toMatch(/[<>]/);
+  });
+
+  it("мовчки лишає порожньо, коли джерело впало", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("boom"));
+    const out = await fillMissingSummaries([
+      { id: "1", url: "https://boards.greenhouse.io/acme/jobs/7", company: "Acme", summary: null },
+    ]);
+    expect(out.get("1")).toBeUndefined();
+  });
+
+  it("не чіпає джерела, з яких поштучно не візьмеш", async () => {
+    const f = vi.spyOn(globalThis, "fetch");
+    const out = await fillMissingSummaries([
+      { id: "1", url: "https://jobs.ashbyhq.com/acme/uuid", company: "Acme", summary: null },
+    ]);
+    expect(f).not.toHaveBeenCalled();
+    expect(out.size).toBe(0);
+  });
+});

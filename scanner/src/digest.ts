@@ -8,6 +8,7 @@ import { loadConfig } from "./config.js";
 import { D1Client } from "./d1.js";
 import { explainWithClaude, pickTop, type CandidateJob, type Profile } from "./match.js";
 import { asLocale, intlOf, say, scanned as scannedLine, thin, type Locale } from "./digest-copy.js";
+import { summarize } from "./summary.js";
 
 const DIGEST_SIZE = 5;
 
@@ -36,8 +37,40 @@ function hourIn(timezone: string, now: Date): number {
   }
 }
 
+/**
+ * Опис для тих вакансій, у яких його ще немає.
+ *
+ * Ashby і Lever віддають текст разом зі списком, тому в них summary вже
+ * заповнений на скані. Greenhouse віддає його лише за ?content=true, що
+ * роздуває масовий скан у 21 раз — тому платимо поштучно і лише за ті
+ * ≤5 вакансій, які справді йдуть людині.
+ *
+ * Джерело впало — лишаємо порожньо. Картка просто буде без опису.
+ */
+export async function fillMissingSummaries(
+  jobs: Array<{ id: string; url: string; company: string; summary: string | null }>
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  for (const j of jobs) {
+    if (j.summary) { out.set(j.id, j.summary); continue; }
+
+    const gh = /^https?:\/\/(?:boards|job-boards)\.greenhouse\.io\/([^/]+)\/jobs\/(\d+)/.exec(j.url);
+    if (!gh) continue;
+    try {
+      const res = await fetch(
+        `https://boards-api.greenhouse.io/v1/boards/${gh[1]}/jobs/${gh[2]}`,
+        { signal: AbortSignal.timeout(15_000) });
+      if (!res.ok) continue;
+      const body = (await res.json()) as { content?: string };
+      const s = summarize(body.content, j.company);
+      if (s) out.set(j.id, s);
+    } catch { /* мовчки далі: опис не критичний */ }
+  }
+  return out;
+}
+
 function formatDigest(
-  jobs: Array<CandidateJob & { why: string }>,
+  jobs: Array<CandidateJob & { why: string; summary?: string | null }>,
   scanned: { jobs: number; companies: number },
   locale: Locale
 ): string {
@@ -62,7 +95,11 @@ function formatDigest(
     if (facts.length) lines.push(facts.join(" · "));
 
     lines.push("");
-    lines.push(`${say(locale, "why")}: ${j.why}`);
+    // Опис самої вакансії. Рядок «чому ти» був однаковий на всі п'ять
+    // позицій, бо будувався з профілю, а профіль один. Старі добірки
+    // опису не мають — для них лишається попередній рядок.
+    if (j.summary) lines.push(j.summary);
+    else lines.push(`${say(locale, "why")}: ${j.why}`);
     lines.push("");
     // Голе посилання окремим рядком: частина клієнтів Telegram ріже markdown-лінки
     lines.push(j.url);
@@ -167,14 +204,16 @@ async function main(): Promise<void> {
     if (pending.length > 0 && botToken && u.telegram_chat_id) {
       const digestId = pending[0]!.digest_id;
       const rows2 = await d1.query<{ company: string; title: string; location: string | null; remote: number;
-        url: string; why_fits: string; salary_min: number | null; salary_currency: string | null }>(
-        `SELECT j.company,j.title,j.location,j.remote,j.url,s.why_fits,j.salary_min,j.salary_currency
+        url: string; why_fits: string; salary_min: number | null; salary_currency: string | null;
+        summary: string | null }>(
+        `SELECT j.company,j.title,j.location,j.remote,j.url,s.why_fits,j.salary_min,j.salary_currency,j.summary
          FROM sent s JOIN jobs_cache j ON j.id=s.job_id
          WHERE s.user_id=? AND s.digest_id=?`, [u.id, digestId]);
       const retry = rows2.map((r) => ({
         id: "", companyKey: "", tags: [], postedAt: null,
         company: r.company, title: r.title, location: r.location, remote: r.remote === 1,
-        url: r.url, salaryMin: r.salary_min, salaryCurrency: r.salary_currency, why: r.why_fits }));
+        url: r.url, salaryMin: r.salary_min, salaryCurrency: r.salary_currency,
+        why: r.why_fits, summary: r.summary }));
       const loc = asLocale(u.locale);
       const ok = await sendTelegram(
         botToken, u.telegram_chat_id, formatDigest(retry, scanned, loc), digestId, loc);
@@ -203,6 +242,7 @@ async function main(): Promise<void> {
       id: string; company: string; company_key: string; title: string; location: string | null;
       remote: number; url: string; tags: string; posted_at: string | null;
       salary_min: number | null; salary_currency: string | null; dedupe_key: string | null;
+      summary: string | null;
     }>(
       // Вікно кандидатів. Чотири правила, кожне з реального прогону:
       //
@@ -240,6 +280,7 @@ async function main(): Promise<void> {
       id: r.id, company: r.company, companyKey: r.company_key, title: r.title,
       location: r.location, remote: r.remote === 1, url: r.url, tags: list(r.tags),
       postedAt: r.posted_at, salaryMin: r.salary_min, salaryCurrency: r.salary_currency,
+      summary: r.summary,
     }));
 
     const top = pickTop(candidates, profile, DIGEST_SIZE, now);
@@ -260,13 +301,27 @@ async function main(): Promise<void> {
 
     const why = await explainWithClaude(top, profile, cfg.anthropicApiKey);
     const digestId = crypto.randomUUID();
-    const withWhy = top.map((j, i) => ({ ...j, why: why[i]! }));
+
+    const summaries = await fillMissingSummaries(
+      top.map((j) => ({ id: j.id, url: j.url, company: j.company, summary: j.summary ?? null })));
+
+    // Знайдений опис повертаємо у спільний кеш: наступній людині ця сама
+    // вакансія дістанеться вже з описом і без зайвого запиту.
+    const fresh = [...summaries.entries()].filter(([id]) => !top.find((j) => j.id === id)?.summary);
+    if (fresh.length > 0) {
+      await d1.batch(fresh.map(([id, s]) => ({
+        sql: "UPDATE jobs_cache SET summary=?, summary_at=datetime('now') WHERE id=? AND summary IS NULL",
+        params: [s, id],
+      })));
+    }
+
+    const withWhy = top.map((j, i) => ({ ...j, why: why[i]!, summary: summaries.get(j.id) ?? j.summary ?? null }));
 
     await d1.batch(withWhy.map((j) => ({
-      sql: `INSERT INTO sent (id,user_id,job_id,digest_id,why_fits,status,sent_at,dedupe_key)
-            VALUES (?,?,?,?,?,?,?,?)
+      sql: `INSERT INTO sent (id,user_id,job_id,digest_id,why_fits,match_facts,status,sent_at,dedupe_key)
+            VALUES (?,?,?,?,?,?,?,?,?)
             ON CONFLICT(user_id,job_id) DO NOTHING`,
-      params: [crypto.randomUUID(), u.id, j.id, digestId, j.why,
+      params: [crypto.randomUUID(), u.id, j.id, digestId, j.why, JSON.stringify(j.facts),
                u.telegram_chat_id && botToken ? "sent" : "pending",
                u.telegram_chat_id && botToken ? now.toISOString() : null,
                dedupeById.get(j.id) ?? null],
