@@ -1,3 +1,4 @@
+import { summarize } from "./summary.js";
 import type { D1Client, D1Statement } from "./d1.js";
 import type { AtsProvider, Company, NormalizedJob, SourceStatus } from "./types.js";
 
@@ -20,20 +21,29 @@ export class Repo {
   // ── вакансії ───────────────────────────────────────────────
   async upsertJobs(jobs: NormalizedJob[]): Promise<void> {
     if (jobs.length === 0) return;
-    const statements: D1Statement[] = jobs.map((j) => ({
-      sql: `INSERT INTO jobs_cache
-              (id,url,company,company_key,title,location,remote,salary_min,salary_max,salary_currency,source,tags,dedupe_key,posted_at,fetched_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            ON CONFLICT(url) DO UPDATE SET
-              company=excluded.company, title=excluded.title, location=excluded.location,
-              remote=excluded.remote, source=excluded.source, tags=excluded.tags,
-              posted_at=excluded.posted_at, fetched_at=excluded.fetched_at`,
-      params: [
-        crypto.randomUUID(), j.url, j.company, j.companyKey, j.title, j.location,
-        j.remote ? 1 : 0, j.salaryMin ?? null, j.salaryMax ?? null, j.salaryCurrency ?? null,
-        j.source, JSON.stringify(j.tags), j.dedupeKey, j.postedAt, j.fetchedAt,
-      ],
-    }));
+    const statements: D1Statement[] = jobs.map((j) => {
+      // Сирий текст оголошення в базу не пишемо ніколи — лише витяг.
+      const summary = summarize(j.description, j.company);
+      return {
+        sql: `INSERT INTO jobs_cache
+                (id,url,company,company_key,title,location,remote,salary_min,salary_max,salary_currency,source,tags,dedupe_key,posted_at,fetched_at,summary,summary_at)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+              ON CONFLICT(url) DO UPDATE SET
+                company=excluded.company, title=excluded.title, location=excluded.location,
+                remote=excluded.remote, source=excluded.source, tags=excluded.tags,
+                posted_at=excluded.posted_at, fetched_at=excluded.fetched_at,
+                -- Наявний опис не затираємо порожнім: джерело могло цього
+                -- разу не віддати текст.
+                summary=COALESCE(excluded.summary, jobs_cache.summary),
+                summary_at=COALESCE(excluded.summary_at, jobs_cache.summary_at)`,
+        params: [
+          crypto.randomUUID(), j.url, j.company, j.companyKey, j.title, j.location,
+          j.remote ? 1 : 0, j.salaryMin ?? null, j.salaryMax ?? null, j.salaryCurrency ?? null,
+          j.source, JSON.stringify(j.tags), j.dedupeKey, j.postedAt, j.fetchedAt,
+          summary, summary ? j.fetchedAt : null,
+        ],
+      };
+    });
     await this.d1.batch(statements);
   }
 
