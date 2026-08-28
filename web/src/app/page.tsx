@@ -81,11 +81,14 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
     n, title: t(locale, `home.step${n}`), body: t(locale, `home.step${n}d`),
   }));
 
+  // Порядок — за годинником, і остання клітинка та, яку людина справді бачить.
+  // Сторож стоїть перед доставкою навмисно: його робота — дібрати вакансій,
+  // якщо день вийшов пісним, а після 09:00 добирати вже нема сенсу.
   const clock = [
     { hour: "05:00", title: t(locale, "home.scan"),    body: t(locale, "home.scand") },
     { hour: "06:00", title: t(locale, "home.match"),   body: t(locale, "home.matchd") },
-    { hour: "09:00", title: t(locale, "home.deliver"), body: t(locale, "home.deliverd") },
     { hour: "08:00", title: t(locale, "home.check"),   body: t(locale, "home.checkd") },
+    { hour: "09:00", title: t(locale, "home.deliver"), body: t(locale, "home.deliverd") },
   ];
 
   // Макет цитує справжні відкриті ролі з того самого запиту — жодних вигаданих.
