@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { slugify, harvestAtsFromJobs } from "./rungs.js";
+import { slugify, harvestAtsFromJobs, isAggregatorBrand } from "./rungs.js";
 import type { RawJob } from "./types.js";
 
 const j = (url: string, company = "Acme"): RawJob => ({
@@ -30,3 +30,23 @@ describe("harvestAtsFromJobs — 80% лінків Getro ведуть в ATS", ()
   });
 });
 
+
+describe("агрегатор — не роботодавець", () => {
+  it("впізнає бренди агрегаторів за назвою й за слагом", () => {
+    expect(isAggregatorBrand("Jobgether")).toBe(true);
+    expect(isAggregatorBrand("jobgether")).toBe(true);
+    expect(isAggregatorBrand("We Work Remotely")).toBe(true);
+    expect(isAggregatorBrand("Anthropic")).toBe(false);
+    expect(isAggregatorBrand("SpaceX")).toBe(false);
+  });
+
+  it("не бере агрегатор за компанію навіть із живого ATS-лінка", () => {
+    // Саме це й сталось: у Jobgether є справжня дошка на Lever, тож збір
+    // ATS-лінків узяв її за роботодавця, і одна «компанія» дала 1774 вакансії.
+    const found = harvestAtsFromJobs([
+      j("https://jobs.lever.co/jobgether/abc", "Jobgether"),
+      j("https://jobs.lever.co/finn/xyz", "FINN"),
+    ]);
+    expect(found.map((f) => f.slug)).toEqual(["finn"]);
+  });
+});

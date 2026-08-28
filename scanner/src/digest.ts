@@ -156,9 +156,24 @@ async function main(): Promise<void> {
       remote: number; url: string; tags: string; posted_at: string | null;
       salary_min: number | null; salary_currency: string | null;
     }>(
-      `SELECT j.* FROM jobs_cache j
-       WHERE j.id NOT IN (SELECT job_id FROM sent WHERE user_id = ?)
-       ORDER BY j.fetched_at DESC LIMIT 600`, [u.id]);
+      // Вікно кандидатів. Обидва правила з'явились після реального прогону:
+      //
+      // 1. Сортуємо за posted_at, а не fetched_at. Скан пише тисячі рядків за
+      //    одну хвилину, тож fetched_at у них однаковий — «найсвіжіші 600» це
+      //    не свіжість, а довільний зріз.
+      // 2. Не більше трьох вакансій на компанію. Без цього одна фірма з великою
+      //    дошкою забирає все вікно: lever:jobgether дав 582 рядки з 600, і
+      //    правило «одна роль на компанію» лишало від добірки одну вакансію.
+      `SELECT * FROM (
+         SELECT j.*, ROW_NUMBER() OVER (
+           PARTITION BY j.company_key ORDER BY j.posted_at DESC, j.fetched_at DESC
+         ) AS rn
+         FROM jobs_cache j
+         WHERE j.id NOT IN (SELECT job_id FROM sent WHERE user_id = ?)
+       )
+       WHERE rn <= 3
+       ORDER BY posted_at DESC, fetched_at DESC
+       LIMIT 1200`, [u.id]);
 
     const candidates: CandidateJob[] = rows.map((r) => ({
       id: r.id, company: r.company, companyKey: r.company_key, title: r.title,

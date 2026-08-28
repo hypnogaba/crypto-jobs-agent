@@ -78,6 +78,27 @@ export function slugify(name: string): string {
     .replace(/[^a-z0-9]+/g, "");
 }
 
+/**
+ * Бренди, які самі є агрегаторами.
+ *
+ * У багатьох із них є справжня дошка на Lever чи Greenhouse, тому і вгадування
+ * слага, і збір ATS-лінків радо беруть їх за роботодавця. Далі одна «компанія»
+ * заливає кеш: lever:jobgether дав 1774 вакансії — 10% усього кешу — і забрав
+ * 582 рядки з 600 у вікні добірки. Правило «одна роль на компанію» після цього
+ * чесно лишало від добірки одну вакансію.
+ */
+const AGGREGATOR_BRANDS = new Set([
+  "jobgether", "arbeitnow", "jobicy", "remoteok", "remotive", "himalayas",
+  "nodesk", "workingnomads", "weworkremotely", "jobspresso", "landingjobs",
+  "themuse", "cryptocurrencyjobs", "cryptojobslist", "web3career",
+  "builtin", "otta", "welcometothejungle", "wellfound", "angellist",
+]);
+
+/** Чи це агрегатор, а не роботодавець. Приймає і назву, і готовий слаг. */
+export function isAggregatorBrand(nameOrSlug: string): boolean {
+  return AGGREGATOR_BRANDS.has(slugify(nameOrSlug));
+}
+
 export interface R4Deps {
   addCompany: (c: { slug: string; name: string; provider: AtsProvider; atsSlug: string; discoveredVia: string }) => Promise<void>;
 }
@@ -96,6 +117,7 @@ export async function runR4(
     const slug = slugify(job.company);
     if (!slug || slug.length < 3 || seen.has(slug)) continue;
     if (knownKeys.has(slug) || knownKeys.has(key)) continue;
+    if (isAggregatorBrand(slug)) continue;
     seen.add(slug);
     candidates.push({ name: job.company, slug });
     if (candidates.length >= maxCandidates) break;
@@ -129,6 +151,7 @@ export function harvestAtsFromJobs(
   for (const j of jobs) {
     const hit = extractAts(j.url);
     if (!hit) continue;
+    if (isAggregatorBrand(hit.slug) || isAggregatorBrand(j.company)) continue;
     if (!out.has(hit.slug)) {
       // Ніша береться з даних самого джерела, не вгадується
       out.set(hit.slug, {
