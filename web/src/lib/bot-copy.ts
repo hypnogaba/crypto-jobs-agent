@@ -107,6 +107,12 @@ const P = {
     fr: "Bien reçu. Merci — c'est comme ça que ça s'améliore.",
     ru: "Принял. Спасибо — именно так оно и становится лучше.",
   },
+  siteLink: {
+    en: "One-time sign-in link, valid for 15 minutes:",
+    uk: "Разове посилання для входу, дійсне 15 хвилин:",
+    fr: "Lien de connexion à usage unique, valable 15 minutes :",
+    ru: "Разовая ссылка для входа, действует 15 минут:",
+  },
   unknown: {
     en: "I do not know that command. /help shows what I can do.",
     uk: "Не знаю такої команди. /help покаже, що я вмію.",

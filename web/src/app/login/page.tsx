@@ -19,7 +19,7 @@ export default async function Login() {
     <Shell locale={locale} night center title={t(locale, "auth.login")} lede={t(locale, "auth.viaBotLede")}>
       <div className="card px-7 py-7">
         <p className="text-sm" style={{ color: "var(--night-2)" }}>{t(locale, "auth.viaBotStep")}</p>
-        <a href={`https://t.me/${bot}`} className="btn mt-6">{t(locale, "auth.openBot")}</a>
+        <a href={`https://t.me/${bot}?start=site`} className="btn mt-6">{t(locale, "auth.openBot")}</a>
         <p className="mono mt-5 text-xs" style={{ color: "var(--night-2)" }}>@{bot} · /site</p>
       </div>
       <p className="mt-6 text-sm" style={{ color: "var(--night-2)" }}>

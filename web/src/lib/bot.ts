@@ -337,7 +337,7 @@ export async function handleCommand(
       await run("UPDATE users SET connect_token=?, connect_expires_at=? WHERE id=?",
         token, new Date(Date.now() + 15 * 60_000).toISOString(), user!.id);
       const base = env.SITE_URL ?? "https://nextrole.info";
-      await send(env, chatId, `Разове посилання для входу, дійсне 15 хвилин:\n${base}/enter?token=${token}`);
+      await send(env, chatId, `${say("siteLink", locale)}\n${base}/enter?token=${token}`);
       break;
     }
 

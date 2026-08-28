@@ -48,6 +48,14 @@ export async function POST(request: Request): Promise<Response> {
 
   // ── /start із токеном: прив'язка акаунту, створеного на сайті ──
   const startToken = /^\/start(?:@\w+)?\s+(\S+)$/.exec(text)?.[1];
+
+  // Глибоке посилання «увійти на сайт»: сторінка входу веде сюди, і одного
+  // дотику по Start досить. Без цього людині доводилось знати команду /site.
+  if (startToken === "site") {
+    await handleCommand(env, chatId, "/site", locale);
+    return NextResponse.json({ ok: true });
+  }
+
   if (startToken) {
     const user = await one<{ id: string; connect_expires_at: string | null }>(
       "SELECT id,connect_expires_at FROM users WHERE connect_token=?", startToken);
