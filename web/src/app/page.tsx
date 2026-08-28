@@ -98,10 +98,13 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
       {/* ══ ГЕРОЙ ══ Ліворуч — єдина дія. Праворуч — доказ, що є з чого обирати. */}
       <section className="scanfield">
         <div className="mx-auto grid w-full max-w-5xl gap-14 px-6 pb-24 pt-16 lg:grid-cols-[1fr_380px] lg:gap-12 sm:pt-24">
-          <div>
+          {/* min-w-0 на обох колонках обов'язковий: у стрічці рядки з nowrap,
+              і без нього grid-колонка росте до найдовшого з них — на телефоні
+              вся сторінка ставала ширшою за екран. */}
+          <div className="min-w-0">
             <p className="eyebrow rise rise-1">{t(locale, "tagline")}</p>
 
-            <h1 className="display display-xl rise rise-2 mt-6 text-5xl sm:text-7xl">
+            <h1 className="display display-xl rise rise-2 mt-6 text-4xl sm:text-6xl lg:text-7xl">
               {t(locale, "home.h1a")}
               <br />
               <span style={{ color: "var(--ember)" }}>{t(locale, "home.h1b")}</span>
@@ -151,7 +154,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
           {/* ── Жива стрічка ──────────────────────────────────────────────
               Не хвалько-лічильник, а вітрина: людина бачить, що саме лежить
               у кеші, ще до того, як щось про себе розповість. */}
-          <aside className="rise rise-5 card self-start px-5 py-5">
+          <aside className="rise rise-5 card min-w-0 self-start px-5 py-5">
             {stats && (
               <>
                 <p className="mono text-3xl" style={{ color: "var(--ink)" }}>{num(stats.jobs)}</p>
@@ -243,7 +246,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
         <p className="lede mt-5">{t(locale, "tg.lede")}</p>
 
         <div className="mt-12 grid items-start gap-12 lg:grid-cols-[380px_1fr]">
-          <div>
+          <div className="min-w-0">
             <div className="tgmock">
               <div className="tgmock-screen">
                 <div className="tgmock-bar">
@@ -309,7 +312,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
             </p>
           </div>
 
-          <div className="ruled card steplist">
+          <div className="ruled card steplist min-w-0">
             {[1, 2, 3].map((n) => (
               <div key={n} className="px-7 py-7">
                 <h3 className="font-medium">{t(locale, `tg.p${n}`)}</h3>

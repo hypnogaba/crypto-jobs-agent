@@ -92,6 +92,11 @@
 
 * { box-sizing: border-box; }
 
+/* Страховка від горизонтального скролу: жоден блок не має права розтягнути
+   сторінку ширше за екран. clip, а не hidden — не створює контекст прокрутки,
+   тож sticky-шапка працює як і раніше. */
+html { overflow-x: clip; }
+
 body {
   background: var(--paper);
   color: var(--ink);
