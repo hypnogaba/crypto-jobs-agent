@@ -73,6 +73,7 @@ const ATS_PATTERNS: Array<[string, RegExp]> = [
   ["breezy", /([a-z0-9_-]+)\.breezy\.hr/i],
   ["rippling", /ats\.rippling\.com\/([a-z0-9_-]+)/i],
   ["personio", /([a-z0-9_-]+)\.jobs\.personio\.(?:de|com)/i],
+  ["bamboohr", /([a-z0-9_-]+)\.bamboohr\.com\/careers/i],
 ];
 
 export function extractAts(url: string): { provider: string; slug: string } | null {

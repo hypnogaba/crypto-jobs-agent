@@ -127,6 +127,28 @@ export async function fetchWorkday(slug: string, name: string, o: FetchOptions =
 
 export type AtsFetcher = (slug: string, name: string, o?: FetchOptions) => Promise<RawJob[]>;
 
+// ── BambooHR ──────────────────────────────────────────────────
+// Публічний ендпоінт, ключа не потребує. Додано, щоб розбавити концентрацію:
+// Greenhouse і Ashby разом давали 67% усього кешу — зміна одного їхнього API
+// забирала б дві третини продукту за ніч.
+export async function fetchBambooHr(slug: string, name: string, o: FetchOptions = {}): Promise<RawJob[]> {
+  const p = await fetchJson<{ result?: Array<{ id: string; jobOpeningName: string;
+    location?: { city?: string; state?: string; country?: string };
+    isRemote?: boolean; departmentLabel?: string }> }>(
+    `https://${slug}.bamboohr.com/careers/list`, {}, o);
+  return (p.result ?? []).map((j) => {
+    const loc = [j.location?.city, j.location?.state, j.location?.country]
+      .filter(Boolean).join(", ") || null;
+    return {
+      url: `https://${slug}.bamboohr.com/careers/${j.id}`, company: name,
+      title: j.jobOpeningName, location: loc,
+      remote: j.isRemote === true || REMOTE.test(loc ?? ""),
+      // Дати відкриття вакансії цей ендпоінт не віддає взагалі.
+      postedAt: null, source: `bamboohr:${slug}`,
+    };
+  });
+}
+
 export const ATS: Record<AtsProvider, AtsFetcher> = {
   greenhouse: fetchGreenhouse,
   lever: fetchLever,
@@ -137,7 +159,9 @@ export const ATS: Record<AtsProvider, AtsFetcher> = {
   rippling: fetchRippling,
   personio: fetchPersonio,
   workday: fetchWorkday,
+  bamboohr: fetchBambooHr,
 };
 
 /** Порядок перевірки при вгадуванні: найпоширеніші попереду. */
-export const GUESS_ORDER: AtsProvider[] = ["greenhouse", "lever", "ashby", "workable", "smartrecruiters", "breezy"];
+export const GUESS_ORDER: AtsProvider[] =
+  ["greenhouse", "lever", "ashby", "workable", "smartrecruiters", "breezy", "bamboohr"];

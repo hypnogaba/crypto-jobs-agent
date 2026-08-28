@@ -13,6 +13,15 @@ describe("slugify", () => {
 });
 
 describe("harvestAtsFromJobs — 80% лінків Getro ведуть в ATS", () => {
+  it("впізнає BambooHR — доданий, щоб розбавити Greenhouse і Ashby", () => {
+    const found = harvestAtsFromJobs([
+      j("https://deel.bamboohr.com/careers/20", "Deel"),
+    ]);
+    expect(found).toHaveLength(1);
+    expect(found[0]!.provider).toBe("bamboohr");
+    expect(found[0]!.slug).toBe("deel");
+  });
+
   it("витягує слаг із посилань різних провайдерів", () => {
     const found = harvestAtsFromJobs([
       j("https://boards.greenhouse.io/ondofinance/jobs/4382521009", "Ondo Finance"),

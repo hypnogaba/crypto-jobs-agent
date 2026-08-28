@@ -5,12 +5,15 @@ import { addCompany, reviveSource, saveSourceKey } from "./actions";
 import { currentUser } from "@/lib/auth";
 import { all, one } from "@/lib/db";
 
+// Ключі зберігаються, але жодне з цих джерел ще не написане в сканері:
+// getSourceKey існує й нікого не викликає. Поки так — кажемо про це прямо,
+// а не вдаємо, що вставлений токен щось вмикає.
 const KEYED = [
-  { id: "adzuna",   opens: "16 країн, значна частина інвентарю Indeed" },
-  { id: "reed",     opens: "британський ринок" },
-  { id: "jooble",   opens: "70+ країн" },
-  { id: "usajobs",  opens: "держсектор США" },
-  { id: "findwork", opens: "IT-специфічний" },
+  { id: "adzuna",   opens: "16 країн, значна частина інвентарю Indeed", where: "developer.adzuna.com" },
+  { id: "reed",     opens: "британський ринок",                          where: "reed.co.uk/developers" },
+  { id: "jooble",   opens: "70+ країн",                                  where: "jooble.org/api/about — ключ дають листом" },
+  { id: "usajobs",  opens: "держсектор США",                             where: "developer.usajobs.gov" },
+  { id: "findwork", opens: "IT-специфічний",                             where: "findwork.dev/developers" },
 ];
 
 const STATE = {
@@ -189,7 +192,9 @@ export default async function Admin() {
           <section>
             <h2 className="display text-xl">Ключі доступу</h2>
             <p className="mt-1 text-sm" style={{ color: "var(--muted)" }}>
-              Вставив токен — джерело оживає без деплою.
+              Ключ зберігається тут, але жодне з цих джерел ще не під&apos;єднане до сканера.
+              Вставлений токен поки нічого не вмикає — під кожне потрібен свій розбирач,
+              і писати його наосліп, без справжньої відповіді API, немає сенсу.
             </p>
             <div className="ruled card mt-4">
               {KEYED.map((k) => (
@@ -197,7 +202,9 @@ export default async function Admin() {
                   <input type="hidden" name="source" value={k.id} />
                   <div className="w-28 shrink-0">
                     <div className="mono text-xs">{k.id}</div>
-                    {keys.has(k.id) && <span className="tag tag-ok mt-1 inline-block">є</span>}
+                    {keys.has(k.id)
+                      ? <span className="tag tag-warn mt-1 inline-block">ключ є, джерела нема</span>
+                      : <span className="tag tag-flat mt-1 inline-block">{k.where}</span>}
                   </div>
                   <input name="key" className="field mono flex-1 text-xs"
                     placeholder={keys.has(k.id) ? "замінити" : k.opens} />
