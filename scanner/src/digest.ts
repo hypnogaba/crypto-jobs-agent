@@ -16,6 +16,7 @@ interface UserRow {
   timezone: string; delivery_hour: number; status: string; last_interaction_at: string | null;
   spheres: string; industries: string; seniority: string | null;
   remote_mode: string; location: string | null; salary_min: number | null;
+  country: string | null;
   custom_role: string | null;
   seniority_weight: number | null;
   location_weight: number | null;
@@ -121,7 +122,7 @@ async function main(): Promise<void> {
   const d1 = new D1Client({ accountId: cfg.cfAccountId, databaseId: cfg.cfDatabaseId, token: cfg.cfApiToken });
 
   const users = await d1.query<UserRow>(
-    `SELECT u.*, p.spheres,p.industries,p.seniority,p.remote_mode,p.location,p.salary_min,p.custom_role,
+    `SELECT u.*, p.spheres,p.industries,p.seniority,p.remote_mode,p.location,p.salary_min,p.custom_role,p.country,
             t.seniority_weight,t.location_weight,t.salary_weight
      FROM users u JOIN profiles p ON p.user_id = u.id
      LEFT JOIN user_tuning t ON t.user_id = u.id
@@ -196,6 +197,7 @@ async function main(): Promise<void> {
         salary: u.salary_weight ?? 1,
       },
       seniority: u.seniority, remoteMode: u.remote_mode, location: u.location, salaryMin: u.salary_min,
+      country: u.country,
     };
 
     // Шортліст: свіже, ще не надіслане цій людині
@@ -203,6 +205,7 @@ async function main(): Promise<void> {
       id: string; company: string; company_key: string; title: string; location: string | null;
       remote: number; url: string; tags: string; posted_at: string | null;
       salary_min: number | null; salary_currency: string | null; dedupe_key: string | null;
+      source: string; country: string | null;
     }>(
       // Вікно кандидатів. Чотири правила, кожне з реального прогону:
       //
@@ -219,6 +222,11 @@ async function main(): Promise<void> {
       //    (це зламало б каскад sent.job_id і дозволило б повторно надіслати
       //    вакансію), тому мертві просто не потрапляють у вікно. Три доби —
       //    запас на випадок, якщо скан упав на день.
+      // 5. Чужу країну відсікаємо ТУТ, а не після відбору. Національні дошки
+      //    дають близько шестисот свіжих вакансій на день; відсортовані за
+      //    posted_at, вони заповнили б вікно з 1200 і випали б аж на підборі,
+      //    лишивши людину з іншої країни майже без кандидатів. Це та сама
+      //    пастка, що колись із lever:jobgether, тільки з іншого боку.
       `SELECT * FROM (
          SELECT j.*, ROW_NUMBER() OVER (
            PARTITION BY j.company_key ORDER BY j.posted_at DESC, j.fetched_at DESC
@@ -228,10 +236,11 @@ async function main(): Promise<void> {
            AND j.dedupe_key NOT IN (
              SELECT dedupe_key FROM sent WHERE user_id = ? AND dedupe_key IS NOT NULL)
            AND j.fetched_at >= datetime('now', '-3 day')
+           AND (j.country IS NULL OR j.country = ?)
        )
        WHERE rn <= 3
        ORDER BY posted_at DESC, fetched_at DESC
-       LIMIT 1200`, [u.id, u.id]);
+       LIMIT 1200`, [u.id, u.id, u.country]);
 
     // Ключ змісту не входить у CandidateJob — тримаємо збоку до запису в sent.
     const dedupeById = new Map(rows.map((r) => [r.id, r.dedupe_key ?? null]));
@@ -240,6 +249,7 @@ async function main(): Promise<void> {
       id: r.id, company: r.company, companyKey: r.company_key, title: r.title,
       location: r.location, remote: r.remote === 1, url: r.url, tags: list(r.tags),
       postedAt: r.posted_at, salaryMin: r.salary_min, salaryCurrency: r.salary_currency,
+      source: r.source, country: r.country,
     }));
 
     const top = pickTop(candidates, profile, DIGEST_SIZE, now);
@@ -258,7 +268,15 @@ async function main(): Promise<void> {
       continue;
     }
 
-    const why = await explainWithClaude(top, profile, cfg.anthropicApiKey);
+    const why = await explainWithClaude(top, profile, cfg.anthropicApiKey, undefined, async (u) => {
+      // Облік не має права зламати доставку: впав запис — добірка все одно йде.
+      try {
+        await d1.execute(
+          `INSERT INTO api_usage (id,service,operation,model,input_tokens,output_tokens,cost_usd,ok)
+           VALUES (?,'anthropic','match_reason',?,?,?,0,?)`,
+          [crypto.randomUUID(), u.model, u.inputTokens, u.outputTokens, u.ok ? 1 : 0]);
+      } catch { /* журнал не важливіший за доставку */ }
+    });
     const digestId = crypto.randomUUID();
     const withWhy = top.map((j, i) => ({ ...j, why: why[i]! }));
 

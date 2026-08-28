@@ -158,3 +158,36 @@ describe("навчання на скаргах", () => {
       .toBeLessThan(scoreJob(j, withLoc).score);
   });
 });
+
+describe("країна", () => {
+  const ua = { ...p, country: "UA" };
+  const nobody = { ...p, country: null };
+  const kyiv = job({ id: "ua", country: "UA", source: "board:dou-design" });
+  const global = job({ id: "g", country: null, source: "greenhouse:acme", companyKey: "glob", company: "Glob" });
+
+  it("вакансія з країною йде лише своїм", () => {
+    expect(pickTop([kyiv], ua).map((j) => j.id)).toEqual(["ua"]);
+    expect(pickTop([kyiv], { ...p, country: "FR" })).toEqual([]);
+  });
+
+  // Людині без визначеної країни нав'язувати національну вакансію не можна:
+  // ботові акаунти всі мають пояс UTC, і країни в них просто немає.
+  it("не нав'язує національну вакансію тому, чиєї країни ми не знаємо", () => {
+    expect(pickTop([kyiv], nobody)).toEqual([]);
+  });
+
+  it("вакансія без країни лишається доступною всім", () => {
+    expect(pickTop([global], nobody).map((j) => j.id)).toEqual(["g"]);
+    expect(pickTop([global], ua).map((j) => j.id)).toEqual(["g"]);
+  });
+
+  // Одиниця штрафу — це нічия, а не витіснення: дошка мусить програвати
+  // рівному, але не сильнішому збігу.
+  it("дошка програє прямому посиланню лише в нічию", () => {
+    expect(scoreJob(kyiv, ua).score).toBe(scoreJob(job({ country: "UA" }), ua).score - 1);
+
+    const weakAts = job({ id: "w", companyKey: "w", tags: ["web3"], source: "greenhouse:w" });
+    const strongBoard = job({ id: "s", companyKey: "s", country: "UA", source: "board:dou-design" });
+    expect(pickTop([weakAts, strongBoard], ua)[0]!.id).toBe("s");
+  });
+});

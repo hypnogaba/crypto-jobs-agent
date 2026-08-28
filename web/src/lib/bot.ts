@@ -9,6 +9,7 @@ import { CvError, extractCvText } from "./cv";
 import { parseProfile } from "./parse";
 import { t as say, timeNow, timeSet } from "./bot-copy";
 import type { Locale } from "./vocab";
+import { persistCountry } from "@/lib/profile-country";
 
 /** Команди бота. Кабінет у чаті — мінімальний, повний лишається на сайті. */
 
@@ -152,7 +153,7 @@ export async function handleOnboardingButton(
     draft.salaryCurrency = draft.salaryMin ? "EUR" : null;
   }
 
-  const after = nextStep(step);
+  const after = nextStep(step, draft);
   if (after) {
     await saveState(chatId, after, draft, null);
     if (row.message_id) {
@@ -188,7 +189,7 @@ export async function handleOnboardingText(
   // Вільний текст просто посеред питань: людина написала, ким хоче бути.
   // Розбираємо тим самим парсером, що й сайт, і ставимо галочки — далі вона
   // лише підтверджує. Це і є «підтягнути з того, що можна написати текстом».
-  if (STEPS.includes(row.step as Step) && text.length >= 8) {
+  if (STEPS.includes(row.step as Step) && row.step !== "city" && text.length >= 8) {
     const parsed = await parseProfile(text, env.ANTHROPIC_API_KEY ?? null);
     const draft = readDraft(row.draft);
     if (parsed.spheres.length) draft.spheres = parsed.spheres;
@@ -232,18 +233,36 @@ export async function handleOnboardingText(
     if (back === "spheres") draft.customRole = own;
     else if (back === "industries") draft.customIndustry = own;
     else if (back === "seniority") draft.customSeniority = own;
-    else if (back === "where") draft.customWhere = own;
+    else if (back === "where") {
+      draft.customWhere = own;
+      // Написане тут і є місцем: окремо перепитувати місто після цього
+      // означало б питати те саме двічі.
+      draft.location = own;
+    }
 
     // Питання з однією відповіддю після свого варіанта йдуть далі самі:
     // вертатись до списку, з якого людина щойно відмовилась, безглуздо.
     const single = back === "seniority" || back === "where";
-    const goto = single ? nextStep(back) : back;
+    const goto = single ? nextStep(back, draft) : back;
     if (!goto) { await finishOnboarding(env, chatId, draft, locale, row.message_id); return true; }
 
     await saveState(chatId, goto, draft, null);
     if (row.message_id) {
       await editKeyboard(env, chatId, row.message_id,
         questionText(goto, locale), keyboard(goto, draft, locale));
+    }
+    return true;
+  }
+
+  // Місто: коротка відповідь вільним текстом, далі — останнє питання.
+  if (row.step === "city") {
+    const draft = readDraft(row.draft);
+    draft.location = text.slice(0, 120).trim() || null;
+    const goto = nextStep("city", draft);
+    if (!goto) { await finishOnboarding(env, chatId, draft, locale, row.message_id); return true; }
+    await saveState(chatId, goto, draft, null);
+    if (row.message_id) {
+      await editKeyboard(env, chatId, row.message_id, questionText(goto, locale), keyboard(goto, draft, locale));
     }
     return true;
   }
@@ -284,12 +303,15 @@ async function finishOnboarding(
        mode=excluded.mode, raw_input=excluded.raw_input, spheres=excluded.spheres,
        custom_role=excluded.custom_role, industries=excluded.industries,
        seniority=excluded.seniority, remote_mode=excluded.remote_mode,
+       location=excluded.location,
        salary_min=excluded.salary_min, salary_currency=excluded.salary_currency,
        updated_at=datetime('now')`,
     userId, "bot", null,
     JSON.stringify(draft.spheres), draft.customRole ?? null, JSON.stringify(draft.industries),
-    draft.seniority, draft.remoteMode ?? "remote_only", null,
+    draft.seniority, draft.remoteMode ?? "remote_only", draft.location ?? null,
     draft.salaryMin, draft.salaryCurrency);
+
+  await persistCountry(userId, draft.location ?? null);
 
   await run("DELETE FROM bot_state WHERE chat_id=?", String(chatId));
 
@@ -426,6 +448,8 @@ export async function handleDocument(
       userId, "cv", text.slice(0, 20_000),
       JSON.stringify(parsed.spheres), JSON.stringify(parsed.industries),
       parsed.seniority, parsed.remoteMode, parsed.location, parsed.salaryMin, parsed.salaryCurrency);
+
+    await persistCountry(userId, parsed.location);
 
     await run("DELETE FROM bot_state WHERE chat_id=?", String(chatId));
     await send(env, chatId, `${say("cvDone", locale)}\n\n${summary({

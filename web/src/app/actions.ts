@@ -10,6 +10,7 @@ import { CvError, extractCvText } from "@/lib/cv";
 import { isLocale, localeFromHeader } from "@/lib/i18n";
 import { checkRate, recordFailure } from "@/lib/ratelimit";
 import type { Locale } from "@/lib/vocab";
+import { persistCountry } from "@/lib/profile-country";
 
 const DRAFT_COOKIE = "nr_draft";
 
@@ -112,6 +113,7 @@ async function persistProfile(
     isCv ? rawInput.slice(0, 20_000) : null,
     JSON.stringify(p.spheres), JSON.stringify(p.industries),
     p.seniority, p.remoteMode, p.location, p.salaryMin, p.salaryCurrency);
+  await persistCountry(userId, p.location);
 }
 
 // ── акаунт ───────────────────────────────────────────────────

@@ -4,6 +4,7 @@ import { review, type Snapshot } from "./review.js";
 const empty: Snapshot = {
   brokenNeverWorked: [], deprecatedButAlive: [], dryCompanies: [],
   providerShare: [], totalJobs: 0, staleJobs: 0, duplicateRoles: 0,
+  countriesWithoutBoard: [],
 };
 
 describe("тижневий самоперегляд", () => {
@@ -69,5 +70,28 @@ describe("тижневий самоперегляд", () => {
     });
     const keys = out.map((p) => `${p.kind}|${p.target ?? ""}`);
     expect(new Set(keys).size).toBe(keys.length);
+  });
+});
+
+describe("країна без дошки", () => {
+  it("просить дошку там, звідки вже є люди", () => {
+    const out = review({ ...empty, countriesWithoutBoard: [{ country: "PL", people: 3 }] });
+    expect(out).toHaveLength(1);
+    expect(out[0]!.target).toBe("no_board:PL");
+    expect(out[0]!.title).toContain("PL");
+    expect(out[0]!.evidence).toContain("3");
+  });
+
+  // Ключ іде по парі kind+target, тож дві країни не сміють схлопнутись
+  // в одне повідомлення — на цьому вже раз обпеклись.
+  it("не схлопує дві країни в одну", () => {
+    const out = review({ ...empty, countriesWithoutBoard: [
+      { country: "PL", people: 3 }, { country: "DE", people: 1 },
+    ]});
+    expect(new Set(out.map((p) => p.target)).size).toBe(2);
+  });
+
+  it("мовчить, поки таких країн немає", () => {
+    expect(review(empty)).toEqual([]);
   });
 });

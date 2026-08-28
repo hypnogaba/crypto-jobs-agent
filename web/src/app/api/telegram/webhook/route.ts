@@ -6,6 +6,7 @@ import { handleCommand, startBotOnboarding, continueBotOnboarding,
          handleOnboardingButton, handleOnboardingText, handleWhyButton, handleDocument } from "@/lib/bot";
 import { isLocale } from "@/lib/i18n";
 import { t as botCopy } from "@/lib/bot-copy";
+import { persistCountry } from "@/lib/profile-country";
 
 /**
  * Вебхук Telegram.
@@ -148,6 +149,8 @@ export async function POST(request: Request): Promise<Response> {
       userId, text.length > 800 ? "cv" : "freetext", text.slice(0, 20_000),
       JSON.stringify(parsed.spheres), JSON.stringify(parsed.industries),
       parsed.seniority, parsed.remoteMode, parsed.location, parsed.salaryMin, parsed.salaryCurrency);
+
+    await persistCountry(userId, parsed.location);
 
     await send(env, chatId,
       `Зрозумів так:\n\n` +

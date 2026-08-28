@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import Nav from "../nav";
 import { detectLocale } from "../actions";
-import { addCompany, reviveSource, saveSourceKey, replyToFeedback, dismissFeedback, purgeNeverWorked, recheckSome, applyProposal, dismissProposal, applyAllProposals } from "./actions";
+import { addCompany, reviveSource, saveSourceKey, replyToFeedback, dismissFeedback, purgeNeverWorked, recheckSome, applyProposal, dismissProposal, applyAllProposals, addBoard, toggleBoard } from "./actions";
 import { currentUser } from "@/lib/auth";
 import { all, one } from "@/lib/db";
 
@@ -126,6 +126,27 @@ export default async function Admin() {
     locale: string; page: string | null; message: string; created_at: string }>(
     "SELECT * FROM site_feedback WHERE handled_at IS NULL ORDER BY created_at DESC LIMIT 30");
 
+  // Витрати. Зараз Anthropic коштує нуль: ключа в проді немає, і обидва
+  // місця виклику мовчки переходять на розбір за ключовими словами. Показуємо
+  // це прямо, а не малюємо нулі так, ніби це досягнення.
+  const spend = await one<{ calls: number; callsWeek: number; inTok: number; outTok: number;
+    failed: number; boards: number; countries: number; boardJobs: number; localJobs: number }>(`
+    SELECT (SELECT COUNT(*) FROM api_usage WHERE date(at)=date('now')) calls,
+           (SELECT COUNT(*) FROM api_usage WHERE at >= datetime('now','-7 day')) callsWeek,
+           (SELECT COALESCE(SUM(input_tokens),0) FROM api_usage WHERE at >= datetime('now','-7 day')) inTok,
+           (SELECT COALESCE(SUM(output_tokens),0) FROM api_usage WHERE at >= datetime('now','-7 day')) outTok,
+           (SELECT COUNT(*) FROM api_usage WHERE ok=0 AND at >= datetime('now','-7 day')) failed,
+           (SELECT COUNT(*) FROM country_boards WHERE enabled=1) boards,
+           (SELECT COUNT(DISTINCT country) FROM country_boards WHERE enabled=1) countries,
+           (SELECT COUNT(*) FROM jobs_cache WHERE source LIKE 'board:%') boardJobs,
+           (SELECT COUNT(*) FROM jobs_cache WHERE country IS NOT NULL) localJobs`);
+
+  const boards = await all<{ id: string; country: string; name: string; label: string;
+    feed_url: string; kind: string; enabled: number; jobs_last_run: number | null; status: string | null }>(
+    `SELECT b.*, s.jobs_last_run, s.status
+       FROM country_boards b LEFT JOIN sources_state s ON s.source_name = b.name
+      ORDER BY b.country, b.label`);
+
   const peak = Math.max(1, ...sources.map((x) => x.jobs_last_run));
   // Три групи за тим, що з цим МОЖНА зробити, а не за кодом помилки.
   // Окремий запит без ліміту: список джерел обрізаний до 120, і рахувати
@@ -236,6 +257,89 @@ export default async function Admin() {
           <Tile n={s?.sources ?? 0} label="джерел" />
           <Tile n={s?.broken ?? 0} label="зламано" accent={(s?.broken ?? 0) > 0} />
         </div>
+
+        <p className="eyebrow mt-8">Витрати</p>
+        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          <Tile n={spend?.calls ?? 0} label="звернень до моделі сьогодні" />
+          <Tile n={spend?.callsWeek ?? 0} label="за тиждень" />
+          <Tile n={spend?.inTok ?? 0} label="токенів на вхід, тиждень" />
+          <Tile n={spend?.outTok ?? 0} label="токенів на вихід, тиждень" />
+          <Tile n={spend?.failed ?? 0} label="невдалих звернень" accent={(spend?.failed ?? 0) > 0} />
+        </div>
+        <p className="mt-3 text-sm" style={{ color: "var(--muted)" }}>
+          {(spend?.callsWeek ?? 0) === 0
+            ? "Модель зараз не викликається взагалі: ключа ANTHROPIC_API_KEY у проді немає, і розбір профілю та пояснення «чому підходить» працюють на ключових словах. Щойно ключ додадуть, лічильники почнуть рости з першого ж звернення."
+            : "Рахуємо токени, а не гроші: ставка за токен залежить від моделі й змінюється, тож долари дивись у консолі Anthropic."}
+          {" "}Кількість запитів до Workers і D1 живе в панелі Cloudflare — щоб показати її тут,
+          довелося б покласти в воркер токен, який уміє значно більше, ніж читати лічильник.
+        </p>
+
+        <p className="eyebrow mt-8">Національні дошки</p>
+        <p className="mt-2 text-sm" style={{ color: "var(--muted)" }}>
+          Дошка країни — не агрегатор: вакансія з неї ніде більше не існує, тому в добірку вона
+          йде. Показується лише людям із тієї ж країни. Країну людини виводимо з написаної
+          локації, а якщо її немає — з часового поясу.
+        </p>
+        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Tile n={spend?.boards ?? 0} label="дошок увімкнено" />
+          <Tile n={spend?.countries ?? 0} label="країн" />
+          <Tile n={spend?.boardJobs ?? 0} label="вакансій із дошок" />
+          <Tile n={spend?.localJobs ?? 0} label="з країною в кеші" />
+        </div>
+
+        {boards.length > 0 && (
+          <div className="card mt-3 overflow-x-auto">
+            <table className="board">
+              <thead>
+                <tr><th>країна</th><th>дошка</th><th>стан</th><th>вакансій</th><th /></tr>
+              </thead>
+              <tbody>
+                {boards.map((b) => (
+                  <tr key={b.id}>
+                    <td className="mono text-xs">{b.country}</td>
+                    <td className="text-xs">{b.label}</td>
+                    <td>
+                      <span className={`tag ${b.enabled === 0 ? "tag-flat" : b.status === "deprecated" ? "tag-bad"
+                        : b.status === "degraded" ? "tag-warn" : "tag-ok"}`}>
+                        {b.enabled === 0 ? "вимкнено" : b.status === "deprecated" ? "мертве"
+                          : b.status === "degraded" ? "збоїть" : b.status === "ok" ? "працює" : "ще не читали"}
+                      </span>
+                    </td>
+                    <td className="num text-xs">{b.jobs_last_run ?? "—"}</td>
+                    <td className="text-right">
+                      <form action={toggleBoard}>
+                        <input type="hidden" name="id" value={b.id} />
+                        <button className="mono text-xs hover:underline" style={{ color: "var(--ember)" }}>
+                          {b.enabled === 0 ? "увімкнути" : "вимкнути"}
+                        </button>
+                      </form>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <form action={addBoard} className="card mt-3 flex flex-wrap items-end gap-3 px-5 py-4">
+          <label className="flex flex-col gap-1">
+            <span className="eyebrow">країна</span>
+            <input name="country" placeholder="PL" maxLength={2} required
+                   className="field mono w-20 uppercase" />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="eyebrow">назва</span>
+            <input name="label" placeholder="JustJoin.IT" required className="field w-44" />
+          </label>
+          <label className="flex min-w-60 flex-1 flex-col gap-1">
+            <span className="eyebrow">адреса RSS</span>
+            <input name="url" type="url" placeholder="https://…/feed" required className="field mono w-full text-xs" />
+          </label>
+          <button className="btn px-4 py-2 text-sm">Додати</button>
+          <p className="w-full text-xs" style={{ color: "var(--muted)" }}>
+            Стрічку перевіряємо до запису: адреса, що не віддає жодної вакансії, у базу не потрапляє.
+          </p>
+        </form>
 
         {feedback.length > 0 && (
           <section className="mt-12">

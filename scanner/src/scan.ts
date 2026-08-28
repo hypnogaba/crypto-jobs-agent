@@ -5,7 +5,9 @@ import { climbLadder, type LadderRungs } from "./ladder.js";
 import { applySourceOutcomes, skipSet } from "./selfrepair.js";
 import { runR1, runR2, runR3, runR4, harvestAtsFromJobs } from "./rungs.js";
 import { prepare } from "./normalize.js";
-import type { RawJob } from "./types.js";
+import type { RawJob, SourceResult } from "./types.js";
+import { fetchBoard } from "./sources/boards.js";
+import { mapLimit, runSource } from "./http.js";
 
 /** Колекції Getro, підтверджені живими. Перебір нових — окремою командою. */
 const GETRO_COLLECTIONS = [100, 150, 200, 250, 300, 400, 550, 800, 858, 950, 1000, 1100, 1200, 1300, 1500];
@@ -86,6 +88,26 @@ async function main(): Promise<void> {
 
     await repo.upsertJobs(outcome.jobs);
 
+    // ── Національні дошки — поза драбиною ────────────────────
+    // Драбина зупиняється, щойно компаній вистачає, і на практиці це завжди
+    // R2. Дошка, повішена сходинкою, не читалася б ніколи. Але вона й не
+    // про достатність: людині з України київські вакансії потрібні навіть у
+    // день, коли глобальних знайшлося вдосталь.
+    const boardResults: SourceResult[] = [];
+    try {
+      const boards = (await repo.listBoards()).filter((b) => !skip.has(b.name));
+      if (boards.length) {
+        const runs = await mapLimit(boards, 4, (b) => runSource(b.name, () => fetchBoard(b)));
+        boardResults.push(...runs);
+        const jobs = prepare(runs.flatMap((r) => r.jobs), cfg.freshnessDays, now);
+        await repo.upsertJobs(jobs);
+        const alive = runs.filter((r) => r.ok).length;
+        console.log(`Національні дошки: ${alive}/${boards.length} відповіли, ${jobs.length} вакансій`);
+      }
+    } catch (e) {
+      console.log(`Дошки пропущено: ${e instanceof Error ? e.message : e}`);
+    }
+
     // ── Зростання окремо від достатності ─────────────────────
     // Драбина відповідає на питання «чи вистачило сьогодні». Але список компаній
     // мусить рости КОЖЕН день, а не лише в бідні: інакше щойно R1 стає багатим,
@@ -114,7 +136,7 @@ async function main(): Promise<void> {
       }
     }
 
-    const { deprecated } = await applySourceOutcomes(outcome.results, repo, prior);
+    const { deprecated } = await applySourceOutcomes([...outcome.results, ...boardResults], repo, prior);
     if (deprecated.length) console.log(`Позначено мертвими: ${deprecated.join(", ")}`);
 
     const status = outcome.distinctCompanies >= cfg.distinctCompanyTarget ? "ok" : "short";

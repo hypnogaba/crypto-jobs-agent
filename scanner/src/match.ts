@@ -16,6 +16,8 @@ export interface Profile {
   remoteMode: string;
   location: string | null;
   salaryMin: number | null;
+  /** Країна людини, виведена з локації або часового поясу. Може бути порожня. */
+  country?: string | null;
   /**
    * Ваги правил, вивчені з відповідей людини. Одиниця — як у всіх.
    * Кожна скарга на цей вимір робить невідповідність дорожчою саме для неї.
@@ -35,6 +37,10 @@ export interface CandidateJob {
   postedAt: string | null;
   salaryMin: number | null;
   salaryCurrency: string | null;
+  /** Джерело рядка: greenhouse:acme, aggregator:wwr, board:dou-design. */
+  source?: string | null;
+  /** Кому показувати. Порожнє — всім; заповнене ставлять національні дошки. */
+  country?: string | null;
 }
 
 export interface ScoredJob extends CandidateJob {
@@ -123,6 +129,11 @@ export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): Score
     else if (days <= 7) score += 1;
   }
 
+  // Дошка програє прямому посиланню на роботодавця — але лише в нічию.
+  // Одиниця на шкалі, де сфера коштує шість: сильний збіг на DOU не має
+  // поступатися посередньому на Greenhouse тільки через домен.
+  if (job.source?.startsWith("board:")) score -= 1;
+
   return { ...job, score, reasons };
 }
 
@@ -148,6 +159,18 @@ export function linksToAggregator(url: string): boolean {
 }
 
 /**
+ * Чи адресована вакансія цій людині за країною.
+ *
+ * Більшість кешу країни не має — це глобальні вакансії, і їх бачать усі.
+ * Заповнену країну ставлять національні дошки, і тоді вона означає «лише
+ * своїм»: київська вакансія в офісі нікому за межами України не потрібна, а
+ * людині без визначеної країни ми не маємо права її нав'язувати.
+ */
+export function fitsCountry(job: CandidateJob, p: Profile): boolean {
+  return !job.country || job.country === p.country;
+}
+
+/**
  * Топ-5 із трьома правилами проти одноманітності.
  *
  * 1. Одна роль на компанію. П'ять позицій в одній фірмі — це одна можливість.
@@ -162,6 +185,7 @@ export function linksToAggregator(url: string): boolean {
 export function pickTop(jobs: CandidateJob[], p: Profile, limit = 5, now = new Date()): ScoredJob[] {
   const scored = jobs
     .filter((j) => !linksToAggregator(j.url))
+    .filter((j) => fitsCountry(j, p))
     .map((j) => scoreJob(j, p, now))
     .filter((j) => j.score > 0)
     .sort((a, b) => b.score - a.score);
@@ -213,9 +237,22 @@ const EXPLAIN_SYSTEM =
 тією ж мовою, що й профіль. Відповідай ЛИШЕ JSON: {"why":["...","..."]} —
 по одному рядку на вакансію, у тому ж порядку.`;
 
-/** Уточнення пояснень моделлю. Впало — лишаються локальні. */
+/** Скільки токенів коштував виклик. Гроші не рахуємо тут: ставка за токен
+ *  живе поза кодом і змінюється, а вигадане число на панелі власника
+ *  виглядало б як факт. */
+export interface UsageReport {
+  model: string; inputTokens: number; outputTokens: number; ok: boolean;
+}
+
+/**
+ * Уточнення пояснень моделлю. Впало — лишаються локальні.
+ *
+ * Облік іде зворотним викликом, а не записом у базу: цей файл лишається
+ * чистим і тестується без D1, а хто його кличе — той і знає, куди писати.
+ */
 export async function explainWithClaude(
-  jobs: ScoredJob[], p: Profile, apiKey: string | null, model = "claude-haiku-4-5"
+  jobs: ScoredJob[], p: Profile, apiKey: string | null, model = "claude-haiku-4-5",
+  onUsage?: (u: UsageReport) => Promise<void> | void,
 ): Promise<string[]> {
   const local = jobs.map((j) => explainLocally(j, p));
   if (!apiKey || jobs.length === 0) return local;
@@ -237,8 +274,19 @@ export async function explainWithClaude(
         messages: [{ role: "user", content: `ПРОФІЛЬ:\n${profileText}\n\nВАКАНСІЇ:\n${jobsText}` }],
       }),
     });
-    if (!res.ok) return local;
-    const data = (await res.json()) as { content?: Array<{ type: string; text?: string }> };
+    if (!res.ok) {
+      await onUsage?.({ model, inputTokens: 0, outputTokens: 0, ok: false });
+      return local;
+    }
+    const data = (await res.json()) as {
+      content?: Array<{ type: string; text?: string }>;
+      usage?: { input_tokens?: number; output_tokens?: number };
+    };
+    await onUsage?.({
+      model, ok: true,
+      inputTokens: data.usage?.input_tokens ?? 0,
+      outputTokens: data.usage?.output_tokens ?? 0,
+    });
     const raw = data.content?.find((b) => b.type === "text")?.text ?? "";
     const json = /\{[\s\S]*\}/.exec(raw)?.[0];
     if (!json) return local;

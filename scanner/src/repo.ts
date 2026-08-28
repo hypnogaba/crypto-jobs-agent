@@ -1,5 +1,6 @@
 import type { D1Client, D1Statement } from "./d1.js";
 import type { AtsProvider, Company, NormalizedJob, SourceStatus } from "./types.js";
+import type { Board } from "./sources/boards.js";
 
 interface CompanyRow {
   slug: string; name: string; ats_provider: string | null; ats_slug: string | null;
@@ -17,21 +18,35 @@ const parseTags = (raw: string | null): string[] => {
 export class Repo {
   constructor(private readonly d1: D1Client) {}
 
+  // ── національні дошки ──────────────────────────────────────
+  /**
+   * Дошки живуть у базі, а не в коді: тому нова країна додається адресою з
+   * адмінки й не потребує деплою.
+   */
+  async listBoards(): Promise<Board[]> {
+    const rows = await this.d1.query<{ name: string; label: string; country: string; feed_url: string; kind: string }>(
+      "SELECT name,label,country,feed_url,kind FROM country_boards WHERE enabled=1 ORDER BY country,name");
+    return rows.map((r) => ({
+      name: r.name, label: r.label, country: r.country, feedUrl: r.feed_url, kind: r.kind,
+    }));
+  }
+
   // ── вакансії ───────────────────────────────────────────────
   async upsertJobs(jobs: NormalizedJob[]): Promise<void> {
     if (jobs.length === 0) return;
     const statements: D1Statement[] = jobs.map((j) => ({
       sql: `INSERT INTO jobs_cache
-              (id,url,company,company_key,title,location,remote,salary_min,salary_max,salary_currency,source,tags,dedupe_key,posted_at,fetched_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+              (id,url,company,company_key,title,location,remote,salary_min,salary_max,salary_currency,source,tags,dedupe_key,posted_at,fetched_at,country)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(url) DO UPDATE SET
               company=excluded.company, title=excluded.title, location=excluded.location,
               remote=excluded.remote, source=excluded.source, tags=excluded.tags,
-              posted_at=excluded.posted_at, fetched_at=excluded.fetched_at`,
+              posted_at=excluded.posted_at, fetched_at=excluded.fetched_at,
+              country=excluded.country`,
       params: [
         crypto.randomUUID(), j.url, j.company, j.companyKey, j.title, j.location,
         j.remote ? 1 : 0, j.salaryMin ?? null, j.salaryMax ?? null, j.salaryCurrency ?? null,
-        j.source, JSON.stringify(j.tags), j.dedupeKey, j.postedAt, j.fetchedAt,
+        j.source, JSON.stringify(j.tags), j.dedupeKey, j.postedAt, j.fetchedAt, j.country ?? null,
       ],
     }));
     await this.d1.batch(statements);
