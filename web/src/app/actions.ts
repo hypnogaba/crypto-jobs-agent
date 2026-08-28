@@ -79,7 +79,7 @@ export async function saveProfile(formData: FormData): Promise<void> {
     const id = uuid();
     await run(
       `INSERT INTO users (id,locale,timezone,delivery_hour,last_interaction_at)
-       VALUES (?,?,?,7,datetime('now'))`,
+       VALUES (?,?,?,9,datetime('now'))`,
       id, await detectLocale(), "UTC");
     await persistProfile(id, draft?.text ?? "", profile);
     (await cookies()).delete(DRAFT_COOKIE);
@@ -132,7 +132,7 @@ export async function createConnectToken(): Promise<void> {
 // ── налаштування ─────────────────────────────────────────────
 export async function saveSettings(formData: FormData): Promise<void> {
   const user = await requireUser();
-  const hour = Math.min(23, Math.max(0, Number.parseInt(String(formData.get("deliveryHour") ?? "7"), 10) || 7));
+  const hour = Math.min(23, Math.max(0, Number.parseInt(String(formData.get("deliveryHour") ?? "9"), 10) || 9));
   const locale = String(formData.get("locale") ?? user.locale);
   const timezone = String(formData.get("timezone") ?? "UTC").slice(0, 64);
   await run("UPDATE users SET delivery_hour=?, locale=?, timezone=?, updated_at=datetime('now') WHERE id=?",

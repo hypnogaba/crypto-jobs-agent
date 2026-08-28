@@ -33,7 +33,7 @@ export default async function Settings({ searchParams }: { searchParams: Promise
       <form action={saveSettings}>
         <div className="ruled card">
           <Row title={t(locale, "settings.delivery")} hint={row?.timezone ?? "UTC"}>
-            <select name="deliveryHour" className="field mono" defaultValue={String(row?.delivery_hour ?? 7)}>
+            <select name="deliveryHour" className="field mono" defaultValue={String(row?.delivery_hour ?? 9)}>
               {Array.from({ length: 24 }, (_, h) => (
                 <option key={h} value={h}>{String(h).padStart(2, "0")}:00</option>
               ))}

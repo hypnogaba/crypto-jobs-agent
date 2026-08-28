@@ -231,7 +231,7 @@ async function finishOnboarding(
   if (!existing) {
     await run(
       `INSERT INTO users (id,telegram_chat_id,locale,timezone,delivery_hour,last_interaction_at)
-       VALUES (?,?,?,?,7,datetime('now'))`,
+       VALUES (?,?,?,?,9,datetime('now'))`,
       userId, String(chatId), locale, "UTC");
   }
 
@@ -362,7 +362,7 @@ export async function handleDocument(
     if (!existing) {
       await run(
         `INSERT INTO users (id,telegram_chat_id,locale,timezone,delivery_hour,last_interaction_at)
-         VALUES (?,?,?,?,7,datetime('now'))`, userId, String(chatId), locale, "UTC");
+         VALUES (?,?,?,?,9,datetime('now'))`, userId, String(chatId), locale, "UTC");
     }
 
     await run(
@@ -460,7 +460,7 @@ export async function handleCommand(
       const arg = text.split(/\s+/)[1];
       const row = await one<{ delivery_hour: number; timezone: string }>(
         "SELECT delivery_hour,timezone FROM users WHERE id=?", user!.id);
-      const current = row?.delivery_hour ?? 7;
+      const current = row?.delivery_hour ?? 9;
       const zone = row?.timezone ?? "UTC";
 
       if (arg === undefined) {

@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS users (
     connect_expires_at   TEXT,
     locale               TEXT NOT NULL DEFAULT 'en',   -- en | fr | ru | uk
     timezone             TEXT NOT NULL DEFAULT 'UTC',  -- визначається автоматично
-    delivery_hour        INTEGER NOT NULL DEFAULT 7,   -- 0–23 за часом людини
+    delivery_hour        INTEGER NOT NULL DEFAULT 9,   -- 0–23 за часом людини
     status               TEXT NOT NULL DEFAULT 'active', -- active | paused | deleted
     -- Для автопаузи через 14 днів повної тиші.
     last_interaction_at  TEXT,

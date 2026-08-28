@@ -117,12 +117,19 @@ body {
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum";
 }
+/* Надписи набираємо пропорційним, а не моноширинним.
+   У кирилиці ширини літер різняться значно сильніше, ніж у латиниці: у
+   фіксованій комірці вузькі І та Ї плавають поруч із Ш та Щ, і рядок
+   «П'ЯТЬ ВАКАНСІЙ ЩОРАНКУ» починає танцювати. Моноширинний лишається там,
+   де він за ділом: числа, посилання, назви джерел. */
 .eyebrow {
-  font-family: var(--nr-mono), ui-monospace, monospace;
-  font-size: 0.68rem;
-  letter-spacing: 0.16em;
+  font-family: var(--nr-ui), ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.11em;
   text-transform: uppercase;
   color: var(--muted);
+  font-feature-settings: "cv11";     /* однакова висота цифр у надписах */
 }
 .lede { color: var(--ink-2); font-size: 1.06rem; line-height: 1.6; max-width: 62ch; }
 
@@ -401,59 +408,134 @@ body::before {
    Формат дослівно повторює formatDigest() зі сканера. Роздільник
    у справжньому повідомленні — двадцять символів ━ окремим рядком;
    тут це border, бо двадцять ━ переносяться непередбачувано. */
+/* Це зображення Telegram, тож і кольори тут його, а не наші: синій для
+   посилань і кнопок, холодне тло чату, хвостик у бабла. Єдине місце в
+   продукті, де ми свідомо виходимо за межі власної палітри — бо інакше
+   макет не читається як месенджер. */
 .tgmock {
+  --tg-blue: #3390ec;
+  --tg-chat: #dbe4ec;
+  --tg-bubble: #ffffff;
+  --tg-text: #16191c;
+  --tg-dim: #707a84;
   border: 1px solid var(--rule); border-radius: 30px;
   background: var(--surface); padding: 9px;
   max-width: 380px;
 }
-/* Екран мусить бути помітно темнішим за бабл, інакше три майже однакові
-   білі шари не читаються як чат. */
-.tgmock-screen {
-  border-radius: 22px; overflow: hidden;
-  background: color-mix(in srgb, var(--ink) 6%, var(--paper));
+:root[data-theme="dark"] .tgmock,
+:root:not([data-theme="light"]) .tgmock {
+  --tg-chat: #17212b;
+  --tg-bubble: #182533;
+  --tg-text: #ebf0f4;
+  --tg-dim: #8c9aa8;
+  --tg-blue: #6ab3f3;
 }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .tgmock {
+    --tg-chat: #dbe4ec; --tg-bubble: #fff; --tg-text: #16191c;
+    --tg-dim: #707a84; --tg-blue: #3390ec;
+  }
+}
+
+.tgmock-screen { border-radius: 22px; overflow: hidden; background: var(--tg-chat); }
+
 .tgmock-bar {
   display: flex; align-items: center; gap: .6rem;
-  padding: .7rem .9rem; border-bottom: 1px solid var(--rule);
-  background: var(--surface);
+  padding: .7rem .9rem; border-bottom: 1px solid rgb(0 0 0 / 6%);
+  background: var(--tg-bubble); color: var(--tg-text);
 }
 .tgmock-avatar {
-  width: 1.9rem; height: 1.9rem; border-radius: 999px; flex: none;
+  width: 2.1rem; height: 2.1rem; border-radius: 999px; flex: none;
   background: var(--ember); color: var(--ember-ink);
   display: grid; place-items: center;
-  font-family: var(--nr-mono), monospace; font-size: .62rem; letter-spacing: .04em;
+  font-size: .68rem; font-weight: 600; letter-spacing: .02em;
 }
-.tgmock-name { font-weight: 550; font-size: .88rem; line-height: 1.2; }
-.tgmock-handle { font-family: var(--nr-mono), monospace; font-size: .66rem; color: var(--faint); }
-.tgmock-body { padding: .9rem .8rem 1rem; }
+.tgmock-name { font-weight: 590; font-size: .9rem; line-height: 1.2; }
+.tgmock-handle { font-size: .74rem; color: var(--tg-blue); }
+
+.tgmock-body { padding: 1rem .75rem .85rem; }
+
+/* Бабл із хвостиком знизу зліва — те, за чим Telegram упізнають найперше. */
 .tgmock-bubble {
-  background: var(--surface); border: 1px solid var(--rule);
-  border-radius: 14px 14px 14px 4px;
-  padding: .8rem .9rem; font-size: .82rem; line-height: 1.5;
+  position: relative;
+  background: var(--tg-bubble); color: var(--tg-text);
+  border: 0; border-radius: 12px 12px 12px 4px;
+  padding: .75rem .85rem .5rem;
+  font-size: .82rem; line-height: 1.5;
+  box-shadow: 0 1px 1px rgb(0 0 0 / 8%);
 }
-.tgmock-rule { border: 0; border-top: 1px dashed var(--rule); margin: .75rem 0; }
-.tgmock-jobline { color: var(--ink); }
-.tgmock-jobline b { font-weight: 560; }
-.tgmock-meta { color: var(--muted); font-size: .76rem; margin-top: .15rem; }
-.tgmock-why { margin-top: .5rem; color: var(--ink-2); font-size: .78rem; }
-.tgmock-why i { color: var(--faint); }
+.tgmock-bubble::after {
+  content: ""; position: absolute; left: -6px; bottom: 0;
+  width: 0; height: 0;
+  border: 6px solid transparent;
+  border-right-color: var(--tg-bubble); border-bottom-color: var(--tg-bubble);
+}
+
+.tgmock-rule { border: 0; border-top: 1px solid rgb(127 127 127 / 18%); margin: .7rem 0; }
+.tgmock-jobline { color: var(--tg-text); }
+.tgmock-jobline b { font-weight: 600; }
+.tgmock-meta { color: var(--tg-dim); font-size: .76rem; margin-top: .15rem; }
+.tgmock-why { margin-top: .5rem; color: var(--tg-text); font-size: .78rem; }
+.tgmock-why i { color: var(--tg-dim); }
 .tgmock-url {
-  margin-top: .5rem; font-family: var(--nr-mono), monospace; font-size: .68rem;
-  color: var(--ok); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  margin-top: .45rem; font-size: .72rem; color: var(--tg-blue);
+  text-decoration: underline; text-underline-offset: 2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.tgmock-more { color: var(--faint); font-size: .78rem; }
-.tgmock-scanned { color: var(--muted); font-size: .74rem; margin-top: .35rem; }
+.tgmock-more { color: var(--tg-dim); font-size: .78rem; }
+.tgmock-scanned { color: var(--tg-dim); font-size: .74rem; margin-top: .35rem; }
+
+/* Час усередині бабла, праворуч унизу — як у месенджері, а не під ним. */
+.tgmock-stamp {
+  display: flex; align-items: center; justify-content: flex-end; gap: .25rem;
+  margin-top: .35rem; font-size: .66rem; color: var(--tg-dim);
+}
+.tgmock-stamp svg { color: var(--tg-blue); }
+
+/* Inline-клавіатура притулена просто під баблом, без відступу. */
 .tgmock-keys {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 1px;
-  margin-top: .5rem; background: var(--rule);
-  border: 1px solid var(--rule); border-radius: 10px; overflow: hidden;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 2px;
+  margin-top: 2px;
 }
 .tgmock-keys span {
-  background: var(--surface); text-align: center;
-  padding: .5rem; font-size: .76rem; color: var(--ok);
+  background: var(--tg-bubble); color: var(--tg-blue);
+  text-align: center; padding: .55rem .4rem; font-size: .78rem;
+  box-shadow: 0 1px 1px rgb(0 0 0 / 8%);
 }
-.tgmock-stamp {
-  display: flex; align-items: center; justify-content: flex-end; gap: .3rem;
-  margin-top: .45rem;
-  font-family: var(--nr-mono), monospace; font-size: .64rem; color: var(--faint);
+.tgmock-keys span:first-child { border-radius: 4px 4px 4px 10px; }
+.tgmock-keys span:last-child  { border-radius: 4px 4px 10px 4px; }
+
+/* ── Ховери ───────────────────────────────────────────────────
+   Одна умова на всі: перехід швидкий, зміна помітна, нічого не стрибає.
+   Наведення має підказувати «тут можна натиснути», а не влаштовувати шоу. */
+.topbar a, .topbar button { transition: color .14s ease, opacity .14s ease; }
+.topbar a:hover, .topbar button:hover { color: var(--ember); opacity: 1; }
+
+/* Крок у списку «як це працює». Піднімається ледь-ледь: помітно, що блок
+   живий, але сусіди не рушать з місця. */
+.steplist > * {
+  transition: background .16s ease, transform .16s ease, box-shadow .16s ease;
 }
+.steplist > *:hover {
+  background: var(--wash-2);
+  transform: scale(1.012);
+  box-shadow: var(--shadow);
+  position: relative;
+  z-index: 1;
+}
+
+.card-hover { transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
+.card-hover:hover { border-color: var(--rule-2); box-shadow: var(--shadow); transform: translateY(-1px); }
+
+@media (prefers-reduced-motion: reduce) {
+  .steplist > *:hover, .card-hover:hover { transform: none; }
+}
+
+/* ── Стрічка, що крутиться ────────────────────────────────────
+   Список дублюється й повзе рівно на половину висоти — тоді стик
+   непомітний і повтор безшовний. Наведення зупиняє: людина, яка
+   придивилась до рядка, не має його втратити. */
+.feed-window { overflow: hidden; height: 21rem; position: relative; }
+.feed-scroll { animation: feed-roll 42s linear infinite; will-change: transform; }
+.feed-window:hover .feed-scroll { animation-play-state: paused; }
+@keyframes feed-roll { from { transform: translateY(0) } to { transform: translateY(-50%) } }

@@ -134,7 +134,7 @@ export async function POST(request: Request): Promise<Response> {
     if (!existing) {
       await run(
         `INSERT INTO users (id,telegram_chat_id,locale,timezone,delivery_hour,last_interaction_at)
-         VALUES (?,?,?,?,7,datetime('now'))`,
+         VALUES (?,?,?,?,9,datetime('now'))`,
         userId, String(chatId), locale, "UTC");
     }
 

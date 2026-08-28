@@ -1,3 +1,4 @@
+import Link from "next/link";
 import Shell from "../shell";
 import Footer from "../footer";
 import { detectLocale } from "../actions";
@@ -16,6 +17,16 @@ export default async function Faq() {
               <dt className="font-medium">{t(locale, `faq.${k}.q`)}</dt>
               <dd className="mt-2 text-sm leading-relaxed" style={{ color: "var(--ink-2)" }}>
                 {t(locale, `faq.${k}.a`)}
+                {/* Умови Remote OK і Remotive вимагають назви й відкритого
+                    посилання, доки ми беремо звідти дані. Із підвалу сторінку
+                    прибрали, тож єдиний шлях до неї тепер тут — і він мусить
+                    бути справжнім посиланням, а не згадкою словами. */}
+                {k === "sources" && (
+                  <>
+                    {" "}
+                    <Link href="/sources" className="link">{t(locale, "nav.sources")}</Link>
+                  </>
+                )}
               </dd>
             </div>
           ))}

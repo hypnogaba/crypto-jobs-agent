@@ -10,7 +10,6 @@ export default function Footer({ locale }: { locale: Locale }) {
         <span className="display text-base" style={{ color: "var(--ink)" }}>NextRole</span>
         <nav className="flex flex-wrap gap-5">
           <Link href="/faq" className="hover:opacity-70">{t(locale, "nav.faq")}</Link>
-          <Link href="/sources" className="hover:opacity-70">{t(locale, "nav.sources")}</Link>
           <Link href="/privacy" className="hover:opacity-70">{t(locale, "nav.privacy")}</Link>
           <Link href="/feedback" className="hover:opacity-70" style={{ color: "var(--ember)" }}>
             {t(locale, "nav.feedback")}

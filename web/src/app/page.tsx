@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import Nav from "./nav";
 import Footer from "./footer";
@@ -85,7 +84,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
   const clock = [
     { hour: "05:00", title: t(locale, "home.scan"),    body: t(locale, "home.scand") },
     { hour: "06:00", title: t(locale, "home.match"),   body: t(locale, "home.matchd") },
-    { hour: "07:00", title: t(locale, "home.deliver"), body: t(locale, "home.deliverd") },
+    { hour: "09:00", title: t(locale, "home.deliver"), body: t(locale, "home.deliverd") },
     { hour: "08:00", title: t(locale, "home.check"),   body: t(locale, "home.checkd") },
   ];
 
@@ -146,10 +145,6 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
                   {t(locale, `err.${error}`)}
                 </p>
               )}
-              <p className="mt-4 text-sm" style={{ color: "var(--muted)" }}>
-                {t(locale, "home.have")}{" "}
-                <Link href="/login" className="link">{t(locale, "home.login")}</Link>
-              </p>
             </form>
           </div>
 
@@ -171,18 +166,28 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
               </p>
 
               {feed.length > 0 ? (
-                <ol className="feed mt-3">
-                  {feed.map((j, i) => (
-                    <li key={`${j.company}-${j.title}-${i}`} style={{ "--i": i } as React.CSSProperties}>
-                      <span className="row">
-                        <span className="co">{j.company}</span>
-                        <span className="sep" aria-hidden="true"> · </span>
-                        {j.title}
-                      </span>
-                      <span className="loc">{place(j)}</span>
-                    </li>
-                  ))}
-                </ol>
+                <div className="feed-window mt-3">
+                  <div className="feed-scroll">
+                    {/* Список двічі: друга копія — це те, що видно на стику,
+                        коли перша доповзає догори. Прихована від читалок,
+                        щоб вони не зачитували все двічі. */}
+                    {[0, 1].map((pass) => (
+                      <ol className="feed" key={pass} aria-hidden={pass === 1 || undefined}>
+                        {feed.map((j, i) => (
+                          <li key={`${pass}-${j.company}-${j.title}-${i}`}
+                              style={{ "--i": pass === 0 ? i : 0 } as React.CSSProperties}>
+                            <span className="row">
+                              <span className="co">{j.company}</span>
+                              <span className="sep" aria-hidden="true"> · </span>
+                              {j.title}
+                            </span>
+                            <span className="loc">{place(j)}</span>
+                          </li>
+                        ))}
+                      </ol>
+                    ))}
+                  </div>
+                </div>
               ) : (
                 <p className="mono mt-4 px-1 pb-3 text-[13px]" style={{ color: "var(--faint)" }}>
                   {t(locale, "feed.quiet")}
@@ -214,7 +219,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
       {/* ══ ЯК ЦЕ ПРАЦЮЄ ══ */}
       <section className="mx-auto w-full max-w-5xl px-6 pb-24">
         <p className="eyebrow">{t(locale, "home.how")}</p>
-        <div className="ruled card mt-6">
+        <div className="ruled card steplist mt-6">
           {steps.map((s) => (
             <div key={s.n} className="grid grid-cols-[3rem_1fr] gap-5 px-6 py-6 sm:grid-cols-[4rem_1fr]">
               <span className="mono text-sm" style={{ color: "var(--ember)" }}>
@@ -281,6 +286,13 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
                           .replace("{companies}", num(stats.companies))}
                       </p>
                     )}
+                    <p className="tgmock-stamp">
+                      {t(locale, "tg.stamp")}
+                      <svg width="14" height="9" viewBox="0 0 16 10" fill="none" stroke="currentColor"
+                           strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M1 5.4L4 8.5 9.6 1.5M7.4 8.2L8 8.8 15 1.5" />
+                      </svg>
+                    </p>
                   </div>
 
                   {/* Це справжня inline-клавіатура під кожною добіркою */}
@@ -288,13 +300,6 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
                     <span>{t(locale, "dash.notRelevant")}</span>
                     <span>{t(locale, "dash.more")}</span>
                   </div>
-                  <p className="tgmock-stamp">
-                    {t(locale, "tg.stamp")}
-                    <svg width="14" height="9" viewBox="0 0 16 10" fill="none" stroke="currentColor"
-                         strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <path d="M1 5.4L4 8.5 9.6 1.5M7.4 8.2L8 8.8 15 1.5" />
-                    </svg>
-                  </p>
                 </div>
               </div>
             </div>
@@ -304,7 +309,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
             </p>
           </div>
 
-          <div className="ruled card">
+          <div className="ruled card steplist">
             {[1, 2, 3].map((n) => (
               <div key={n} className="px-7 py-7">
                 <h3 className="font-medium">{t(locale, `tg.p${n}`)}</h3>
