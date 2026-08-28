@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="NextRole">
+  <defs>
+    <pattern id="fine" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="rgb(32 33 35 / 9%)" stroke-width="1.5"/>
+    </pattern>
+    <pattern id="major" width="128" height="128" patternUnits="userSpaceOnUse">
+      <path d="M128 0H0V128" fill="none" stroke="rgb(32 33 35 / 16%)" stroke-width="2"/>
+    </pattern>
+  </defs>
+  <rect width="512" height="512" fill="#fbfbfa"/>
+  <rect width="512" height="512" fill="url(#fine)"/>
+  <rect width="512" height="512" fill="url(#major)"/>
+  <path d="M118 386V302h84v-84h84v-84" fill="none" stroke="#202123" stroke-width="48" stroke-linecap="square"/>
+  <rect x="328" y="92" width="84" height="84" fill="#b34a1e"/>
+</svg>
