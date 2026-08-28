@@ -112,6 +112,15 @@ async function persistProfile(
     isCv ? rawInput.slice(0, 20_000) : null,
     JSON.stringify(p.spheres), JSON.stringify(p.industries),
     p.seniority, p.remoteMode, p.location, p.salaryMin, p.salaryCurrency);
+
+  // Перша добірка поза розкладом. Умова NOT EXISTS принципова: без неї
+  // кожне редагування профілю замовляло б позачергову доставку. Таблиця
+  // й погодинний розгрібач уже існують (scanner/src/digest.ts).
+  await run(
+    `INSERT INTO delivery_requests (id,user_id)
+     SELECT ?,? WHERE NOT EXISTS (SELECT 1 FROM sent WHERE user_id=?)
+                  AND NOT EXISTS (SELECT 1 FROM delivery_requests WHERE user_id=?)`,
+    uuid(), userId, userId, userId);
 }
 
 // ── акаунт ───────────────────────────────────────────────────
@@ -175,10 +184,43 @@ export async function recordFeedback(formData: FormData): Promise<void> {
 }
 
 export const listMatches = async (userId: string) =>
-  all<{ id: string; company: string; title: string; location: string | null; url: string; why_fits: string; created_at: string; digest_id: string }>(
-    `SELECT s.id,j.company,j.title,j.location,j.url,s.why_fits,s.created_at,s.digest_id
+  all<{ id: string; company: string; title: string; location: string | null; url: string;
+        why_fits: string; match_facts: string; summary: string | null;
+        salary_min: number | null; salary_currency: string | null;
+        applied_at: string | null; hidden_at: string | null;
+        created_at: string; digest_id: string }>(
+    `SELECT s.id,j.company,j.title,j.location,j.url,s.why_fits,s.match_facts,
+            j.summary,j.salary_min,j.salary_currency,
+            s.applied_at,s.hidden_at,s.created_at,s.digest_id
      FROM sent s JOIN jobs_cache j ON j.id = s.job_id
      WHERE s.user_id=? ORDER BY s.created_at DESC LIMIT 50`, userId);
+
+/**
+ * Стан вакансії в кабінеті.
+ *
+ * Кожна дія звіряє власника: id рядка sent приходить із форми, тож без
+ * умови user_id людина могла б змінити чужий запис, підмінивши id.
+ */
+async function setMatchState(
+  formData: FormData, column: "applied_at" | "hidden_at", value: "now" | null
+): Promise<void> {
+  const user = await requireUser();
+  const id = String(formData.get("id") ?? "");
+  if (!id) return;
+  // Назва стовпця береться з літерального об'єднання типів, а не з форми —
+  // рядок SQL лишається замкненим.
+  await run(
+    `UPDATE sent SET ${column} = ${value === "now" ? "datetime('now')" : "NULL"}
+      WHERE id=? AND user_id=?`, id, user.id);
+  await run("UPDATE users SET last_interaction_at=datetime('now') WHERE id=?", user.id);
+  redirect("/dashboard");
+}
+
+// Кожен експорт у файлі "use server" мусить бути саме async-функцією.
+// Стрілка, що просто повертає проміс, збірку не пройде.
+export async function hideMatch(f: FormData): Promise<void>   { await setMatchState(f, "hidden_at", "now"); }
+export async function unhideMatch(f: FormData): Promise<void> { await setMatchState(f, "hidden_at", null); }
+export async function undoApplied(f: FormData): Promise<void> { await setMatchState(f, "applied_at", null); }
 
 /** Перемикач мови в навігації. Для зареєстрованих зберігається в профіль. */
 /**
