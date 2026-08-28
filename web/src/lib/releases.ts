@@ -11,6 +11,14 @@ export const RELEASES: Release[] = [
     "date": "2026-08-28",
     "changes": [
       {
+        "hash": "3076f71",
+        "subject": "SETUP: домен, щоденні таймери, лічильник і збірка історії версій"
+      },
+      {
+        "hash": "f965cf7",
+        "subject": "Адмінка: що горить — угорі, зростання — графіком, довідники — згорнуті"
+      },
+      {
         "hash": "2fb2356",
         "subject": "Посилання на сайт тепер має картку; шаблонні картинки Next прибрано"
       },
@@ -318,4 +326,4 @@ export const RELEASES: Release[] = [
   }
 ];
 
-export const GENERATED_AT = "2026-08-28 20:20";
+export const GENERATED_AT = "2026-08-28 20:30";
