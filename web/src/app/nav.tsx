@@ -56,9 +56,10 @@ export default async function Nav({ locale }: { locale: Locale }) {
           <form action={switchLocale} className="flex gap-2">
             {LOCALES.map((l) => (
               <button key={l.id} name="locale" value={l.id} type="submit"
-                className="mono text-xs uppercase hover:opacity-100"
-                style={{ opacity: l.id === locale ? 1 : 0.45,
-                         color: l.id === locale ? "var(--ember)" : "inherit" }}>
+                className="pick mono text-xs uppercase"
+                data-on={l.id === locale}
+                aria-pressed={l.id === locale}
+                title={l.name} aria-label={l.name}>
                 {l.id}
               </button>
             ))}
@@ -68,9 +69,9 @@ export default async function Nav({ locale }: { locale: Locale }) {
             {THEMES.map((th) => (
               <button key={th.id} name="theme" value={th.id === "system" ? "" : th.id}
                 type="submit" title={t(locale, th.key)} aria-label={t(locale, th.key)}
-                className="flex h-6 w-6 items-center justify-center hover:opacity-100"
-                style={{ opacity: th.id === theme ? 1 : 0.4,
-                         color: th.id === theme ? "var(--ember)" : "inherit" }}>
+                className="pick flex h-6 w-6 items-center justify-center"
+                data-on={th.id === theme}
+                aria-pressed={th.id === theme}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                      strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   {th.icon}

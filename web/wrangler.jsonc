@@ -27,6 +27,11 @@
     { "pattern": "nextrole.info", "custom_domain": true },
     { "pattern": "www.nextrole.info", "custom_domain": true }
   ],
+  // Маячок Cloudflare Web Analytics. Не секрет — він і так видимий у HTML,
+  // і вміє лише слати перегляди в наш лічильник. Порожнє значення = вимкнено.
+  "vars": {
+    "WEB_ANALYTICS_TOKEN": ""
+  },
   "workers_dev": true,
   "observability": {
     "enabled": true

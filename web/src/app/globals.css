@@ -511,6 +511,16 @@ body::before {
 .topbar a, .topbar button { transition: color .14s ease, opacity .14s ease; }
 .topbar a:hover, .topbar button:hover { color: var(--ember); opacity: 1; }
 
+/* Вибір мови й теми. Стан живе в data-атрибуті, а не в inline-стилі: inline
+   виграє в будь-якого правила таблиці, тому попередній .topbar button:hover
+   з opacity:1 не спрацьовував жодного разу — наведення на «EN» не робило
+   нічого. Обраний варіант — ember, наведений — повний контраст без ember,
+   інакше наведення й вибір виглядали б однаково. */
+.topbar .pick { opacity: .45; cursor: pointer; }
+.topbar .pick:hover,
+.topbar .pick:focus-visible { opacity: 1; color: var(--ink); }
+.topbar .pick[data-on="true"] { opacity: 1; color: var(--ember); }
+
 /* Крок у списку «як це працює». Піднімається ледь-ледь: помітно, що блок
    живий, але сусіди не рушать з місця. */
 .steplist > * {

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { cookies, headers } from "next/headers";
 import { isLocale, localeFromHeader } from "@/lib/i18n";
+import Analytics from "./analytics";
 import { Inter_Tight, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -65,7 +66,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang={lang} data-theme={theme}
           className={`${ui.variable} ${mono.variable}`}>
-      <body className="flex min-h-screen flex-col">{children}</body>
+      <body className="flex min-h-screen flex-col">
+        {children}
+        <Analytics />
+      </body>
     </html>
   );
 }
