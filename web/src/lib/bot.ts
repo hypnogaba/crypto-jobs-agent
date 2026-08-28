@@ -1,4 +1,10 @@
 import { one, run, uuid } from "./db";
+import {
+  emptyDraft, keyboard, nextStep, questionText, askOtherAmount, readyText,
+  summary, toggle, type Draft, type Step,
+} from "./bot-onboarding";
+import { isLocale } from "./i18n";
+import type { Locale } from "./vocab";
 
 /** Команди бота. Кабінет у чаті — мінімальний, повний лишається на сайті. */
 
@@ -13,17 +19,195 @@ async function send(env: Env, chatId: number, text: string): Promise<void> {
   });
 }
 
-export async function startBotOnboarding(env: Env, chatId: number): Promise<void> {
+// ── Покроковий онбординг ──────────────────────────────────────
+// Кнопки, а не вільний текст: людині не було зрозуміло, що писати, а бот
+// мовчки приймав будь-що — на «тест» він зберігав порожній профіль.
+
+interface Keyed { text: string; callback_data: string }
+
+async function sendKeyboard(
+  env: Env, chatId: number, text: string, rows: Keyed[][]
+): Promise<number | null> {
+  const token = env.TELEGRAM_BOT_TOKEN;
+  if (!token) return null;
+  const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, text, reply_markup: { inline_keyboard: rows } }),
+  });
+  const body = (await res.json()) as { result?: { message_id?: number } };
+  return body.result?.message_id ?? null;
+}
+
+/** Редагуємо те саме повідомлення, щоб чат не заріс десятком однакових. */
+async function editKeyboard(
+  env: Env, chatId: number, messageId: number, text: string, rows: Keyed[][]
+): Promise<void> {
+  const token = env.TELEGRAM_BOT_TOKEN;
+  if (!token) return;
+  await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, message_id: messageId, text,
+                           reply_markup: { inline_keyboard: rows } }),
+  });
+}
+
+/** Без цього кнопка крутиться, доки Telegram не здасться. */
+async function ackButton(env: Env, callbackId: string): Promise<void> {
+  const token = env.TELEGRAM_BOT_TOKEN;
+  if (!token) return;
+  await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ callback_query_id: callbackId }),
+  });
+}
+
+interface StateRow { step: string; draft: string; message_id: number | null }
+
+const readDraft = (raw: string): Draft => {
+  try { return { ...emptyDraft(), ...(JSON.parse(raw) as Partial<Draft>) }; }
+  catch { return emptyDraft(); }
+};
+
+async function saveState(chatId: number, step: Step, draft: Draft, messageId: number | null): Promise<void> {
+  await run(
+    `INSERT INTO bot_state (chat_id,step,draft,message_id,updated_at)
+     VALUES (?,?,?,?,datetime('now'))
+     ON CONFLICT(chat_id) DO UPDATE SET
+       step=excluded.step, draft=excluded.draft,
+       message_id=COALESCE(excluded.message_id, bot_state.message_id),
+       updated_at=datetime('now')`,
+    String(chatId), step, JSON.stringify(draft), messageId);
+}
+
+export async function startBotOnboarding(env: Env, chatId: number, locale: Locale = "en"): Promise<void> {
   const existing = await one<{ id: string }>("SELECT id FROM users WHERE telegram_chat_id=?", String(chatId));
   if (existing) {
     await send(env, chatId, "Ти вже підключений. /profile — подивитись профіль, /time — змінити годину, /pause — призупинити.");
     return;
   }
-  await send(env, chatId,
-    "Привіт. Я щоранку надсилаю п'ять вакансій, підібраних під тебе.\n\n" +
-    "Напиши одним реченням, яку роботу шукаєш — наприклад «партнерства у web3, віддалено, від €80k». " +
-    "Або надішли своє резюме текстом.");
+
+  const greeting = locale === "uk"
+    ? "Привіт. Я щоранку надсилаю п'ять вакансій, підібраних під тебе.\nЧотири питання, тридцять секунд."
+    : "Hi. Every morning I send five jobs picked for you.\nFour questions, thirty seconds.";
+  await send(env, chatId, greeting);
+
+  const draft = emptyDraft();
+  const id = await sendKeyboard(env, chatId, questionText("spheres", locale), keyboard("spheres", draft, locale));
+  await saveState(chatId, "spheres", draft, id);
 }
+
+/** Один дотик по кнопці. Повертає true, якщо це справді був онбординг. */
+export async function handleOnboardingButton(
+  env: Env, chatId: number, data: string, callbackId: string | undefined, locale: Locale
+): Promise<boolean> {
+  if (!data.startsWith("ob:")) return false;
+  if (callbackId) await ackButton(env, callbackId);
+
+  const [, field, value] = data.split(":");
+  if (field === "noop" || !field || value === undefined) return true;
+
+  const row = await one<StateRow>("SELECT step,draft,message_id FROM bot_state WHERE chat_id=?", String(chatId));
+  if (!row) return true;                       // стан загубився — мовчимо, /start почне заново
+
+  const draft = readDraft(row.draft);
+  const step = row.step as Step;
+
+  // Кілька відповідей: перемикаємо й перемальовуємо те саме питання
+  if ((step === "spheres" || step === "industries") && value !== "__next") {
+    if (step === "spheres") draft.spheres = toggle(draft.spheres, value);
+    else draft.industries = toggle(draft.industries, value);
+    await saveState(chatId, step, draft, null);
+    if (row.message_id) {
+      await editKeyboard(env, chatId, row.message_id, questionText(step, locale), keyboard(step, draft, locale));
+    }
+    return true;
+  }
+
+  // Одна відповідь — або «Готово» в списку з кількома
+  if (step === "seniority") draft.seniority = value;
+  if (step === "where") draft.remoteMode = value;
+  if (step === "salary") {
+    if (value === "__other") {
+      await saveState(chatId, "salary", draft, null);
+      await send(env, chatId, askOtherAmount(locale));
+      return true;
+    }
+    const n = Number.parseInt(value, 10);
+    draft.salaryMin = Number.isFinite(n) && n > 0 ? n : null;
+    draft.salaryCurrency = draft.salaryMin ? "EUR" : null;
+  }
+
+  const after = nextStep(step);
+  if (after) {
+    await saveState(chatId, after, draft, null);
+    if (row.message_id) {
+      await editKeyboard(env, chatId, row.message_id, questionText(after, locale), keyboard(after, draft, locale));
+    }
+    return true;
+  }
+
+  await finishOnboarding(env, chatId, draft, locale, row.message_id);
+  return true;
+}
+
+/** «Інша сума» — єдине місце, де в онбордингу лишився вільний текст. */
+export async function handleOnboardingText(
+  env: Env, chatId: number, text: string, locale: Locale
+): Promise<boolean> {
+  const row = await one<StateRow>("SELECT step,draft,message_id FROM bot_state WHERE chat_id=?", String(chatId));
+  if (!row || row.step !== "salary") return false;
+
+  const m = /(\d[\d\s.,]*)\s*([a-zA-Z€$£]{1,4})?/.exec(text);
+  const amount = m ? Number.parseInt(m[1]!.replace(/[^\d]/g, ""), 10) : NaN;
+  if (!Number.isFinite(amount) || amount <= 0) {
+    await send(env, chatId, askOtherAmount(locale));
+    return true;
+  }
+
+  const draft = readDraft(row.draft);
+  draft.salaryMin = amount;
+  const cur = (m?.[2] ?? "EUR").toUpperCase().replace("€", "EUR").replace("$", "USD").replace("£", "GBP");
+  draft.salaryCurrency = cur.slice(0, 3);
+  await finishOnboarding(env, chatId, draft, locale, row.message_id);
+  return true;
+}
+
+async function finishOnboarding(
+  env: Env, chatId: number, draft: Draft, locale: Locale, messageId: number | null
+): Promise<void> {
+  const existing = await one<{ id: string }>("SELECT id FROM users WHERE telegram_chat_id=?", String(chatId));
+  const userId = existing?.id ?? uuid();
+  if (!existing) {
+    await run(
+      `INSERT INTO users (id,telegram_chat_id,locale,timezone,delivery_hour,last_interaction_at)
+       VALUES (?,?,?,?,7,datetime('now'))`,
+      userId, String(chatId), locale, "UTC");
+  }
+
+  await run(
+    `INSERT INTO profiles (user_id,mode,raw_input,spheres,industries,seniority,remote_mode,location,salary_min,salary_currency,updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,datetime('now'))
+     ON CONFLICT(user_id) DO UPDATE SET
+       mode=excluded.mode, raw_input=excluded.raw_input, spheres=excluded.spheres,
+       industries=excluded.industries, seniority=excluded.seniority,
+       remote_mode=excluded.remote_mode, salary_min=excluded.salary_min,
+       salary_currency=excluded.salary_currency, updated_at=datetime('now')`,
+    userId, "bot", null,
+    JSON.stringify(draft.spheres), JSON.stringify(draft.industries),
+    draft.seniority, draft.remoteMode ?? "remote_only", null,
+    draft.salaryMin, draft.salaryCurrency);
+
+  await run("DELETE FROM bot_state WHERE chat_id=?", String(chatId));
+
+  const done = `${summary(draft, locale)}\n\n${readyText(locale)}`;
+  if (messageId) await editKeyboard(env, chatId, messageId, done, []);
+  else await send(env, chatId, done);
+}
+
+export const botLocale = (code: string | undefined): Locale => {
+  const two = (code ?? "en").slice(0, 2).toLowerCase();
+  return isLocale(two) ? two : "en";
+};
 
 export async function continueBotOnboarding(env: Env, chatId: number, data: string): Promise<void> {
   const user = await one<{ id: string }>("SELECT id FROM users WHERE telegram_chat_id=?", String(chatId));

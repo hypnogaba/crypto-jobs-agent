@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { one, run, uuid } from "@/lib/db";
 import { parseProfile } from "@/lib/parse";
-import { handleCommand, startBotOnboarding, continueBotOnboarding } from "@/lib/bot";
+import { handleCommand, startBotOnboarding, continueBotOnboarding,
+         handleOnboardingButton, handleOnboardingText } from "@/lib/bot";
 import { isLocale } from "@/lib/i18n";
 
 /**
@@ -65,7 +66,7 @@ export async function POST(request: Request): Promise<Response> {
 
   // ── /start без токена: повна реєстрація прямо в чаті ──
   if (/^\/start\b/.test(text)) {
-    await startBotOnboarding(env, chatId);
+    await startBotOnboarding(env, chatId, locale);
     return NextResponse.json({ ok: true });
   }
 
@@ -75,7 +76,16 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   if (callback) {
+    // Кнопки онбордингу йдуть першими: реакції на добірку мають префікс fb:
+    if (await handleOnboardingButton(env, chatId, callback, update.callback_query?.id, locale)) {
+      return NextResponse.json({ ok: true });
+    }
     await continueBotOnboarding(env, chatId, callback);
+    return NextResponse.json({ ok: true });
+  }
+
+  // Єдине місце, де в онбордингу лишився вільний текст, — «інша сума»
+  if (text.length >= 1 && await handleOnboardingText(env, chatId, text, locale)) {
     return NextResponse.json({ ok: true });
   }
 
