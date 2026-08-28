@@ -61,16 +61,25 @@ export interface ParsedTitle {
  * живій стрічці дала вакансію з містом «$1000–2000». Тире буває трьох видів,
  * бо його ставлять люди.
  */
-const SALARY = /^(?:від\s*|from\s*)?\$\s*(\d[\d\s]*)(?:\s*[–—-]\s*\$?\s*(\d[\d\s]*))?\+?$/i;
+const SALARY = /^(від|from|до|up\s*to)?\s*\$\s*(\d[\d\s]*)(?:\s*[–—-]\s*\$?\s*(\d[\d\s]*))?\+?$/i;
 
-function parseSalary(part: string): { min: number; max: number | null } | null {
+/** «до» задає стелю, а не підлогу. */
+const CEILING = /^(до|up\s*to)$/i;
+
+function parseSalary(part: string): { min: number | null; max: number | null } | null {
   const m = SALARY.exec(part.trim());
   if (!m) return null;
   const num = (v: string): number => Number(v.replace(/\s/g, ""));
-  const min = num(m[1]!);
-  if (!Number.isFinite(min) || min <= 0) return null;
-  const max = m[2] ? num(m[2]) : null;
-  return { min, max: max && max >= min ? max : null };
+  const first = num(m[2]!);
+  if (!Number.isFinite(first) || first <= 0) return null;
+
+  // «до $5000» — це максимум. Записати його як мінімум означало б підняти
+  // людині поріг замість того, щоб його опустити: у базі вже лежало п'ять
+  // таких рядків, і всі вони мали зарплату в локації.
+  if (CEILING.test(m[1] ?? "")) return { min: null, max: first };
+
+  const second = m[3] ? num(m[3]) : null;
+  return { min: first, max: second && second >= first ? second : null };
 }
 
 /**
@@ -96,7 +105,7 @@ export function parseBoardTitle(raw: string): ParsedTitle | null {
     const company = parts.shift();
     if (head && company) {
       const remote = parts.some((p) => REMOTE_TAIL.test(p));
-      let pay: { min: number; max: number | null } | null = null;
+      let pay: { min: number | null; max: number | null } | null = null;
       const place: string[] = [];
       for (const p of parts) {
         if (REMOTE_TAIL.test(p)) continue;

@@ -41,6 +41,20 @@ describe("parseBoardTitle", () => {
     });
   });
 
+  // У базі лежало п'ять таких рядків, і в усіх зарплата стояла в локації.
+  // «до» — це стеля: записати її як підлогу означало б підняти людині поріг.
+  it("розуміє «до» як стелю, а не підлогу", () => {
+    expect(parseBoardTitle("Senior Golang Developer в Acme, до $5000")).toMatchObject({
+      salaryMin: null, salaryMax: 5000, salaryCurrency: "USD", location: null,
+    });
+    expect(parseBoardTitle("HR-менеджер в Acme, до $900, Львів")).toMatchObject({
+      salaryMin: null, salaryMax: 900, location: "Львів",
+    });
+    expect(parseBoardTitle("Full Stack Developer в Acme, до $3000, за кордоном")).toMatchObject({
+      salaryMax: 3000, location: "за кордоном",
+    });
+  });
+
   it("не бачить зарплати там, де її немає", () => {
     expect(parseBoardTitle("QA Engineer в SoftServe, Львів")).toMatchObject({
       salaryMin: null, salaryCurrency: null,
