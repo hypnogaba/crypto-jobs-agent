@@ -253,3 +253,43 @@ body {
   .rise { animation: none; }
   * { transition: none !important; }
 }
+
+/* ── Рядок наміру ─────────────────────────────────────────────
+   Головна дія продукту — сказати одним реченням, кого шукаєш.
+   Тому вхід виглядає як рядок чату, а не як анкета: одне поле,
+   одна кнопка, решта тихо під ним. Радіус більший, ніж деінде в
+   системі, — це єдине місце, де хочеться писати, а не заповнювати. */
+.composer {
+  background: color-mix(in srgb, var(--night-ink) 6%, transparent);
+  border: 1px solid var(--night-rule);
+  border-radius: 14px;
+  padding: 0.9rem 1rem 0.65rem;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.composer:focus-within {
+  border-color: var(--ember);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ember) 16%, transparent);
+}
+.composer textarea {
+  width: 100%; background: transparent; border: 0; outline: none;
+  color: var(--night-ink); font: inherit; font-size: 1.05rem;
+  line-height: 1.55; resize: none; min-height: 3.4rem;
+}
+.composer textarea::placeholder { color: var(--night-2); }
+
+.composer-bar { display: flex; align-items: center; gap: .7rem; margin-top: .55rem; }
+
+.icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 2.15rem; height: 2.15rem; border-radius: 999px;
+  border: 1px solid var(--night-rule); background: transparent;
+  color: var(--night-2); cursor: pointer; flex: none;
+  transition: color .15s ease, border-color .15s ease, filter .15s ease;
+}
+.icon-btn:hover { color: var(--night-ink); border-color: var(--ember); }
+.icon-btn:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; }
+.icon-send {
+  margin-left: auto;
+  background: var(--ember); border-color: var(--ember); color: var(--ember-ink);
+}
+.icon-send:hover { color: var(--ember-ink); filter: brightness(1.09); }

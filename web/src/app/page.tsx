@@ -46,37 +46,48 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
             {t(locale, "home.lede")}
           </p>
 
-          {/* Форма просто в героя: єдина дія на сторінці */}
+          {/* Єдина дія на сторінці — написати одне речення. Тому це рядок,
+              а не анкета: скріпка і стрілка всередині, решта нижче й тихо. */}
           <form action={startOnboarding} className="rise rise-4 mt-11 max-w-2xl">
-            <label htmlFor="input" className="eyebrow">{t(locale, "home.field")}</label>
-            <textarea
-              id="input" name="input" rows={4}
-              className="field field-night mt-3 resize-y text-base"
-              placeholder={t(locale, "home.placeholder")}
-            />
-            <label className="mt-4 flex flex-wrap items-center gap-3">
-              <span className="eyebrow">{t(locale, "home.orCv")}</span>
-              <input type="file" name="cv" accept=".pdf,.txt,.md,text/plain,application/pdf"
-                className="text-sm file:mr-3 file:cursor-pointer file:rounded-sm file:border
-                           file:px-3 file:py-1.5 file:text-xs"
-                style={{ color: "var(--night-2)" }} />
-            </label>
-            <p className="mt-2 text-xs" style={{ color: "var(--night-2)" }}>{t(locale, "home.cvHint")}</p>
+            <div className="composer">
+              <label htmlFor="input" className="sr-only">{t(locale, "home.field")}</label>
+              <textarea
+                id="input" name="input" rows={2}
+                placeholder={t(locale, "home.placeholder")}
+              />
+              <div className="composer-bar">
+                <label className="icon-btn" title={t(locale, "home.orCv")}>
+                  <span className="sr-only">{t(locale, "home.orCv")}</span>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                       strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                  </svg>
+                  <input type="file" name="cv" className="sr-only"
+                         accept=".pdf,.txt,.md,text/plain,application/pdf" />
+                </label>
+                <span className="text-xs" style={{ color: "var(--night-2)" }}>
+                  {t(locale, "home.cvHint")}
+                </span>
+                <button type="submit" className="icon-btn icon-send" aria-label={t(locale, "home.cta")}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                       strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M12 19V5M5 12l7-7 7 7" />
+                  </svg>
+                </button>
+              </div>
+            </div>
 
             {error && (
               <p className="mt-3 text-sm" style={{ color: "var(--ember)" }}>
                 {t(locale, `err.${error}`)}
               </p>
             )}
-            <div className="mt-5 flex flex-wrap items-center gap-5">
-              <button type="submit" className="btn">{t(locale, "home.cta")}</button>
-              <span className="text-sm" style={{ color: "var(--night-2)" }}>
-                {t(locale, "home.have")}{" "}
-                <Link href="/login" className="link" style={{ color: "var(--night-ink)" }}>
-                  {t(locale, "home.login")}
-                </Link>
-              </span>
-            </div>
+            <p className="mt-4 text-sm" style={{ color: "var(--night-2)" }}>
+              {t(locale, "home.have")}{" "}
+              <Link href="/login" className="link" style={{ color: "var(--night-ink)" }}>
+                {t(locale, "home.login")}
+              </Link>
+            </p>
           </form>
 
           {stats && (
