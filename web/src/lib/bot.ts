@@ -102,6 +102,20 @@ export async function startBotOnboarding(env: Env, chatId: number, locale: Local
   await saveState(chatId, "spheres", draft, id);
 }
 
+/**
+ * Перша добірка поза розкладом.
+ *
+ * Та сама умова, що й на сайті (actions.ts): замовляємо лише першу. Без
+ * NOT EXISTS кожне повторне проходження онбордингу замовляло б ще одну.
+ */
+async function requestFirstDigest(userId: string): Promise<void> {
+  await run(
+    `INSERT INTO delivery_requests (id,user_id)
+     SELECT ?,? WHERE NOT EXISTS (SELECT 1 FROM sent WHERE user_id=?)
+                  AND NOT EXISTS (SELECT 1 FROM delivery_requests WHERE user_id=?)`,
+    uuid(), userId, userId, userId);
+}
+
 /** Один дотик по кнопці. Повертає true, якщо це справді був онбординг. */
 export async function handleOnboardingButton(
   env: Env, chatId: number, data: string, callbackId: string | undefined, locale: Locale
@@ -292,6 +306,7 @@ async function finishOnboarding(
     draft.salaryMin, draft.salaryCurrency);
 
   await run("DELETE FROM bot_state WHERE chat_id=?", String(chatId));
+  await requestFirstDigest(userId);
 
   const done = `${summary(draft, locale)}\n\n${readyText(locale)}`;
   if (messageId) await editKeyboard(env, chatId, messageId, done, []);
@@ -428,6 +443,7 @@ export async function handleDocument(
       parsed.seniority, parsed.remoteMode, parsed.location, parsed.salaryMin, parsed.salaryCurrency);
 
     await run("DELETE FROM bot_state WHERE chat_id=?", String(chatId));
+    await requestFirstDigest(userId);
     await send(env, chatId, `${say("cvDone", locale)}\n\n${summary({
       spheres: parsed.spheres, industries: parsed.industries, customRole: null,
       seniority: parsed.seniority, remoteMode: parsed.remoteMode,

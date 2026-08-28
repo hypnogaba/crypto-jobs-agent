@@ -133,11 +133,13 @@ const WORD = {
     fr: "Écrivez votre rôle avec vos mots, par exemple : recrutement technique, rédaction de subventions, audit de smart contracts.",
     ru: "Напиши свою роль своими словами — например: технический рекрутинг, grant writing, аудит смартконтрактов.",
   },
+  // Три кроки, а не гола готовність. І «завтра о 09:00» тут більше не
+  // писали б правду: профіль одразу замовляє позачергову добірку.
   ready: {
-    en: "All set. The first five roles arrive tomorrow at 09:00.",
-    uk: "Готово. Перші п'ять вакансій прийдуть завтра о 09:00.",
-    fr: "C'est prêt. Les cinq premières offres arrivent demain à 09h00.",
-    ru: "Готово. Первые пять вакансий придут завтра в 09:00.",
+    en: "You are set.\n\n\u2713 Profile saved\n\u25cf First batch \u2014 within the hour\n\u25cb Then \u2014 every day at your time",
+    uk: "Готово.\n\n\u2713 Профіль збережено\n\u25cf Перша добірка \u2014 протягом години\n\u25cb Далі \u2014 щодня у твій час",
+    fr: "C'est prêt.\n\n\u2713 Profil enregistré\n\u25cf Première sélection \u2014 dans l'heure\n\u25cb Ensuite \u2014 chaque jour à votre heure",
+    ru: "Готово.\n\n\u2713 Профиль сохранён\n\u25cf Первая подборка \u2014 в течение часа\n\u25cb Дальше \u2014 каждый день в твоё время",
   },
   commands: {
     en: "/profile — your profile\n/time — delivery hour\n/pause and /resume\n/site — sign in on the web",

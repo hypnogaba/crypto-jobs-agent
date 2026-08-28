@@ -22,6 +22,13 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     "SELECT timezone,delivery_hour FROM users WHERE id=?", user.id);
   const tz = me?.timezone ?? "UTC";
 
+  // «Перша добірка — протягом години» правдиве лише поки запит справді
+  // висить неопрацьованим. Якщо його вже розгребли й нічого не знайшлося,
+  // обіцяти годину — брехня, і тоді працює звичайний порожній стан.
+  const pending = await one<{ n: number }>(
+    "SELECT COUNT(*) n FROM delivery_requests WHERE user_id=? AND handled_at IS NULL", user.id);
+  const firstOnTheWay = (pending?.n ?? 0) > 0;
+
   // Ранкова пачка — одна одиниця, а не п'ять карток.
   const digests = new Map<string, Match[]>();
   for (const m of matches) {
@@ -40,7 +47,16 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       {queued && <p className="tag tag-ok mb-6 inline-block">{t(locale, "dash.queued")}</p>}
 
       {matches.length === 0 ? (
-        <FirstRun locale={locale} hour={me?.delivery_hour ?? 9} connected={Boolean(user.telegramChatId)} />
+        firstOnTheWay ? (
+          <FirstRun locale={locale} hour={me?.delivery_hour ?? 9} connected={Boolean(user.telegramChatId)} />
+        ) : (
+          <div className="card px-8 py-14 text-center">
+            <p className="display text-2xl" style={{ color: "var(--ink-2)" }}>{t(locale, "dash.empty")}</p>
+            {!user.telegramChatId && (
+              <a href="/telegram" className="btn mt-7">{t(locale, "telegram.button")}</a>
+            )}
+          </div>
+        )
       ) : (
         <div className="flex flex-col gap-12">
           {[...digests.entries()].map(([digestId, group]) => {
