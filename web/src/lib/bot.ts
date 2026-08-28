@@ -293,6 +293,13 @@ export async function handleWhyButton(
 
   const column = TUNED[reason];
   if (column) {
+    // Назва стовпця підставляється в SQL, а не передається параметром — так
+    // не можна. Зараз це безпечно лише тому, що значення береться з TUNED,
+    // але одна необережна правка перетворила б це на ін'єкцію. Тому перевірка
+    // явна: у запит потрапляє тільки те, що є в цьому списку.
+    const ALLOWED = ["seniority_weight", "location_weight", "salary_weight"] as const;
+    if (!ALLOWED.includes(column as (typeof ALLOWED)[number])) return true;
+
     await run(
       `UPDATE user_tuning SET ${column} = MIN(${column} + 0.5, 3.0),
                               updated_at = datetime('now') WHERE user_id=?`, user.id);
