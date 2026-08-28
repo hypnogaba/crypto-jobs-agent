@@ -3,6 +3,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { one, run, uuid } from "@/lib/db";
 import { parseProfile } from "@/lib/parse";
 import { handleCommand, startBotOnboarding, continueBotOnboarding } from "@/lib/bot";
+import { isLocale } from "@/lib/i18n";
 
 /**
  * Вебхук Telegram.
@@ -25,8 +26,10 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const update = (await request.json()) as {
-    message?: { text?: string; chat?: { id?: number }; document?: { file_id?: string } };
-    callback_query?: { data?: string; message?: { chat?: { id?: number } }; id?: string };
+    message?: { text?: string; chat?: { id?: number }; document?: { file_id?: string };
+                from?: { language_code?: string } };
+    callback_query?: { data?: string; message?: { chat?: { id?: number } }; id?: string;
+                       from?: { language_code?: string } };
   };
 
   const chatId = update.message?.chat?.id ?? update.callback_query?.message?.chat?.id;
@@ -34,6 +37,12 @@ export async function POST(request: Request): Promise<Response> {
 
   const text = update.message?.text?.trim() ?? "";
   const callback = update.callback_query?.data;
+
+  // Telegram сам каже, якою мовою людина користується. Досі тут стояло жорстке
+  // "en", тож той, хто зареєструвався в боті, отримував англійський сайт.
+  const langCode = (update.message?.from?.language_code
+    ?? update.callback_query?.from?.language_code ?? "en").slice(0, 2).toLowerCase();
+  const locale = isLocale(langCode) ? langCode : "en";
 
   // ── /start із токеном: прив'язка акаунту, створеного на сайті ──
   const startToken = /^\/start(?:@\w+)?\s+(\S+)$/.exec(text)?.[1];
@@ -80,7 +89,7 @@ export async function POST(request: Request): Promise<Response> {
       await run(
         `INSERT INTO users (id,telegram_chat_id,locale,timezone,delivery_hour,last_interaction_at)
          VALUES (?,?,?,?,7,datetime('now'))`,
-        userId, String(chatId), "en", "UTC");
+        userId, String(chatId), locale, "UTC");
     }
 
     await run(
