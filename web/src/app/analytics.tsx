@@ -29,7 +29,10 @@ export default function Analytics() {
 
   return (
     <script
+      // Модульний скрипт і так відкладений; defer стоїть явно, бо інакше
+      // правило @next/next/no-sync-scripts вважає тег блокувальним.
       type="module"
+      defer
       src="https://static.cloudflareinsights.com/beacon.min.js"
       data-cf-beacon={JSON.stringify({ token })}
     />
