@@ -566,6 +566,22 @@ export async function handleCommand(
       await send(env, chatId, say("feedbackAsk", locale));
       break;
 
+    // Вхід для власника: одна команда — і одразу в панель, без проміжного
+    // кабінету. Сесія живе 30 днів, тож насправді це раз на місяць.
+    case "/admin": {
+      if (String(chatId) !== env.ADMIN_CHAT_ID) { await send(env, chatId, say("unknown", locale)); break; }
+      const token = crypto.randomUUID().replace(/-/g, "");
+      await run("UPDATE users SET connect_token=?, connect_expires_at=? WHERE id=?",
+        token, new Date(Date.now() + 15 * 60_000).toISOString(), user!.id);
+      const base = env.SITE_URL ?? "https://nextrole.info";
+      await send(env, chatId, `${say("adminLink", locale)}\n${base}/enter?token=${token}&to=/admin`);
+      break;
+    }
+
+    case "/news":
+      await send(env, chatId, say("channel", locale));
+      break;
+
     case "/help":
       await send(env, chatId, say("help", locale));
       break;

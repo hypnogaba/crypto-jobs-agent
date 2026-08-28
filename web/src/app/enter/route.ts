@@ -12,8 +12,15 @@ import { createSession } from "@/lib/auth";
  * посиланням скористались уперше.
  */
 export async function GET(request: Request): Promise<Response> {
-  const token = new URL(request.url).searchParams.get("token");
+  const url = new URL(request.url);
+  const token = url.searchParams.get("token");
   if (!token) redirect("/login");
+
+  // Куди вести після входу. Тільки власні шляхи й тільки зі списку:
+  // «?to=» з довільним значенням був би відкритим перенаправленням.
+  const ALLOWED = ["/dashboard", "/settings", "/admin"];
+  const to = url.searchParams.get("to");
+  const target = to && ALLOWED.includes(to) ? to : "/dashboard";
 
   const user = await one<{ id: string; connect_expires_at: string | null }>(
     "SELECT id,connect_expires_at FROM users WHERE connect_token=?", token);
@@ -25,5 +32,5 @@ export async function GET(request: Request): Promise<Response> {
     `UPDATE users SET connect_token=NULL, connect_expires_at=NULL,
                       last_interaction_at=datetime('now') WHERE id=?`, user.id);
   await createSession(user.id);
-  redirect("/dashboard");
+  redirect(target);
 }

@@ -11,6 +11,9 @@ export default function Footer({ locale }: { locale: Locale }) {
         <nav className="flex flex-wrap gap-5">
           <Link href="/faq" className="hover:opacity-70">{t(locale, "nav.faq")}</Link>
           <Link href="/privacy" className="hover:opacity-70">{t(locale, "nav.privacy")}</Link>
+          <a href="https://t.me/nextroleinfo" target="_blank" rel="noreferrer" className="hover:opacity-70">
+            {t(locale, "nav.channel")}
+          </a>
           <Link href="/feedback" className="hover:opacity-70" style={{ color: "var(--ember)" }}>
             {t(locale, "nav.feedback")}
           </Link>

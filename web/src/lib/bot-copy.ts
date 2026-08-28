@@ -172,10 +172,10 @@ const P = {
     ru: "/profile — твой профиль\n/time — час доставки\n/pause и /resume — пауза\n/site — вход на сайт\n/feedback — сказать, что не так\n/delete — удалить всё",
   },
   feedbackAsk: {
-    en: "What is wrong? Write it in one message — it goes straight to the person who builds this.",
-    uk: "Що не так? Напиши одним повідомленням — воно йде прямо до людини, яка це робить.",
-    fr: "Qu'est-ce qui ne va pas ? Écrivez-le en un message — il va directement à celui qui construit ça.",
-    ru: "Что не так? Напиши одним сообщением — оно идёт прямо к человеку, который это делает.",
+    en: "What is wrong, or what is missing? Anything — a bug, an idea, a feature you want. One message, straight to the person who builds this.",
+    uk: "Що не так або чого бракує? Будь-що — поломка, ідея, потрібна функція. Одним повідомленням, прямо до людини, яка це робить.",
+    fr: "Qu'est-ce qui ne va pas, ou qu'est-ce qui manque ? N'importe quoi — un bug, une idée, une fonctionnalité. Un message, directement à celui qui construit ça.",
+    ru: "Что не так или чего не хватает? Что угодно — поломка, идея, нужная функция. Одним сообщением, прямо к человеку, который это делает.",
   },
   feedbackThanks: {
     en: "Got it. Thank you — this is how it gets better.",
@@ -206,6 +206,18 @@ const P = {
     uk: "Я проставив те, що зрозумів. Виправ те, що не так.",
     fr: "J'ai coché ce que j'ai compris. Corrigez ce qui ne va pas.",
     ru: "Я отметил то, что понял. Исправь то, что не так.",
+  },
+  channel: {
+    en: "News and what is new: t.me/nextroleinfo",
+    uk: "Новини й що з'явилось: t.me/nextroleinfo",
+    fr: "Actualités et nouveautés : t.me/nextroleinfo",
+    ru: "Новости и что появилось: t.me/nextroleinfo",
+  },
+  adminLink: {
+    en: "Owner panel, valid 15 minutes. The session then lasts 30 days.",
+    uk: "Панель власника, посилання дійсне 15 хвилин. Далі сесія живе 30 днів.",
+    fr: "Panneau propriétaire, lien valable 15 minutes. La session dure ensuite 30 jours.",
+    ru: "Панель владельца, ссылка действует 15 минут. Дальше сессия живёт 30 дней.",
   },
   cvReading: {
     en: "Reading it — a moment.", uk: "Читаю — хвилинку.",
@@ -276,7 +288,9 @@ export const COMMANDS: Array<{ command: string; label: Phrase }> = [
   { command: "pause",    label: { en: "Pause digests", uk: "Призупинити добірки", fr: "Mettre en pause", ru: "Приостановить" } },
   { command: "resume",   label: { en: "Resume digests", uk: "Відновити добірки", fr: "Reprendre", ru: "Возобновить" } },
   { command: "site",     label: { en: "Sign in on the web", uk: "Вхід на сайт", fr: "Accès au site", ru: "Вход на сайт" } },
-  { command: "feedback", label: { en: "Tell us what is wrong", uk: "Сказати, що не так", fr: "Signaler un problème", ru: "Сказать, что не так" } },
+  { command: "feedback", label: { en: "A bug, an idea, a wish", uk: "Поломка, ідея, побажання", fr: "Bug, idée, souhait", ru: "Поломка, идея, пожелание" } },
+  { command: "news",     label: { en: "Our channel", uk: "Наш канал", fr: "Notre canal", ru: "Наш канал" } },
+  { command: "admin",    label: { en: "Owner panel", uk: "Панель власника", fr: "Panneau propriétaire", ru: "Панель владельца" } },
   { command: "help",     label: { en: "What I can do", uk: "Що я вмію", fr: "Ce que je sais faire", ru: "Что я умею" } },
   { command: "delete",   label: { en: "Erase everything", uk: "Видалити все", fr: "Tout effacer", ru: "Удалить всё" } },
 ];
