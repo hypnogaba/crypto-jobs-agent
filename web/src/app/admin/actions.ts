@@ -164,3 +164,73 @@ export async function recheckSome(formData: FormData): Promise<void> {
   }
   revalidatePath("/admin");
 }
+
+/**
+ * Що саме робить кожен вид пропозиції.
+ *
+ * Однотипне виконується гуртом одним запитом: пропозиція «прибрати 142 дошки»
+ * і має бути одним рухом, інакше вона знову перетвориться на сотню кнопок.
+ */
+async function execute(kind: string, target: string | null): Promise<void> {
+  if (kind === "deprecate_never_worked") {
+    await run(
+      `UPDATE sources_state SET status='deprecated'
+        WHERE status<>'ok' AND status<>'deprecated' AND last_ok_at IS NULL`);
+  } else if (kind === "revive_source" && target) {
+    await run(
+      `UPDATE sources_state SET status='ok', consecutive_fail_days=0, last_error=NULL,
+                                checked_at=datetime('now') WHERE source_name=?`, target);
+  } else if (kind === "drop_dry_companies") {
+    const limit = Number.parseInt(target ?? "30", 10) || 30;
+    await run("DELETE FROM companies WHERE dry_scans >= ?", limit);
+  }
+  // notice виконувати нічого — його лише закривають
+}
+
+/**
+ * Виконати пропозицію тижневого самоперегляду.
+ *
+ * Кожен вид знає рівно одну дію. Якщо системи не навчено її виконувати —
+ * такої пропозиції просто не існує (див. scanner/src/review.ts), тому тут
+ * немає гілки «а що робити з цим».
+ */
+export async function applyProposal(formData: FormData): Promise<void> {
+  await requireAdmin();
+  const id = String(formData.get("id") ?? "");
+  if (!id) return;
+
+  const p = await one<{ kind: string; target: string | null; status: string }>(
+    "SELECT kind,target,status FROM proposals WHERE id=?", id);
+  if (!p || p.status !== "open") return;
+
+  await execute(p.kind, p.target);
+  // notice виконувати нічого — його лише закривають
+
+  await run("UPDATE proposals SET status='applied', resolved_at=datetime('now') WHERE id=?", id);
+  revalidatePath("/admin");
+}
+
+export async function dismissProposal(formData: FormData): Promise<void> {
+  await requireAdmin();
+  const id = String(formData.get("id") ?? "");
+  if (!id) return;
+  await run("UPDATE proposals SET status='dismissed', resolved_at=datetime('now') WHERE id=?", id);
+  revalidatePath("/admin");
+}
+
+/** «Застосувати все» для одного рівня важливості — щоб не тиснути тридцять разів. */
+export async function applyAllProposals(formData: FormData): Promise<void> {
+  await requireAdmin();
+  const severity = String(formData.get("severity") ?? "");
+  if (!["high", "medium", "low"].includes(severity)) return;
+
+  const rows = await all<{ id: string; kind: string; target: string | null }>(
+    "SELECT id,kind,target FROM proposals WHERE status='open' AND severity=? AND kind<>'notice'",
+    severity);
+
+  for (const r of rows) {
+    await execute(r.kind, r.target);
+    await run("UPDATE proposals SET status='applied', resolved_at=datetime('now') WHERE id=?", r.id);
+  }
+  revalidatePath("/admin");
+}

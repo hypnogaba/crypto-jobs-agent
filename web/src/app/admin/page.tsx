@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import Nav from "../nav";
 import { detectLocale } from "../actions";
-import { addCompany, reviveSource, saveSourceKey, replyToFeedback, dismissFeedback, purgeNeverWorked, recheckSome } from "./actions";
+import { addCompany, reviveSource, saveSourceKey, replyToFeedback, dismissFeedback, purgeNeverWorked, recheckSome, applyProposal, dismissProposal, applyAllProposals } from "./actions";
 import { currentUser } from "@/lib/auth";
 import { all, one } from "@/lib/db";
 
@@ -116,6 +116,12 @@ export default async function Admin() {
   const keys = new Set((await all<{ source_name: string }>("SELECT source_name FROM source_keys"))
     .map((k) => k.source_name));
 
+  const proposals = await all<{ id: string; kind: string; target: string | null; title: string;
+    detail: string; evidence: string | null; severity: string; created_at: string }>(
+    `SELECT * FROM proposals WHERE status='open'
+      ORDER BY CASE severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, created_at`);
+  const bySeverity = (sev: string) => proposals.filter((x) => x.severity === sev);
+
   const feedback = await all<{ id: string; user_id: string | null; contact: string | null;
     locale: string; page: string | null; message: string; created_at: string }>(
     "SELECT * FROM site_feedback WHERE handled_at IS NULL ORDER BY created_at DESC LIMIT 30");
@@ -139,6 +145,69 @@ export default async function Admin() {
       <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-12">
         <p className="eyebrow">Панель власника</p>
         <h1 className="display mt-2 text-3xl">Стан системи</h1>
+
+        {proposals.length > 0 && (
+          <section className="mt-10 flex flex-col gap-4">
+            <div>
+              <h2 className="display text-xl">Що пропоную змінити</h2>
+              <p className="mt-1 text-sm" style={{ color: "var(--muted)" }}>
+                Раз на тиждень система дивиться на власні дані. Кожна пропозиція, крім позначених
+                «до відома», виконується одним дотиком — розбиратись не треба.
+              </p>
+            </div>
+
+            {(["high", "medium", "low"] as const).map((sev) => {
+              const rows = bySeverity(sev);
+              if (rows.length === 0) return null;
+              const doable = rows.filter((r) => r.kind !== "notice").length;
+              const head = sev === "high" ? "Варте уваги зараз"
+                : sev === "medium" ? "Не терміново" : "Прибирання";
+              return (
+                <div key={sev}>
+                  <div className="flex flex-wrap items-baseline justify-between gap-3">
+                    <h3 className="font-medium">{head} · {rows.length}</h3>
+                    {doable > 1 && (
+                      <form action={applyAllProposals}>
+                        <input type="hidden" name="severity" value={sev} />
+                        <button className="btn px-3 py-2 text-xs">Застосувати все ({doable})</button>
+                      </form>
+                    )}
+                  </div>
+                  <div className="ruled card mt-3">
+                    {rows.map((r) => (
+                      <article key={r.id} className="flex flex-wrap items-start gap-x-6 gap-y-3 px-6 py-5">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                            <h4 className="font-medium">{r.title}</h4>
+                            {r.kind === "notice" && <span className="tag tag-flat">до відома</span>}
+                          </div>
+                          <p className="mt-1 text-sm" style={{ color: "var(--ink-2)" }}>{r.detail}</p>
+                          {r.evidence && (
+                            <p className="mono mt-2 text-xs" style={{ color: "var(--muted)" }}>{r.evidence}</p>
+                          )}
+                        </div>
+                        <div className="flex gap-2">
+                          {r.kind !== "notice" && (
+                            <form action={applyProposal}>
+                              <input type="hidden" name="id" value={r.id} />
+                              <button className="btn px-3 py-2 text-xs">Застосувати</button>
+                            </form>
+                          )}
+                          <form action={dismissProposal}>
+                            <input type="hidden" name="id" value={r.id} />
+                            <button className="btn btn-quiet px-3 py-2 text-xs">
+                              {r.kind === "notice" ? "Прочитав" : "Не треба"}
+                            </button>
+                          </form>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </section>
+        )}
 
         <p className="eyebrow mt-10">Люди</p>
         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
