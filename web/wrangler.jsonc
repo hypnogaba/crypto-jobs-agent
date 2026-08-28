@@ -21,6 +21,12 @@
       "service": "nextrole"
     }
   ],
+  // Власний домен. workers.dev лишається робочим — зручно для перевірок,
+  // але канонічною адресою в robots і sitemap є nextrole.info.
+  "routes": [
+    { "pattern": "nextrole.info", "custom_domain": true },
+    { "pattern": "www.nextrole.info", "custom_domain": true }
+  ],
   "workers_dev": true,
   "observability": {
     "enabled": true

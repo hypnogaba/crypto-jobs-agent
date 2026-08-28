@@ -22,10 +22,26 @@ const mono = JetBrains_Mono({
   display: "swap",
 });
 
+const SITE = "https://nextrole.info";
+const TITLE = "NextRole — five jobs every morning";
+const DESCRIPTION =
+  "Tell us what you are looking for once. Every morning we send five matching roles " +
+  "to your Telegram, each with a live link.";
+
 export const metadata: Metadata = {
-  title: "NextRole — five jobs every morning",
-  description:
-    "Tell us what you are looking for once. Every morning we send five matching roles to your Telegram, each with a live link.",
+  // Канонічна адреса — власний домен. Без цього посилання, якими діляться,
+  // вели б на workers.dev, і пошук індексував би дві копії одного сайту.
+  metadataBase: new URL(SITE),
+  title: TITLE,
+  description: DESCRIPTION,
+  alternates: { canonical: "/" },
+  openGraph: {
+    type: "website",
+    url: SITE,
+    siteName: "NextRole",
+    title: TITLE,
+    description: DESCRIPTION,
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
