@@ -9,6 +9,16 @@ import type { Locale } from "./vocab";
 type Dict = Record<string, string>;
 
 const en: Dict = {
+  // Факти збігу під описом вакансії
+  "fact.level": "your level", "fact.remote": "remote",
+  "fact.salary": "pays your range", "fact.fresh": "fresh",
+  "time.today": "Today", "time.yesterday": "Yesterday",
+  "dash.apply": "Apply", "dash.hide": "Not interested", "dash.hidden": "Hidden",
+  "dash.unhide": "Bring back", "dash.undo": "Undo", "dash.appliedOn": "Applied {d}",
+  "dash.count": "{n} roles", "dash.applied": "{n} applied",
+  "first.title": "You are set.", "first.profile": "Profile saved",
+  "first.soon": "First batch \u2014 within the hour",
+  "first.daily": "Then \u2014 every day at {h}", "first.edit": "Edit profile",
   "dash.notRelevant": "Not what I need",
   "dash.more": "Five more",
   "dash.queued": "Queued. The next batch arrives within the hour.",
@@ -212,6 +222,16 @@ const en: Dict = {
 };
 
 const uk: Dict = {
+  // Факти збігу під описом вакансії
+  "fact.level": "твій рівень", "fact.remote": "віддалено",
+  "fact.salary": "вилка підходить", "fact.fresh": "свіжа",
+  "time.today": "Сьогодні", "time.yesterday": "Вчора",
+  "dash.apply": "Податися", "dash.hide": "Не цікавить", "dash.hidden": "Приховано",
+  "dash.unhide": "Повернути", "dash.undo": "Скасувати", "dash.appliedOn": "Подано {d}",
+  "dash.count": "{n} вакансій", "dash.applied": "{n} подано",
+  "first.title": "Готово.", "first.profile": "Профіль збережено",
+  "first.soon": "Перша добірка \u2014 протягом години",
+  "first.daily": "Далі \u2014 щодня о {h}", "first.edit": "Змінити профіль",
   "dash.notRelevant": "Не те, що треба",
   "dash.more": "Ще п'ять",
   "dash.queued": "Прийнято. Наступна добірка прийде протягом години.",
@@ -415,6 +435,16 @@ const uk: Dict = {
 };
 
 const fr: Dict = {
+  // Faits de correspondance sous la description
+  "fact.level": "votre niveau", "fact.remote": "à distance",
+  "fact.salary": "salaire adapté", "fact.fresh": "récente",
+  "time.today": "Aujourd'hui", "time.yesterday": "Hier",
+  "dash.apply": "Postuler", "dash.hide": "Pas intéressé", "dash.hidden": "Masquée",
+  "dash.unhide": "Restaurer", "dash.undo": "Annuler", "dash.appliedOn": "Postulé le {d}",
+  "dash.count": "{n} offres", "dash.applied": "{n} envoyées",
+  "first.title": "C'est prêt.", "first.profile": "Profil enregistré",
+  "first.soon": "Première sélection \u2014 dans l'heure",
+  "first.daily": "Ensuite \u2014 chaque jour à {h}", "first.edit": "Modifier le profil",
   "dash.notRelevant": "Pas ce qu'il me faut",
   "dash.more": "Cinq de plus",
   "dash.queued": "Pris en compte. La prochaine sélection arrive dans l'heure.",
@@ -618,6 +648,16 @@ const fr: Dict = {
 };
 
 const ru: Dict = {
+  // Факты совпадения под описанием вакансии
+  "fact.level": "твой уровень", "fact.remote": "удалённо",
+  "fact.salary": "вилка подходит", "fact.fresh": "свежая",
+  "time.today": "Сегодня", "time.yesterday": "Вчера",
+  "dash.apply": "Откликнуться", "dash.hide": "Не интересно", "dash.hidden": "Скрыто",
+  "dash.unhide": "Вернуть", "dash.undo": "Отменить", "dash.appliedOn": "Отклик {d}",
+  "dash.count": "{n} вакансий", "dash.applied": "{n} откликов",
+  "first.title": "Готово.", "first.profile": "Профиль сохранён",
+  "first.soon": "Первая подборка \u2014 в течение часа",
+  "first.daily": "Дальше \u2014 каждый день в {h}", "first.edit": "Изменить профиль",
   "dash.notRelevant": "Не то, что нужно",
   "dash.more": "Ещё пять",
   "dash.queued": "Принято. Следующая подборка придёт в течение часа.",
