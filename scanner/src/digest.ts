@@ -48,6 +48,52 @@ function hourIn(timezone: string, now: Date): number {
  *
  * Джерело впало — лишаємо порожньо. Картка просто буде без опису.
  */
+/**
+ * Де взяти текст оголошення поштучно.
+ *
+ * Список джерел, які НЕ віддають опис разом зі списком вакансій. Ashby,
+ * Lever і Workable його вже приносять, тому в них summary заповнений ще
+ * на скані. Greenhouse віддає лише за ?content=true, що роздуває масовий
+ * скан у 21 раз; Rippling і SmartRecruiters у списку опису не мають зовсім.
+ *
+ * Тому платимо поштучно і лише за ті ≤5 вакансій, що справді йдуть людині.
+ */
+const LAZY: Array<{
+  re: RegExp;
+  api: (m: RegExpExecArray) => string;
+  pick: (body: unknown) => string | null;
+}> = [
+  {
+    re: /^https?:\/\/(?:boards|job-boards)\.greenhouse\.io\/([^/]+)\/jobs\/(\d+)/,
+    api: (m) => `https://boards-api.greenhouse.io/v1/boards/${m[1]}/jobs/${m[2]}`,
+    pick: (b) => (b as { content?: string }).content ?? null,
+  },
+  {
+    re: /^https?:\/\/ats\.rippling\.com\/([^/]+)\/jobs\/([0-9a-f-]+)/i,
+    api: (m) => `https://api.rippling.com/platform/api/ats/v1/board/${m[1]}/jobs/${m[2]}`,
+    // description — це НЕ рядок, а { company, role }. Беремо role і блурб
+    // компанії навіть не бачимо.
+    pick: (b) => (b as { description?: { role?: string } }).description?.role ?? null,
+  },
+  {
+    // SmartRecruiters сам відділяє опис ролі від блурбу компанії, тож
+    // беремо саме jobDescription і не покладаємось на евристику.
+    re: /^https?:\/\/jobs\.smartrecruiters\.com\/([^/]+)\/([^/?#]+)/,
+    api: (m) => `https://api.smartrecruiters.com/v1/companies/${m[1]}/postings/${m[2]}`,
+    pick: (b) => {
+      const secs = (b as { jobAd?: { sections?: Record<string, { text?: string }> } }).jobAd?.sections;
+      if (!secs) return null;
+      return [secs.jobDescription?.text, secs.qualifications?.text].filter(Boolean).join("\n\n") || null;
+    },
+  },
+];
+
+/**
+ * Опис для тих вакансій, у яких його ще немає.
+ *
+ * Джерело впало або невідоме — лишаємо порожньо. Картка просто буде без
+ * опису: заголовок, локація й чіпи на місці.
+ */
 export async function fillMissingSummaries(
   jobs: Array<{ id: string; url: string; company: string; summary: string | null }>
 ): Promise<Map<string, string>> {
@@ -55,17 +101,18 @@ export async function fillMissingSummaries(
   for (const j of jobs) {
     if (j.summary) { out.set(j.id, j.summary); continue; }
 
-    const gh = /^https?:\/\/(?:boards|job-boards)\.greenhouse\.io\/([^/]+)\/jobs\/(\d+)/.exec(j.url);
-    if (!gh) continue;
-    try {
-      const res = await fetch(
-        `https://boards-api.greenhouse.io/v1/boards/${gh[1]}/jobs/${gh[2]}`,
-        { signal: AbortSignal.timeout(15_000) });
-      if (!res.ok) continue;
-      const body = (await res.json()) as { content?: string };
-      const s = summarize(body.content, j.company);
-      if (s) out.set(j.id, s);
-    } catch { /* мовчки далі: опис не критичний */ }
+    for (const src of LAZY) {
+      const m = src.re.exec(j.url);
+      if (!m) continue;
+      try {
+        const res = await fetch(src.api(m), { signal: AbortSignal.timeout(15_000) });
+        if (!res.ok) break;
+        const text = src.pick(await res.json());
+        const s = summarize(text, j.company);
+        if (s) out.set(j.id, s);
+      } catch { /* мовчки далі: опис не критичний */ }
+      break;
+    }
   }
   return out;
 }

@@ -80,13 +80,15 @@ export async function fetchAshby(slug: string, name: string, o: FetchOptions = {
 
 // ── Workable ──────────────────────────────────────────────────
 export async function fetchWorkable(slug: string, name: string, o: FetchOptions = {}): Promise<RawJob[]> {
-  const p = await fetchJson<{ jobs?: Array<{ title: string; location?: { city?: string; country?: string }; url?: string; shortcode?: string; published_on?: string; telecommuting?: boolean }> }>(
+  const p = await fetchJson<{ jobs?: Array<{ title: string; location?: { city?: string; country?: string }; url?: string; shortcode?: string; published_on?: string; telecommuting?: boolean; description?: string }> }>(
     `https://apply.workable.com/api/v1/widget/accounts/${slug}?details=true`, {}, o);
   return (p.jobs ?? []).map((j) => {
     const loc = [j.location?.city, j.location?.country].filter(Boolean).join(", ") || null;
     return { url: j.url ?? `https://apply.workable.com/${slug}/j/${j.shortcode}/`, company: name,
       title: j.title, location: loc, remote: j.telecommuting === true || REMOTE.test(loc ?? ""),
-      postedAt: iso(j.published_on), source: `workable:${slug}` };
+      postedAt: iso(j.published_on), source: `workable:${slug}`,
+      // `?details=true` уже приносить повний опис — ми його просто не читали.
+      description: j.description ?? null };
   });
 }
 

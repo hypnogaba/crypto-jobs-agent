@@ -59,6 +59,39 @@ describe("fillMissingSummaries", () => {
     expect(out.get("1")).toBeUndefined();
   });
 
+  it("Rippling: бере опис із поштучного виклику", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      // Rippling віддає description об'єктом { company, role }, не рядком.
+      new Response(JSON.stringify({
+        description: {
+          company: "Perle is a fast-growing global leader trusted by customers around the world.",
+          role: "<p>You will own the localisation pipeline for our partner network every day.</p>",
+        },
+      }), { status: 200 }) as Response);
+    const out = await fillMissingSummaries([
+      { id: "1", url: "https://ats.rippling.com/perle/jobs/ecee9768-c116-44e7-9b60-4afe0945687f",
+        company: "Perle", summary: null },
+    ]);
+    expect(out.get("1")).toMatch(/^You will own the localisation/);
+    expect(out.get("1")).not.toMatch(/fast-growing global leader/);
+  });
+
+  it("SmartRecruiters: бере jobDescription, а не блурб компанії", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({
+        jobAd: { sections: {
+          companyDescription: { text: "Savant is a fast-growing global leader trusted by customers around the world." },
+          jobDescription: { text: "In this role you will run the analytics platform and its data contracts." },
+        } },
+      }), { status: 200 }) as Response);
+    const out = await fillMissingSummaries([
+      { id: "1", url: "https://jobs.smartrecruiters.com/savant1/744000012345678",
+        company: "Savant", summary: null },
+    ]);
+    expect(out.get("1")).toMatch(/^In this role you will run the analytics/);
+    expect(out.get("1")).not.toMatch(/fast-growing global leader/);
+  });
+
   it("не чіпає джерела, з яких поштучно не візьмеш", async () => {
     const f = vi.spyOn(globalThis, "fetch");
     const out = await fillMissingSummaries([
