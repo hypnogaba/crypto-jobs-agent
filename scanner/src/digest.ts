@@ -170,9 +170,9 @@ async function main(): Promise<void> {
     const rows = await d1.query<{
       id: string; company: string; company_key: string; title: string; location: string | null;
       remote: number; url: string; tags: string; posted_at: string | null;
-      salary_min: number | null; salary_currency: string | null;
+      salary_min: number | null; salary_currency: string | null; dedupe_key: string | null;
     }>(
-      // Вікно кандидатів. Обидва правила з'явились після реального прогону:
+      // Вікно кандидатів. Чотири правила, кожне з реального прогону:
       //
       // 1. Сортуємо за posted_at, а не fetched_at. Скан пише тисячі рядків за
       //    одну хвилину, тож fetched_at у них однаковий — «найсвіжіші 600» це
@@ -180,16 +180,29 @@ async function main(): Promise<void> {
       // 2. Не більше трьох вакансій на компанію. Без цього одна фірма з великою
       //    дошкою забирає все вікно: lever:jobgether дав 582 рядки з 600, і
       //    правило «одна роль на компанію» лишало від добірки одну вакансію.
+      // 3. Не слати те саме за ЗМІСТОМ, а не лише за рядком у базі. Компанія,
+      //    що перевиставила вакансію під новим URL, створює новий id — і людина
+      //    отримувала б її вдруге. Таких груп у кеші 398.
+      // 4. Тільки те, що ми бачили на дошці нещодавно. Кеш нічого не видаляє
+      //    (це зламало б каскад sent.job_id і дозволило б повторно надіслати
+      //    вакансію), тому мертві просто не потрапляють у вікно. Три доби —
+      //    запас на випадок, якщо скан упав на день.
       `SELECT * FROM (
          SELECT j.*, ROW_NUMBER() OVER (
            PARTITION BY j.company_key ORDER BY j.posted_at DESC, j.fetched_at DESC
          ) AS rn
          FROM jobs_cache j
          WHERE j.id NOT IN (SELECT job_id FROM sent WHERE user_id = ?)
+           AND j.dedupe_key NOT IN (
+             SELECT dedupe_key FROM sent WHERE user_id = ? AND dedupe_key IS NOT NULL)
+           AND j.fetched_at >= datetime('now', '-3 day')
        )
        WHERE rn <= 3
        ORDER BY posted_at DESC, fetched_at DESC
-       LIMIT 1200`, [u.id]);
+       LIMIT 1200`, [u.id, u.id]);
+
+    // Ключ змісту не входить у CandidateJob — тримаємо збоку до запису в sent.
+    const dedupeById = new Map(rows.map((r) => [r.id, r.dedupe_key ?? null]));
 
     const candidates: CandidateJob[] = rows.map((r) => ({
       id: r.id, company: r.company, companyKey: r.company_key, title: r.title,
@@ -218,12 +231,13 @@ async function main(): Promise<void> {
     const withWhy = top.map((j, i) => ({ ...j, why: why[i]! }));
 
     await d1.batch(withWhy.map((j) => ({
-      sql: `INSERT INTO sent (id,user_id,job_id,digest_id,why_fits,status,sent_at)
-            VALUES (?,?,?,?,?,?,?)
+      sql: `INSERT INTO sent (id,user_id,job_id,digest_id,why_fits,status,sent_at,dedupe_key)
+            VALUES (?,?,?,?,?,?,?,?)
             ON CONFLICT(user_id,job_id) DO NOTHING`,
       params: [crypto.randomUUID(), u.id, j.id, digestId, j.why,
                u.telegram_chat_id && botToken ? "sent" : "pending",
-               u.telegram_chat_id && botToken ? now.toISOString() : null],
+               u.telegram_chat_id && botToken ? now.toISOString() : null,
+               dedupeById.get(j.id) ?? null],
     })));
 
     const text = formatDigest(withWhy, scanned);
