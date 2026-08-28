@@ -21,13 +21,28 @@ export async function fetchGreenhouse(slug: string, name: string, o: FetchOption
 
 // ── Lever ─── назва вакансії в полі `text`, не `title`
 export async function fetchLever(slug: string, name: string, o: FetchOptions = {}): Promise<RawJob[]> {
-  const posts = await fetchJson<Array<{ text: string; hostedUrl?: string; applyUrl?: string; categories?: { location?: string }; workplaceType?: string; createdAt?: number }>>(
-    `https://api.lever.co/v0/postings/${slug}?mode=json`, {}, o);
+  const posts = await fetchJson<Array<{
+    text: string; hostedUrl?: string; applyUrl?: string; workplaceType?: string; createdAt?: number;
+    categories?: { location?: string; team?: string; department?: string; commitment?: string };
+    salaryRange?: { min?: number; max?: number; currency?: string; interval?: string };
+  }>>(`https://api.lever.co/v0/postings/${slug}?mode=json`, {}, o);
+
   return posts.map((j) => {
     const loc = j.categories?.location ?? null;
-    return { url: j.hostedUrl ?? j.applyUrl ?? "", company: name, title: j.text, location: loc,
+
+    // Lever віддає вилку прямо в списку, а ми її досі викидали. Беремо лише
+    // річні: погодинні й місячні поруч із річними читались би як помилка.
+    const yearly = j.salaryRange?.interval === "per-year-salary";
+    const sr = yearly ? j.salaryRange : undefined;
+
+    return {
+      url: j.hostedUrl ?? j.applyUrl ?? "", company: name, title: j.text, location: loc,
       remote: j.workplaceType?.toLowerCase() === "remote" || REMOTE.test(loc ?? ""),
-      postedAt: iso(j.createdAt), source: `lever:${slug}` };
+      postedAt: iso(j.createdAt), source: `lever:${slug}`,
+      salaryMin: sr?.min ?? null, salaryMax: sr?.max ?? null, salaryCurrency: sr?.currency ?? null,
+      team: j.categories?.team ?? j.categories?.department ?? null,
+      commitment: j.categories?.commitment ?? null,
+    };
   });
 }
 

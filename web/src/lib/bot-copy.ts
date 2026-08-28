@@ -59,14 +59,39 @@ const P = {
   whyMoney: {
     en: "Pay too low", uk: "Зарплата замала", fr: "Salaire trop bas", ru: "Зарплата мала",
   },
+  whyRemote: {
+    en: "Not really remote", uk: "Насправді не віддалено", fr: "Pas vraiment à distance", ru: "На самом деле не удалённо",
+  },
+  whyIndustry: {
+    en: "Wrong industry", uk: "Не та індустрія", fr: "Mauvais secteur", ru: "Не та индустрия",
+  },
+  whyStale: {
+    en: "Already closed", uk: "Вакансію вже закрито", fr: "Offre déjà fermée", ru: "Вакансия уже закрыта",
+  },
+  whySame: {
+    en: "Too similar to each other", uk: "Усі надто схожі між собою", fr: "Trop semblables", ru: "Все слишком похожи",
+  },
   whyOther: {
-    en: "Something else", uk: "Інше", fr: "Autre chose", ru: "Другое",
+    en: "Something else — I will write it", uk: "Інше — напишу словами",
+    fr: "Autre chose — je l'écris", ru: "Другое — напишу словами",
   },
   whyWrite: {
-    en: "Tell me in one message what was wrong.",
-    uk: "Напиши одним повідомленням, що саме не так.",
-    fr: "Dites-moi en un message ce qui n'allait pas.",
-    ru: "Напиши одним сообщением, что именно не так.",
+    en: "Tell me in one message what was wrong. Anything at all — I read every one of these.",
+    uk: "Напиши одним повідомленням, що саме не так. Будь-що — я читаю кожне таке повідомлення.",
+    fr: "Dites-moi en un message ce qui n'allait pas. N'importe quoi — je les lis toutes.",
+    ru: "Напиши одним сообщением, что именно не так. Что угодно — я читаю каждое такое сообщение.",
+  },
+  learnedRemote: {
+    en: "Noted. Jobs that are not truly remote will sink for you from now on.",
+    uk: "Прийняв. Вакансії, які насправді не віддалені, тепер опускатимуться нижче.",
+    fr: "Noté. Les offres qui ne sont pas vraiment à distance descendront désormais.",
+    ru: "Принял. Вакансии, которые на самом деле не удалённые, теперь будут опускаться ниже.",
+  },
+  learnedNote: {
+    en: "Noted, and written down. Weights cannot fix this one, but I see it.",
+    uk: "Прийняв і записав. Вагами це не лікується, але я це бачу.",
+    fr: "Noté et consigné. Les pondérations n'y peuvent rien, mais je le vois.",
+    ru: "Принял и записал. Весами это не лечится, но я это вижу.",
   },
   learnedLevel: {
     en: "Noted. Level mismatches will cost more for you from now on.",
@@ -163,6 +188,32 @@ const P = {
     uk: "Разове посилання для входу, дійсне 15 хвилин:",
     fr: "Lien de connexion à usage unique, valable 15 minutes :",
     ru: "Разовая ссылка для входа, действует 15 минут:",
+  },
+  profileHow: {
+    en: "To change it: /start for the four questions again, or just send your CV as a file.",
+    uk: "Щоб змінити: /start — чотири питання заново, або просто надішли резюме файлом.",
+    fr: "Pour modifier : /start pour refaire les quatre questions, ou envoyez votre CV en fichier.",
+    ru: "Чтобы изменить: /start — четыре вопроса заново, или просто пришли резюме файлом.",
+  },
+  cvReading: {
+    en: "Reading it — a moment.", uk: "Читаю — хвилинку.",
+    fr: "Je le lis — un instant.", ru: "Читаю — минутку.",
+  },
+  cvDone: {
+    en: "Read it. Here is what I understood:", uk: "Прочитав. Ось що я зрозумів:",
+    fr: "C'est lu. Voici ce que j'ai compris :", ru: "Прочитал. Вот что я понял:",
+  },
+  cvUnreadable: {
+    en: "I could not read that file. PDF or plain text works; a scan or an image does not.",
+    uk: "Не зміг прочитати цей файл. Годиться PDF або звичайний текст; скан чи картинка — ні.",
+    fr: "Je n'ai pas pu lire ce fichier. PDF ou texte brut ; un scan ou une image, non.",
+    ru: "Не смог прочитать этот файл. Подходит PDF или обычный текст; скан или картинка — нет.",
+  },
+  cvFailed: {
+    en: "Something went wrong while reading it. Try again, or just write a sentence.",
+    uk: "Щось пішло не так під час читання. Спробуй ще раз або просто напиши речення.",
+    fr: "Un problème est survenu. Réessayez, ou écrivez simplement une phrase.",
+    ru: "Что-то пошло не так при чтении. Попробуй ещё раз или просто напиши предложение.",
   },
   unknown: {
     en: "I do not know that command. /help shows what I can do.",

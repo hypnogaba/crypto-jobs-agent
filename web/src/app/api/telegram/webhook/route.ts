@@ -3,7 +3,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { one, run, uuid } from "@/lib/db";
 import { parseProfile } from "@/lib/parse";
 import { handleCommand, startBotOnboarding, continueBotOnboarding,
-         handleOnboardingButton, handleOnboardingText, handleWhyButton } from "@/lib/bot";
+         handleOnboardingButton, handleOnboardingText, handleWhyButton, handleDocument } from "@/lib/bot";
 import { isLocale } from "@/lib/i18n";
 import { t as botCopy } from "@/lib/bot-copy";
 
@@ -28,7 +28,8 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const update = (await request.json()) as {
-    message?: { text?: string; chat?: { id?: number }; document?: { file_id?: string };
+    message?: { text?: string; chat?: { id?: number };
+                document?: { file_id?: string; file_name?: string; file_size?: number };
                 from?: { language_code?: string } };
     callback_query?: { data?: string; message?: { chat?: { id?: number } }; id?: string;
                        from?: { language_code?: string } };
@@ -40,11 +41,22 @@ export async function POST(request: Request): Promise<Response> {
   const text = update.message?.text?.trim() ?? "";
   const callback = update.callback_query?.data;
 
-  // Telegram сам каже, якою мовою людина користується. Досі тут стояло жорстке
-  // "en", тож той, хто зареєструвався в боті, отримував англійський сайт.
+  // Одне джерело правди про мову.
+  //
+  // Добірку шле сканер за users.locale, а кнопки відповідав вебхук за
+  // language_code із Telegram. У людини з українським акаунтом і англійським
+  // клієнтом мова стрибала посеред розмови: добірка українською, питання під
+  // нею англійською.
+  //
+  // Тепер збережена мова перемагає завжди. Telegram лишається першим здогадом
+  // лише для того, у кого акаунта ще немає.
+  const known = await one<{ locale: string }>(
+    "SELECT locale FROM users WHERE telegram_chat_id=?", String(chatId));
   const langCode = (update.message?.from?.language_code
     ?? update.callback_query?.from?.language_code ?? "en").slice(0, 2).toLowerCase();
-  const locale = isLocale(langCode) ? langCode : "en";
+  const locale = known && isLocale(known.locale)
+    ? known.locale
+    : isLocale(langCode) ? langCode : "en";
 
   // ── /start із токеном: прив'язка акаунту, створеного на сайті ──
   const startToken = /^\/start(?:@\w+)?\s+(\S+)$/.exec(text)?.[1];
@@ -93,6 +105,18 @@ export async function POST(request: Request): Promise<Response> {
       return NextResponse.json({ ok: true });
     }
     await continueBotOnboarding(env, chatId, callback, locale);
+    return NextResponse.json({ ok: true });
+  }
+
+  // Резюме файлом. До вільного тексту, бо документ приходить без тексту.
+  const doc = update.message?.document;
+  if (doc?.file_id) {
+    // Три мегабайти — стеля: більше майже напевно скан, який ми не прочитаємо.
+    if ((doc.file_size ?? 0) > 3_000_000) {
+      await handleCommand(env, chatId, "/help", locale);
+      return NextResponse.json({ ok: true });
+    }
+    await handleDocument(env, chatId, doc.file_id, doc.file_name ?? "cv.pdf", locale);
     return NextResponse.json({ ok: true });
   }
 

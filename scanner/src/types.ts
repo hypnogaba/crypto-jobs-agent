@@ -16,6 +16,10 @@ export interface RawJob {
    * і ніша губиться, якщо не передати її явно.
    */
   inheritedTags?: string[];
+  /** Команда або відділ — те, що ATS справді знає про роль. */
+  team?: string | null;
+  /** Повна зайнятість, контракт, стажування. */
+  commitment?: string | null;
 }
 
 export interface NormalizedJob extends RawJob {

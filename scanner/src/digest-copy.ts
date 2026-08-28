@@ -18,10 +18,10 @@ export const asLocale = (raw: string | null | undefined): Locale =>
 
 const P = {
   greeting: {
-    en: "Good morning. Here is what turned up today.",
-    uk: "Доброго ранку. Ось що знайшлось сьогодні.",
-    fr: "Bonjour. Voici ce que nous avons trouvé aujourd'hui.",
-    ru: "Доброе утро. Вот что нашлось сегодня.",
+    en: "Good morning. Look what I found for you today.",
+    uk: "Доброго ранку. Дивись, що я знайшов саме для тебе.",
+    fr: "Bonjour. Regardez ce que j'ai trouvé pour vous aujourd'hui.",
+    ru: "Доброе утро. Смотри, что я нашёл именно для тебя.",
   },
   why: {
     en: "Why you", uk: "Чому ти", fr: "Pourquoi vous", ru: "Почему ты",

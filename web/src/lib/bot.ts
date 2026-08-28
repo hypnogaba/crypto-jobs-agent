@@ -4,6 +4,8 @@ import {
   summary, toggle, type Draft, type Step,
 } from "./bot-onboarding";
 import { isLocale } from "./i18n";
+import { CvError, extractCvText } from "./cv";
+import { parseProfile } from "./parse";
 import { t as say, timeNow, timeSet } from "./bot-copy";
 import type { Locale } from "./vocab";
 
@@ -267,6 +269,9 @@ async function finishOnboarding(
  */
 const TUNED: Record<string, string> = {
   level: "seniority_weight", place: "location_weight", money: "salary_weight",
+  // «Насправді не віддалено» — це та сама скарга на місце: вакансія
+  // назвалась віддаленою, а нею не є.
+  remote: "location_weight",
 };
 
 export async function handleWhyButton(
@@ -291,9 +296,10 @@ export async function handleWhyButton(
     await run(
       `UPDATE user_tuning SET ${column} = MIN(${column} + 0.5, 3.0),
                               updated_at = datetime('now') WHERE user_id=?`, user.id);
-    await send(env, chatId, say(
-      reason === "level" ? "learnedLevel" : reason === "place" ? "learnedPlace" : "learnedMoney",
-      locale));
+    const told = reason === "level" ? "learnedLevel"
+      : reason === "place" ? "learnedPlace"
+      : reason === "remote" ? "learnedRemote" : "learnedMoney";
+    await send(env, chatId, say(told, locale));
     return true;
   }
 
@@ -305,6 +311,13 @@ export async function handleWhyButton(
     return true;
   }
 
+  // Індустрія, застаріла вакансія, одноманітність — ваги тут не допоможуть,
+  // але причину треба зберегти: з неї видно, що саме ламається.
+  if (["industry", "stale", "same"].includes(reason)) {
+    await send(env, chatId, say("learnedNote", locale));
+    return true;
+  }
+
   // «Інше» — просимо написати словами; текст ловить handleOnboardingText
   await run(
     `INSERT INTO bot_state (chat_id,step,draft,updated_at)
@@ -312,6 +325,68 @@ export async function handleWhyButton(
      ON CONFLICT(chat_id) DO UPDATE SET step='why', draft=?, updated_at=datetime('now')`,
     String(chatId), JSON.stringify({ digestId }));
   await send(env, chatId, say("whyWrite", locale));
+  return true;
+}
+
+/**
+ * Резюме файлом просто в чаті.
+ *
+ * Досі PDF розбирався лише на сайті, а в боті доводилось вставляти текстом.
+ * Telegram не віддає файл напряму: спершу getFile за file_id, потім
+ * завантаження за шляхом. Файл ніде не зберігається — з нього беруться
+ * чотири поля профілю, і на цьому все.
+ */
+export async function handleDocument(
+  env: Env, chatId: number, fileId: string, fileName: string, locale: Locale
+): Promise<boolean> {
+  const token = env.TELEGRAM_BOT_TOKEN;
+  if (!token) return false;
+
+  await send(env, chatId, say("cvReading", locale));
+
+  try {
+    const meta = await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${fileId}`);
+    const path = ((await meta.json()) as { result?: { file_path?: string } }).result?.file_path;
+    if (!path) { await send(env, chatId, say("cvFailed", locale)); return true; }
+
+    const res = await fetch(`https://api.telegram.org/file/bot${token}/${path}`);
+    const blob = await res.blob();
+    const file = new File([blob], fileName || "cv.pdf",
+      { type: fileName.toLowerCase().endsWith(".pdf") ? "application/pdf" : "text/plain" });
+
+    const text = await extractCvText(file);
+    const parsed = await parseProfile(text, env.ANTHROPIC_API_KEY ?? null);
+
+    const existing = await one<{ id: string }>("SELECT id FROM users WHERE telegram_chat_id=?", String(chatId));
+    const userId = existing?.id ?? uuid();
+    if (!existing) {
+      await run(
+        `INSERT INTO users (id,telegram_chat_id,locale,timezone,delivery_hour,last_interaction_at)
+         VALUES (?,?,?,?,7,datetime('now'))`, userId, String(chatId), locale, "UTC");
+    }
+
+    await run(
+      `INSERT INTO profiles (user_id,mode,cv_text,spheres,industries,seniority,remote_mode,location,salary_min,salary_currency,updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,datetime('now'))
+       ON CONFLICT(user_id) DO UPDATE SET
+         mode=excluded.mode, cv_text=excluded.cv_text, spheres=excluded.spheres,
+         industries=excluded.industries, seniority=excluded.seniority,
+         remote_mode=excluded.remote_mode, location=excluded.location,
+         salary_min=excluded.salary_min, salary_currency=excluded.salary_currency,
+         updated_at=datetime('now')`,
+      userId, "cv", text.slice(0, 20_000),
+      JSON.stringify(parsed.spheres), JSON.stringify(parsed.industries),
+      parsed.seniority, parsed.remoteMode, parsed.location, parsed.salaryMin, parsed.salaryCurrency);
+
+    await run("DELETE FROM bot_state WHERE chat_id=?", String(chatId));
+    await send(env, chatId, `${say("cvDone", locale)}\n\n${summary({
+      spheres: parsed.spheres, industries: parsed.industries, customRole: null,
+      seniority: parsed.seniority, remoteMode: parsed.remoteMode,
+      salaryMin: parsed.salaryMin, salaryCurrency: parsed.salaryCurrency,
+    }, locale)}`);
+  } catch (e) {
+    await send(env, chatId, e instanceof CvError ? say("cvUnreadable", locale) : say("cvFailed", locale));
+  }
   return true;
 }
 
@@ -341,11 +416,15 @@ export async function continueBotOnboarding(
         // «Дякую, врахую» було неправдою: реакція нікуди не впливала.
         // Тепер питаємо, ЩО саме не так — з цього можна вчитись.
         await sendKeyboard(env, chatId, say("askWhy", locale), [
-          [{ text: say("whySphere", locale), callback_data: `wh:${digestId}:sphere` },
-           { text: say("whyLevel", locale),  callback_data: `wh:${digestId}:level` }],
-          [{ text: say("whyPlace", locale),  callback_data: `wh:${digestId}:place` },
-           { text: say("whyMoney", locale),  callback_data: `wh:${digestId}:money` }],
-          [{ text: say("whyOther", locale),  callback_data: `wh:${digestId}:other` }],
+          [{ text: say("whySphere", locale),   callback_data: `wh:${digestId}:sphere` },
+           { text: say("whyLevel", locale),    callback_data: `wh:${digestId}:level` }],
+          [{ text: say("whyPlace", locale),    callback_data: `wh:${digestId}:place` },
+           { text: say("whyMoney", locale),    callback_data: `wh:${digestId}:money` }],
+          [{ text: say("whyRemote", locale),   callback_data: `wh:${digestId}:remote` },
+           { text: say("whyIndustry", locale), callback_data: `wh:${digestId}:industry` }],
+          [{ text: say("whyStale", locale),    callback_data: `wh:${digestId}:stale` },
+           { text: say("whySame", locale),     callback_data: `wh:${digestId}:same` }],
+          [{ text: say("whyOther", locale),    callback_data: `wh:${digestId}:other` }],
         ]);
       }
     }
@@ -402,14 +481,20 @@ export async function handleCommand(
     }
 
     case "/profile": {
-      const p = await one<{ spheres: string; seniority: string | null; remote_mode: string; salary_min: number | null }>(
-        "SELECT spheres,seniority,remote_mode,salary_min FROM profiles WHERE user_id=?", user!.id);
+      const p = await one<{ spheres: string; industries: string; seniority: string | null;
+        remote_mode: string; salary_min: number | null; salary_currency: string | null;
+        custom_role: string | null }>(
+        `SELECT spheres,industries,seniority,remote_mode,salary_min,salary_currency,custom_role
+           FROM profiles WHERE user_id=?`, user!.id);
+      const list = (raw: string | null): string[] => {
+        try { const v = JSON.parse(raw ?? "[]"); return Array.isArray(v) ? v : []; } catch { return []; }
+      };
       await send(env, chatId, p
-        ? summary({
-            spheres: JSON.parse(p.spheres || "[]") as string[],
-            industries: [], seniority: p.seniority,
-            remoteMode: p.remote_mode, salaryMin: p.salary_min, salaryCurrency: null,
-          }, locale) + `\n\n/start — ${say("help", locale).split("\n")[0]!.split("—")[1]?.trim() ?? ""}`.trimEnd()
+        ? `${summary({
+            spheres: list(p.spheres), industries: list(p.industries), customRole: p.custom_role,
+            seniority: p.seniority, remoteMode: p.remote_mode,
+            salaryMin: p.salary_min, salaryCurrency: p.salary_currency,
+          }, locale)}\n\n${say("profileHow", locale)}`
         : say("noProfile", locale));
       break;
     }
