@@ -293,3 +293,29 @@ body {
   background: var(--ember); border-color: var(--ember); color: var(--ember-ink);
 }
 .icon-send:hover { color: var(--ember-ink); filter: brightness(1.09); }
+
+/* ── Компоненти всередині нічної смуги ────────────────────────
+   Вхідний потік — головна, чотири питання, підключення Telegram — весь
+   темний: людина приходить уночі й лишається в ній, доки не налаштується.
+   Кабінет далі світлий: там уже ранок. Щоб сторінка переїжджала в ніч
+   одним прапорцем, компоненти беруть нічні токени самі, за контекстом,
+   а не через окремий клас на кожному виклику. */
+.night .card { background: color-mix(in srgb, var(--night-ink) 4%, transparent); border-color: var(--night-rule); }
+.night .ruled > * + * { border-top-color: var(--night-rule); }
+
+.night .field { background: transparent; color: var(--night-ink); border-color: var(--night-rule); }
+.night .field::placeholder { color: var(--night-2); }
+.night select.field option { color: var(--ink); background: var(--surface); }
+
+.night .chip { border-color: var(--night-rule); color: var(--night-2); }
+.night .chip:hover { border-color: var(--ember); color: var(--night-ink); }
+.night .chip:has(input:checked) {
+  border-color: var(--ember); color: var(--night-ink);
+  background: color-mix(in srgb, var(--ember) 20%, transparent);
+}
+
+.night .link { color: var(--night-ink); }
+.night .link:hover { color: var(--ember); }
+.night .lede { color: var(--night-2); }
+.night .btn-quiet { color: var(--night-2); border-color: var(--night-rule); }
+.night .btn-quiet:hover { color: var(--night-ink); border-color: var(--ember); }

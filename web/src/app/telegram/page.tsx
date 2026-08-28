@@ -14,7 +14,7 @@ export default async function Telegram() {
 
   if (user.telegramChatId) {
     return (
-      <Shell locale={locale} title={t(locale, "telegram.done")} lede={t(locale, "telegram.doneLede")}>
+      <Shell locale={locale} night title={t(locale, "telegram.done")} lede={t(locale, "telegram.doneLede")}>
         <Link href="/dashboard" className="btn">{t(locale, "dash.title")}</Link>
       </Shell>
     );
@@ -34,22 +34,22 @@ export default async function Telegram() {
   const bot = env.TELEGRAM_BOT_USERNAME ?? "mynextrole_bot";
 
   return (
-    <Shell locale={locale} eyebrow="03 / 03" title={t(locale, "telegram.title")} lede={t(locale, "telegram.lede")}>
+    <Shell locale={locale} night eyebrow="03 / 03" title={t(locale, "telegram.title")} lede={t(locale, "telegram.lede")}>
       <div className="card px-7 py-8">
         <a href={`https://t.me/${bot}?start=${row.connect_token}`} className="btn">
           {t(locale, "telegram.button")}
         </a>
-        <p className="mono mt-5 text-xs" style={{ color: "var(--muted)" }}>
+        <p className="mono mt-5 text-xs" style={{ color: "var(--night-2)" }}>
           @{bot} · {t(locale, "telegram.expiry")}
         </p>
-        <form action={createConnectToken} className="mt-5 border-t pt-5" style={{ borderColor: "var(--rule)" }}>
-          <button type="submit" className="text-sm link" style={{ color: "var(--muted)" }}>
+        <form action={createConnectToken} className="mt-5 border-t pt-5" style={{ borderColor: "var(--night-rule)" }}>
+          <button type="submit" className="text-sm link" style={{ color: "var(--night-2)" }}>
             {t(locale, "telegram.regen")}
           </button>
         </form>
       </div>
       <p className="mt-6 text-sm">
-        <Link href="/dashboard" className="link" style={{ color: "var(--muted)" }}>
+        <Link href="/dashboard" className="link" style={{ color: "var(--night-2)" }}>
           {t(locale, "telegram.skip")}
         </Link>
       </p>
