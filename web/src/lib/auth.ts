@@ -48,13 +48,21 @@ export interface SessionUser {
   isAdmin: boolean;
 }
 
-/** Адмін — це власник: перший зареєстрований акаунт або email зі змінної. */
-async function isAdminUser(email: string | null, id: string): Promise<boolean> {
+/**
+ * Адмін — це власник, названий явно.
+ *
+ * Раніше запасним варіантом був «перший зареєстрований акаунт». Відколи
+ * реєстрація не питає пошти, першим акаунтом стає перший випадковий
+ * відвідувач — тож запасний варіант прибрано. Без ADMIN_CHAT_ID (або
+ * застарілого ADMIN_EMAIL) адмінки немає ні в кого.
+ */
+async function isAdminUser(email: string | null, chatId: string | null): Promise<boolean> {
   const { env } = await import("@opennextjs/cloudflare").then((m) => m.getCloudflareContext());
-  const adminEmail = (env as unknown as Record<string, string | undefined>).ADMIN_EMAIL;
-  if (adminEmail && email && email.toLowerCase() === adminEmail.toLowerCase()) return true;
-  const first = await one<{ id: string }>("SELECT id FROM users ORDER BY created_at LIMIT 1");
-  return first?.id === id;
+  const vars = env as unknown as Record<string, string | undefined>;
+
+  if (vars.ADMIN_CHAT_ID && chatId && chatId === vars.ADMIN_CHAT_ID) return true;
+  if (vars.ADMIN_EMAIL && email && email.toLowerCase() === vars.ADMIN_EMAIL.toLowerCase()) return true;
+  return false;
 }
 
 export async function createSession(userId: string): Promise<void> {
@@ -95,7 +103,7 @@ export async function currentUser(): Promise<SessionUser | null> {
   return {
     id: row.id, email: row.email, telegramChatId: row.telegram_chat_id,
     locale: row.locale, status: row.status,
-    isAdmin: await isAdminUser(row.email, row.id),
+    isAdmin: await isAdminUser(row.email, row.telegram_chat_id),
   };
 }
 

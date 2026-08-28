@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { explainLocally, pickTop, scoreJob, type CandidateJob, type Profile } from "./match.js";
+import { explainLocally, linksToAggregator, pickTop, scoreJob, type CandidateJob, type Profile } from "./match.js";
 
 const p: Profile = {
   userId: "u1", spheres: ["partnerships", "devrel"], industries: ["web3"],
@@ -75,5 +75,27 @@ describe("сфера важливіша за індустрію", () => {
   });
   it("чужа сфера дає відʼємний рахунок і не потрапляє в добірку", () => {
     expect(pickTop([job({ tags: ["marketing", "web3"] })], p, 5)).toHaveLength(0);
+  });
+});
+
+describe("посилання має вести на роботодавця", () => {
+  it("впізнає хости агрегаторів, включно з піддоменами", () => {
+    expect(linksToAggregator("https://jobicy.com/jobs/151908-x")).toBe(true);
+    expect(linksToAggregator("https://www.workingnomads.com/job/go/1/")).toBe(true);
+    expect(linksToAggregator("https://himalayas.app/companies/x/jobs/y")).toBe(true);
+    expect(linksToAggregator("https://job-boards.greenhouse.io/alpaca/jobs/1")).toBe(false);
+    expect(linksToAggregator("https://jobs.ashbyhq.com/sanity/abc")).toBe(false);
+  });
+
+  it("не судить те, чого не розібрав", () => {
+    expect(linksToAggregator("не посилання")).toBe(false);
+  });
+
+  it("викидає їх із добірки, хоч би як добре вони набрали балів", () => {
+    const top = pickTop([
+      job({ id: "a", companyKey: "a", url: "https://jobicy.com/jobs/1" }),
+      job({ id: "b", companyKey: "b", url: "https://jobs.lever.co/finn/1" }),
+    ], p);
+    expect(top.map((t) => t.id)).toEqual(["b"]);
   });
 });

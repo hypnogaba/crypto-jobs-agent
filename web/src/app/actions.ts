@@ -3,12 +3,11 @@
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { all, one, run, uuid } from "@/lib/db";
-import { createSession, currentUser, destroySession, hashPassword, requireUser, verifyPassword } from "@/lib/auth";
+import { all, run, uuid } from "@/lib/db";
+import { createSession, currentUser, destroySession, requireUser } from "@/lib/auth";
 import { parseProfile, type ParsedProfile } from "@/lib/parse";
 import { CvError, extractCvText } from "@/lib/cv";
 import { isLocale, localeFromHeader } from "@/lib/i18n";
-import { checkRate, clearRate, recordFailure } from "@/lib/ratelimit";
 import type { Locale } from "@/lib/vocab";
 
 const DRAFT_COOKIE = "nr_draft";
@@ -73,11 +72,18 @@ export async function saveProfile(formData: FormData): Promise<void> {
   };
 
   if (!user) {
-    // Ще не зареєстрований — тримаємо відповіді до створення акаунту
-    const jar = await cookies();
-    jar.set(DRAFT_COOKIE, JSON.stringify({ text: draft?.text ?? "", parsed: profile }), {
-      httpOnly: true, sameSite: "lax", secure: true, path: "/", maxAge: 3600 });
-    redirect("/register");
+    // Ще немає акаунта — створюємо мовчки, без пошти й пароля.
+    // Особа людини — це її Telegram, і вона підтвердить її наступним кроком.
+    // Просити тут пароль означало б поставити анкету посеред дії.
+    const id = uuid();
+    await run(
+      `INSERT INTO users (id,locale,timezone,delivery_hour,last_interaction_at)
+       VALUES (?,?,?,7,datetime('now'))`,
+      id, await detectLocale(), "UTC");
+    await persistProfile(id, draft?.text ?? "", profile);
+    (await cookies()).delete(DRAFT_COOKIE);
+    await createSession(id);
+    redirect("/telegram");
   }
 
   await persistProfile(user.id, draft?.text ?? "", profile);
@@ -108,55 +114,6 @@ async function persistProfile(
 }
 
 // ── акаунт ───────────────────────────────────────────────────
-export async function register(formData: FormData): Promise<void> {
-  const email = String(formData.get("email") ?? "").trim().toLowerCase();
-  const password = String(formData.get("password") ?? "");
-
-  const ip = (await headers()).get("cf-connecting-ip") ?? "unknown";
-  if (!(await checkRate(`register:${ip}`)).allowed) redirect("/register?error=tooMany");
-
-  if (!email.includes("@")) { await recordFailure(`register:${ip}`); redirect("/register?error=badCredentials"); }
-  if (password.length < 8) redirect("/register?error=weakPassword");
-
-  const existing = await one<{ id: string }>("SELECT id FROM users WHERE email=?", email);
-  if (existing) { await recordFailure(`register:${ip}`); redirect("/register?error=emailTaken"); }
-
-  const id = uuid();
-  const locale = await detectLocale();
-  await run(
-    `INSERT INTO users (id,email,password_hash,locale,timezone,delivery_hour,last_interaction_at)
-     VALUES (?,?,?,?,?,7,datetime('now'))`,
-    id, email, await hashPassword(password), locale, "UTC");
-
-  const draft = await readDraft();
-  if (draft) {
-    await persistProfile(id, draft.text, draft.parsed as never);
-    (await cookies()).delete(DRAFT_COOKIE);
-  }
-  await createSession(id);
-  redirect(draft ? "/telegram" : "/onboarding");
-}
-
-export async function login(formData: FormData): Promise<void> {
-  const email = String(formData.get("email") ?? "").trim().toLowerCase();
-  const password = String(formData.get("password") ?? "");
-  const key = `login:${email}`;
-
-  const verdict = await checkRate(key);
-  if (!verdict.allowed) redirect(`/login?error=tooMany&min=${verdict.retryAfterMinutes}`);
-
-  const row = await one<{ id: string; password_hash: string | null }>(
-    "SELECT id,password_hash FROM users WHERE email=?", email);
-  if (!row?.password_hash || !(await verifyPassword(password, row.password_hash))) {
-    await recordFailure(key);
-    redirect("/login?error=badCredentials");
-  }
-  await clearRate(key);
-  await run("UPDATE users SET last_interaction_at=datetime('now') WHERE id=?", row.id);
-  await createSession(row.id);
-  redirect("/dashboard");
-}
-
 export async function logout(): Promise<void> {
   await destroySession();
   redirect("/");

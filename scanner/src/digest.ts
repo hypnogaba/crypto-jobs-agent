@@ -73,10 +73,26 @@ async function sendTelegram(token: string, chatId: string, text: string, digestI
   return res.ok;
 }
 
+/**
+ * Розбір аргументів.
+ *
+ * Написане навпростець `argv[argv.indexOf("--user") + 1]` тихо ламало все:
+ * без прапорця indexOf дає −1, тож onlyUser ставав argv[0] — шляхом до node.
+ * Значення непорожнє, тому кожен плановий прогін звужувався до
+ * `u.id = '/usr/local/bin/node'` і не знаходив нікого. Добірки не доходили
+ * взагалі, і жодної помилки при цьому не було.
+ */
+export function parseArgs(argv: string[]): { force: boolean; onlyUser: string | null } {
+  const i = argv.indexOf("--user");
+  return {
+    force: argv.includes("--force"),
+    onlyUser: i === -1 ? null : argv[i + 1] ?? null,
+  };
+}
+
 async function main(): Promise<void> {
   const cfg = loadConfig();
-  const force = process.argv.includes("--force");
-  const onlyUser = process.argv[process.argv.indexOf("--user") + 1];
+  const { force, onlyUser } = parseArgs(process.argv.slice(2));
   const now = new Date();
   const botToken = process.env.TELEGRAM_BOT_TOKEN ?? null;
 
@@ -234,4 +250,4 @@ async function main(): Promise<void> {
   console.log(`Добірка: оброблено ${users.length} профілів, доставлено ${delivered}.`);
 }
 
-await main();
+if (process.argv[1]?.endsWith("digest.js")) await main();

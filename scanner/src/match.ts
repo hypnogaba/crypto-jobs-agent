@@ -92,12 +92,35 @@ export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): Score
 }
 
 /**
+ * Хости агрегаторів. Вакансія з таким посиланням у добірку не йде: продукт
+ * обіцяє живе посилання на самого роботодавця, а не на чужий каталог. У кеші
+ * вона лишається — з неї й далі збираються назви компаній для R4.
+ */
+const AGGREGATOR_HOSTS = [
+  "jobicy.com", "workingnomads.com", "himalayas.app", "remoteok.com", "remoteok.io",
+  "remotive.com", "remotive.io", "weworkremotely.com", "arbeitnow.com", "arbeitnow.co.uk",
+  "nodesk.co", "jobspresso.co", "landingjobs.co", "themuse.com", "cryptocurrencyjobs.co",
+  "web3.career", "cryptojobslist.com", "builtin.com", "otta.com", "welcometothejungle.com",
+  "wellfound.com", "angel.co", "jobgether.com", "news.ycombinator.com",
+];
+
+/** Чи веде посилання на агрегатор, а не на сайт роботодавця. */
+export function linksToAggregator(url: string): boolean {
+  let host: string;
+  try { host = new URL(url).hostname.toLowerCase().replace(/^www\./, ""); }
+  catch { return false; }          // не розібрали — не наша справа судити
+  return AGGREGATOR_HOSTS.some((h) => host === h || host.endsWith(`.${h}`));
+}
+
+/**
  * Топ-5 із двома правилами анти-концентрації: одна роль на компанію
  * і схлопування однакових ролей. П'ять позицій в одній фірмі — це одна
  * можливість, а не п'ять.
  */
 export function pickTop(jobs: CandidateJob[], p: Profile, limit = 5, now = new Date()): ScoredJob[] {
-  const scored = jobs.map((j) => scoreJob(j, p, now))
+  const scored = jobs
+    .filter((j) => !linksToAggregator(j.url))
+    .map((j) => scoreJob(j, p, now))
     .filter((j) => j.score > 0)
     .sort((a, b) => b.score - a.score);
 
