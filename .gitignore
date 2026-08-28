@@ -7,3 +7,6 @@
 scanner/node_modules/
 scanner/dist/
 scanner/.env
+
+# Робочі каталоги агента — не частина продукту
+.claude/
