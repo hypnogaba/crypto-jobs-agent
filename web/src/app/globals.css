@@ -539,3 +539,23 @@ body::before {
 .feed-scroll { animation: feed-roll 42s linear infinite; will-change: transform; }
 .feed-window:hover .feed-scroll { animation-play-state: paused; }
 @keyframes feed-roll { from { transform: translateY(0) } to { transform: translateY(-50%) } }
+
+/* ── Картка вакансії ────────────────────────────────────────── */
+
+/* Дрібний факт збігу. Це не чіп онбордингу: там це вибір, тут — довідка. */
+.fact {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.01em;
+  color: var(--muted);
+}
+.fact + .fact::before { content: " · "; color: var(--rule-2); }
+
+/* Дії картки завжди в потоці. display:none зробив би кнопку недосяжною
+   з телефона й з клавіатури, тому лише приглушуємо. */
+.row-actions { opacity: 0.5; transition: opacity 0.15s ease; }
+.match:hover .row-actions,
+.match:focus-within .row-actions { opacity: 1; }
+@media (hover: none) { .row-actions { opacity: 1; } }
+
+.match-done { opacity: 0.55; }

@@ -46,7 +46,7 @@ export default async function Sources() {
   return (
     <>
       <Shell locale={locale} eyebrow={t(locale, "nav.sources")} title={t(locale, "sources.title")}
-             lede={t(locale, "sources.lede")} wide>
+             lede={t(locale, "sources.lede")} width="wide">
         <section>
           <h2 className="display text-xl">{t(locale, "sources.direct")}</h2>
           <p className="mt-1 text-sm" style={{ color: "var(--ink-2)" }}>{t(locale, "sources.directLede")}</p>

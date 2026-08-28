@@ -3,15 +3,18 @@ import type { Locale } from "@/lib/vocab";
 
 /** Оболонка внутрішніх сторінок: вузька колонка, заголовок, багато повітря. */
 export default async function Shell({
-  locale, eyebrow, title, lede, wide = false, center = false, children,
+  locale, eyebrow, title, lede, width = "narrow", center = false, children,
 }: {
   locale: Locale; eyebrow?: string; title: string; lede?: string;
-  wide?: boolean; center?: boolean; children: React.ReactNode;
+  // Три ширини, не дві: кабінету тісно у вузькій колонці й порожньо в
+  // широкій, бо картка має і опис, і дії праворуч.
+  width?: "narrow" | "roomy" | "wide"; center?: boolean; children: React.ReactNode;
 }) {
+  const max = width === "wide" ? "max-w-5xl" : width === "roomy" ? "max-w-3xl" : "max-w-2xl";
   return (
     <>
       <Nav locale={locale} />
-      <main className={`mx-auto w-full flex-1 px-6 py-14 ${wide ? "max-w-5xl" : "max-w-2xl"}` +
+      <main className={`mx-auto w-full flex-1 px-6 py-14 ${max}` +
                        (center ? " flex flex-col justify-center pb-24" : "")}>
         <div className={center ? "mx-auto w-full max-w-sm" : undefined}>
           {eyebrow && <p className="eyebrow rise rise-1">{eyebrow}</p>}
