@@ -41,6 +41,16 @@ export const metadata: Metadata = {
     siteName: "NextRole",
     title: TITLE,
     description: DESCRIPTION,
+    // Без картки посилання на продукт у Telegram виглядало як голий рядок
+    // тексту — а перший канал поширення тут саме Telegram. Картка
+    // збирається з тих самих величин, що й сайт: brand/og/gen.py.
+    images: [{ url: "/og.png", width: 1200, height: 630, alt: TITLE }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: TITLE,
+    description: DESCRIPTION,
+    images: ["/og.png"],
   },
 };
 
