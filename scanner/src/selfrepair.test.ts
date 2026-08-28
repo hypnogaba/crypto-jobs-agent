@@ -45,3 +45,26 @@ describe("skipSet", () => {
     ])]).toEqual(["a"]);
   });
 });
+
+describe("джерело, яке не працювало ніколи", () => {
+  it("помирає з першої невдачі, а не через три дні", async () => {
+    // 143 таких набралось за один прогін: зібрані з ATS-лінків Getro, дошки 404.
+    const p = repo();
+    const out = await applySourceOutcomes(
+      [{ source: "greenhouse:turntide", ok: false, jobs: [], error: "404" }],
+      p as never,
+      [{ source: "greenhouse:turntide", status: "ok", consecutiveFailDays: 0, everOk: false }]);
+    expect(p.deprecateSource).toHaveBeenCalledWith("greenhouse:turntide");
+    expect(out.deprecated).toEqual(["greenhouse:turntide"]);
+  });
+
+  it("те, що колись працювало, зберігає запас у три дні", async () => {
+    const p = repo();
+    const out = await applySourceOutcomes(
+      [{ source: "lever:finn", ok: false, jobs: [], error: "500" }],
+      p as never,
+      [{ source: "lever:finn", status: "ok", consecutiveFailDays: 0, everOk: true }]);
+    expect(p.deprecateSource).not.toHaveBeenCalled();
+    expect(out.deprecated).toEqual([]);
+  });
+});

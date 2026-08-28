@@ -22,13 +22,19 @@ export default async function Telegram() {
 
   let row = await one<{ connect_token: string | null; connect_expires_at: string | null }>(
     "SELECT connect_token,connect_expires_at FROM users WHERE id=?", user.id);
-  const expired = !row?.connect_expires_at || new Date(row.connect_expires_at).getTime() < Date.now();
+  // Правило чистоти React стосується клієнтських компонентів, які можуть
+  // перемальовуватись. Це серверний компонент: він виконується один раз на
+  // запит, і поточний час тут — саме те, що потрібно.
+  /* eslint-disable react-hooks/purity */
+  const now = Date.now();
+  const expired = !row?.connect_expires_at || new Date(row.connect_expires_at).getTime() < now;
   if (!row?.connect_token || expired) {
     const token = crypto.randomUUID().replace(/-/g, "");
     await run("UPDATE users SET connect_token=?, connect_expires_at=? WHERE id=?",
-      token, new Date(Date.now() + 15 * 60_000).toISOString(), user.id);
+      token, new Date(now + 15 * 60_000).toISOString(), user.id);
     row = { connect_token: token, connect_expires_at: null };
   }
+  /* eslint-enable react-hooks/purity */
 
   const env = getCloudflareContext().env as unknown as Record<string, string | undefined>;
   const bot = env.TELEGRAM_BOT_USERNAME ?? "mynextrole_bot";

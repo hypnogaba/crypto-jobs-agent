@@ -1,6 +1,10 @@
 import type { SourceResult, SourceStatus } from "./types.js";
 
-export interface SourceSnapshot { source: string; status: SourceStatus; consecutiveFailDays: number }
+export interface SourceSnapshot {
+  source: string; status: SourceStatus; consecutiveFailDays: number;
+  /** Чи дало це джерело бодай одну вакансію за весь час. */
+  everOk?: boolean;
+}
 
 export interface SelfRepairRepo {
   recordSourceOutcome: (source: string, ok: boolean, jobs: number, error?: string) => Promise<void>;
@@ -9,6 +13,15 @@ export interface SelfRepairRepo {
 
 /** Два дні поспіль — межа між «збоїть» і «померло». */
 const DEPRECATE_AFTER_DAYS = 2;
+
+/**
+ * Джерело, яке не дало жодної вакансії за весь час, помирає з першої невдачі.
+ *
+ * Такі беруться зі збору ATS-лінків у даних Getro: посилання в записі є, а дошка
+ * вже 404. Одного разу їх набралось 143 — 7% списку, і кожне три доби марно
+ * опитувалось. Запас у три дні заслуговує те, що колись працювало.
+ */
+const NEVER_WORKED_GRACE = 0;
 
 export async function applySourceOutcomes(
   results: SourceResult[], repo: SelfRepairRepo, prior: SourceSnapshot[]
@@ -21,8 +34,11 @@ export async function applySourceOutcomes(
     if (r.source.startsWith("guess:") || r.source.startsWith("unknown:")) continue;
     await repo.recordSourceOutcome(r.source, r.ok, r.jobs.length, r.error);
     if (r.ok) continue;
-    const days = (byName.get(r.source)?.consecutiveFailDays ?? 0) + 1;
-    if (days > DEPRECATE_AFTER_DAYS) {
+    const prior = byName.get(r.source);
+    const days = (prior?.consecutiveFailDays ?? 0) + 1;
+    // everOk невідоме (undefined) для нового джерела — тоді поводимось як раніше
+    const grace = prior?.everOk === false ? NEVER_WORKED_GRACE : DEPRECATE_AFTER_DAYS;
+    if (days > grace) {
       await repo.deprecateSource(r.source);
       deprecated.push(r.source);
     }

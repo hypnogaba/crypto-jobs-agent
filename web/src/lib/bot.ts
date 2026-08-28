@@ -16,7 +16,7 @@ async function send(env: Env, chatId: number, text: string): Promise<void> {
 export async function startBotOnboarding(env: Env, chatId: number): Promise<void> {
   const existing = await one<{ id: string }>("SELECT id FROM users WHERE telegram_chat_id=?", String(chatId));
   if (existing) {
-    await send(env, chatId, "Ти вже підключений. /profile — подивитись профіль, /pause — призупинити.");
+    await send(env, chatId, "Ти вже підключений. /profile — подивитись профіль, /time — змінити годину, /pause — призупинити.");
     return;
   }
   await send(env, chatId,
@@ -68,6 +68,35 @@ export async function handleCommand(env: Env, chatId: number, text: string): Pro
       await send(env, chatId, "Відновив. Наступна добірка прийде вранці.");
       break;
 
+    // Єдине налаштування, яке справді хочеться змінити з телефона. Досі його
+    // можна було змінити лише на сайті, хоча людина живе в боті.
+    case "/time": {
+      const arg = text.split(/\s+/)[1];
+      const row = await one<{ delivery_hour: number; timezone: string }>(
+        "SELECT delivery_hour,timezone FROM users WHERE id=?", user!.id);
+      const current = row?.delivery_hour ?? 7;
+      const zone = row?.timezone ?? "UTC";
+
+      if (arg === undefined) {
+        await send(env, chatId,
+          `Зараз добірка приходить о ${String(current).padStart(2, "0")}:00 за твоїм часом (${zone}).\n\n` +
+          "Щоб змінити — напиши /time і годину, наприклад /time 9.");
+        break;
+      }
+
+      // Приймаємо і «9», і «09:00»: людина напише як звикла.
+      const hour = Number.parseInt(arg.replace(/:.*$/, ""), 10);
+      if (!Number.isInteger(hour) || hour < 0 || hour > 23) {
+        await send(env, chatId, "Година має бути числом від 0 до 23. Наприклад: /time 9");
+        break;
+      }
+
+      await run("UPDATE users SET delivery_hour=?, updated_at=datetime('now') WHERE id=?", hour, user!.id);
+      await send(env, chatId,
+        `Готово. Наступні добірки приходитимуть о ${String(hour).padStart(2, "0")}:00 за твоїм часом (${zone}).`);
+      break;
+    }
+
     case "/profile": {
       const p = await one<{ spheres: string; seniority: string | null; remote_mode: string; salary_min: number | null }>(
         "SELECT spheres,seniority,remote_mode,salary_min FROM profiles WHERE user_id=?", user!.id);
@@ -95,6 +124,6 @@ export async function handleCommand(env: Env, chatId: number, text: string): Pro
 
     default:
       await send(env, chatId,
-        "/profile — профіль\n/pause і /resume — пауза\n/site — вхід на сайт\n/delete — видалити все");
+        "/profile — профіль\n/time — година доставки\n/pause і /resume — пауза\n/site — вхід на сайт\n/delete — видалити все");
   }
 }

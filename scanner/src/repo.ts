@@ -122,12 +122,15 @@ export class Repo {
       [source, (error ?? "невідома помилка").slice(0, 300)]);
   }
 
-  async listSourceStates(): Promise<Array<{ source: string; status: SourceStatus; consecutiveFailDays: number }>> {
+  async listSourceStates(): Promise<Array<{
+    source: string; status: SourceStatus; consecutiveFailDays: number; everOk: boolean;
+  }>> {
     const rows = await this.d1.query<SourceRow>("SELECT * FROM sources_state");
     return rows.map((r) => ({
       source: r.source_name,
       status: (r.status as SourceStatus) ?? "ok",
       consecutiveFailDays: r.consecutive_fail_days,
+      everOk: r.last_ok_at !== null,
     }));
   }
 

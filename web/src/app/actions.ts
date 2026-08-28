@@ -180,6 +180,22 @@ export const listMatches = async (userId: string) =>
      WHERE s.user_id=? ORDER BY s.created_at DESC LIMIT 50`, userId);
 
 /** Перемикач мови в навігації. Для зареєстрованих зберігається в профіль. */
+/**
+ * Три стани, не два: світло, темрява і «як у системі». Порожнє значення стирає
+ * куку, тож людина може повернутись до системної теми, а не лишитись замкненою
+ * в одному з двох виборів.
+ */
+export async function switchTheme(formData: FormData): Promise<void> {
+  const chosen = String(formData.get("theme") ?? "");
+  const jar = await cookies();
+  if (chosen === "light" || chosen === "dark") {
+    jar.set("nr_theme", chosen, { path: "/", maxAge: 31_536_000, sameSite: "lax" });
+  } else {
+    jar.delete("nr_theme");
+  }
+  redirect((await headers()).get("referer")?.replace(/^https?:\/\/[^/]+/, "") || "/");
+}
+
 export async function switchLocale(formData: FormData): Promise<void> {
   const chosen = String(formData.get("locale") ?? "en");
   if (!isLocale(chosen)) return;
