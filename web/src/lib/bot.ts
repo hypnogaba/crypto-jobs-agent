@@ -4,6 +4,7 @@ import {
   summary, toggle, type Draft, type Step,
 } from "./bot-onboarding";
 import { isLocale } from "./i18n";
+import { t as say, timeNow, timeSet } from "./bot-copy";
 import type { Locale } from "./vocab";
 
 /** Команди бота. Кабінет у чаті — мінімальний, повний лишається на сайті. */
@@ -82,14 +83,11 @@ async function saveState(chatId: number, step: Step, draft: Draft, messageId: nu
 export async function startBotOnboarding(env: Env, chatId: number, locale: Locale = "en"): Promise<void> {
   const existing = await one<{ id: string }>("SELECT id FROM users WHERE telegram_chat_id=?", String(chatId));
   if (existing) {
-    await send(env, chatId, "Ти вже підключений. /profile — подивитись профіль, /time — змінити годину, /pause — призупинити.");
+    await send(env, chatId, say("alreadyIn", locale));
     return;
   }
 
-  const greeting = locale === "uk"
-    ? "Привіт. Я щоранку надсилаю п'ять вакансій, підібраних під тебе.\nЧотири питання, тридцять секунд."
-    : "Hi. Every morning I send five jobs picked for you.\nFour questions, thirty seconds.";
-  await send(env, chatId, greeting);
+  await send(env, chatId, say("greeting", locale));
 
   const draft = emptyDraft();
   const id = await sendKeyboard(env, chatId, questionText("spheres", locale), keyboard("spheres", draft, locale));
@@ -155,7 +153,25 @@ export async function handleOnboardingText(
   env: Env, chatId: number, text: string, locale: Locale
 ): Promise<boolean> {
   const row = await one<StateRow>("SELECT step,draft,message_id FROM bot_state WHERE chat_id=?", String(chatId));
-  if (!row || row.step !== "salary") return false;
+  if (!row) return false;
+
+  if (row.step === "feedback") {
+    const user = await one<{ id: string }>("SELECT id FROM users WHERE telegram_chat_id=?", String(chatId));
+    await run(
+      "INSERT INTO site_feedback (id,user_id,contact,locale,page,message) VALUES (?,?,?,?,?,?)",
+      uuid(), user?.id ?? null, `tg:${chatId}`, locale, "bot", text.slice(0, 4000));
+    await run("DELETE FROM bot_state WHERE chat_id=?", String(chatId));
+
+    // Летить власнику тим самим ботом, що й з сайту.
+    if (env.ADMIN_CHAT_ID) {
+      await send(env, Number(env.ADMIN_CHAT_ID),
+        `Відгук із бота (${locale}, chat ${chatId})\n\n${text.slice(0, 3000)}`);
+    }
+    await send(env, chatId, say("feedbackThanks", locale));
+    return true;
+  }
+
+  if (row.step !== "salary") return false;
 
   const m = /(\d[\d\s.,]*)\s*([a-zA-Z€$£]{1,4})?/.exec(text);
   const amount = m ? Number.parseInt(m[1]!.replace(/[^\d]/g, ""), 10) : NaN;
@@ -209,7 +225,9 @@ export const botLocale = (code: string | undefined): Locale => {
   return isLocale(two) ? two : "en";
 };
 
-export async function continueBotOnboarding(env: Env, chatId: number, data: string): Promise<void> {
+export async function continueBotOnboarding(
+  env: Env, chatId: number, data: string, locale: Locale = "en"
+): Promise<void> {
   const user = await one<{ id: string }>("SELECT id FROM users WHERE telegram_chat_id=?", String(chatId));
   if (!user) return;
 
@@ -223,33 +241,35 @@ export async function continueBotOnboarding(env: Env, chatId: number, data: stri
         // Черга, а не обіцянка: сайт на Workers не дотягнеться до сканера,
         // тому запит підбирає сервер під час найближчого прогону доставки.
         await run("INSERT INTO delivery_requests (id,user_id) VALUES (?,?)", uuid(), user.id);
-        await send(env, chatId, "Прийняв. Наступна добірка прийде протягом години.");
+        await send(env, chatId, say("moreQueued", locale));
       } else {
-        await send(env, chatId, "Дякую, врахую. Завтрашня добірка буде точнішою.");
+        await send(env, chatId, say("noted", locale));
       }
     }
   }
 }
 
-export async function handleCommand(env: Env, chatId: number, text: string): Promise<void> {
+export async function handleCommand(
+  env: Env, chatId: number, text: string, locale: Locale = "en"
+): Promise<void> {
   const user = await one<{ id: string; status: string }>(
     "SELECT id,status FROM users WHERE telegram_chat_id=?", String(chatId));
   const cmd = text.split(/\s+/)[0]!.replace(/@\w+$/, "");
 
   if (!user && cmd !== "/start") {
-    await send(env, chatId, "Спершу /start, щоб я знав, кого шукати.");
+    await send(env, chatId, say("startFirst", locale));
     return;
   }
 
   switch (cmd) {
     case "/pause":
       await run("UPDATE users SET status='paused', paused_reason='manual' WHERE id=?", user!.id);
-      await send(env, chatId, "Призупинив. /resume коли захочеш повернутись.");
+      await send(env, chatId, say("paused", locale));
       break;
 
     case "/resume":
       await run("UPDATE users SET status='active', paused_reason=NULL, last_interaction_at=datetime('now') WHERE id=?", user!.id);
-      await send(env, chatId, "Відновив. Наступна добірка прийде вранці.");
+      await send(env, chatId, say("resumed", locale));
       break;
 
     // Єдине налаштування, яке справді хочеться змінити з телефона. Досі його
@@ -262,22 +282,19 @@ export async function handleCommand(env: Env, chatId: number, text: string): Pro
       const zone = row?.timezone ?? "UTC";
 
       if (arg === undefined) {
-        await send(env, chatId,
-          `Зараз добірка приходить о ${String(current).padStart(2, "0")}:00 за твоїм часом (${zone}).\n\n` +
-          "Щоб змінити — напиши /time і годину, наприклад /time 9.");
+        await send(env, chatId, `${timeNow(locale, current, zone)}\n\n${say("timeUsage", locale)}`);
         break;
       }
 
       // Приймаємо і «9», і «09:00»: людина напише як звикла.
       const hour = Number.parseInt(arg.replace(/:.*$/, ""), 10);
       if (!Number.isInteger(hour) || hour < 0 || hour > 23) {
-        await send(env, chatId, "Година має бути числом від 0 до 23. Наприклад: /time 9");
+        await send(env, chatId, say("timeBad", locale));
         break;
       }
 
       await run("UPDATE users SET delivery_hour=?, updated_at=datetime('now') WHERE id=?", hour, user!.id);
-      await send(env, chatId,
-        `Готово. Наступні добірки приходитимуть о ${String(hour).padStart(2, "0")}:00 за твоїм часом (${zone}).`);
+      await send(env, chatId, timeSet(locale, hour, zone));
       break;
     }
 
@@ -285,10 +302,12 @@ export async function handleCommand(env: Env, chatId: number, text: string): Pro
       const p = await one<{ spheres: string; seniority: string | null; remote_mode: string; salary_min: number | null }>(
         "SELECT spheres,seniority,remote_mode,salary_min FROM profiles WHERE user_id=?", user!.id);
       await send(env, chatId, p
-        ? `Сфери: ${(JSON.parse(p.spheres || "[]") as string[]).join(", ") || "—"}\n` +
-          `Рівень: ${p.seniority ?? "—"}\nРобота: ${p.remote_mode}\n` +
-          `Зарплата від: ${p.salary_min ?? "—"}\n\nЩоб змінити — просто напиши новий опис.`
-        : "Профілю ще немає. Напиши, яку роботу шукаєш.");
+        ? summary({
+            spheres: JSON.parse(p.spheres || "[]") as string[],
+            industries: [], seniority: p.seniority,
+            remoteMode: p.remote_mode, salaryMin: p.salary_min, salaryCurrency: null,
+          }, locale) + `\n\n/start — ${say("help", locale).split("\n")[0]!.split("—")[1]?.trim() ?? ""}`.trimEnd()
+        : say("noProfile", locale));
       break;
     }
 
@@ -301,13 +320,25 @@ export async function handleCommand(env: Env, chatId: number, text: string): Pro
       break;
     }
 
+    // Відгук просто в чаті: людина живе тут, а не на сайті.
+    case "/feedback":
+      await run(
+        `INSERT INTO bot_state (chat_id,step,draft,updated_at) VALUES (?,'feedback','{}',datetime('now'))
+         ON CONFLICT(chat_id) DO UPDATE SET step='feedback', draft='{}', updated_at=datetime('now')`,
+        String(chatId));
+      await send(env, chatId, say("feedbackAsk", locale));
+      break;
+
+    case "/help":
+      await send(env, chatId, say("help", locale));
+      break;
+
     case "/delete":
       await run("DELETE FROM users WHERE id=?", user!.id);
-      await send(env, chatId, "Видалив акаунт і всі дані. Захочеш повернутись — просто /start.");
+      await send(env, chatId, say("deleted", locale));
       break;
 
     default:
-      await send(env, chatId,
-        "/profile — профіль\n/time — година доставки\n/pause і /resume — пауза\n/site — вхід на сайт\n/delete — видалити все");
+      await send(env, chatId, say("help", locale));
   }
 }

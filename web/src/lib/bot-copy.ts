@@ -1,0 +1,162 @@
+/**
+ * Усе, що бот каже людині, — у чотирьох мовах.
+ *
+ * Раніше половина реплік була зашита українською, а онбординг уже говорив
+ * мовою Telegram. Виходила суміш: питання англійською, відповідь українською.
+ * Мова береться з language_code, який Telegram надсилає в кожному оновленні;
+ * якщо її немає серед наших чотирьох — англійська.
+ */
+import type { Locale } from "./vocab";
+
+type Phrase = { en: string; uk: string; fr: string; ru: string };
+
+const P = {
+  alreadyIn: {
+    en: "You are already connected. /profile to see it, /time to change the hour, /pause to stop.",
+    uk: "Ти вже підключений. /profile — подивитись профіль, /time — змінити годину, /pause — призупинити.",
+    fr: "Vous êtes déjà connecté. /profile pour le voir, /time pour changer l'heure, /pause pour arrêter.",
+    ru: "Ты уже подключён. /profile — посмотреть профиль, /time — изменить час, /pause — приостановить.",
+  },
+  greeting: {
+    en: "Hi. Every morning I send five jobs picked for you.\nFour questions, thirty seconds.",
+    uk: "Привіт. Я щоранку надсилаю п'ять вакансій, підібраних під тебе.\nЧотири питання, тридцять секунд.",
+    fr: "Bonjour. Chaque matin je vous envoie cinq offres choisies pour vous.\nQuatre questions, trente secondes.",
+    ru: "Привет. Я каждое утро присылаю пять вакансий, подобранных под тебя.\nЧетыре вопроса, тридцать секунд.",
+  },
+  linked: {
+    en: "Done. The first digest arrives tomorrow morning at your chosen hour.",
+    uk: "Готово. Перша добірка прийде завтра вранці о твоїй годині.",
+    fr: "C'est fait. La première sélection arrive demain matin à votre heure.",
+    ru: "Готово. Первая подборка придёт завтра утром в твой час.",
+  },
+  linkExpired: {
+    en: "That link has expired. Refresh the connect page and try again.",
+    uk: "Посилання застаріло. Онови сторінку підключення й спробуй ще раз.",
+    fr: "Ce lien a expiré. Rafraîchissez la page de connexion et réessayez.",
+    ru: "Ссылка устарела. Обнови страницу подключения и попробуй ещё раз.",
+  },
+  moreQueued: {
+    en: "Got it. The next digest arrives within the hour.",
+    uk: "Прийняв. Наступна добірка прийде протягом години.",
+    fr: "Compris. La prochaine sélection arrive dans l'heure.",
+    ru: "Принял. Следующая подборка придёт в течение часа.",
+  },
+  noted: {
+    en: "Thanks, noted. Tomorrow's digest will be closer.",
+    uk: "Дякую, врахую. Завтрашня добірка буде точнішою.",
+    fr: "Merci, c'est noté. La sélection de demain sera plus juste.",
+    ru: "Спасибо, учту. Завтрашняя подборка будет точнее.",
+  },
+  startFirst: {
+    en: "Send /start first, so I know what to look for.",
+    uk: "Спершу /start, щоб я знав, кого шукати.",
+    fr: "Envoyez d'abord /start, que je sache quoi chercher.",
+    ru: "Сначала /start, чтобы я знал, кого искать.",
+  },
+  paused: {
+    en: "Paused. /resume whenever you want them back.",
+    uk: "Призупинив. /resume коли захочеш повернутись.",
+    fr: "En pause. /resume quand vous voulez reprendre.",
+    ru: "Приостановил. /resume когда захочешь вернуться.",
+  },
+  resumed: {
+    en: "Back on. The next digest arrives in the morning.",
+    uk: "Відновив. Наступна добірка прийде вранці.",
+    fr: "C'est reparti. La prochaine sélection arrive demain matin.",
+    ru: "Возобновил. Следующая подборка придёт утром.",
+  },
+  timeUsage: {
+    en: "To change it, send /time and an hour, for example /time 9.",
+    uk: "Щоб змінити — напиши /time і годину, наприклад /time 9.",
+    fr: "Pour changer, envoyez /time et une heure, par exemple /time 9.",
+    ru: "Чтобы изменить — напиши /time и час, например /time 9.",
+  },
+  timeBad: {
+    en: "The hour must be a number from 0 to 23. For example: /time 9",
+    uk: "Година має бути числом від 0 до 23. Наприклад: /time 9",
+    fr: "L'heure doit être un nombre de 0 à 23. Par exemple : /time 9",
+    ru: "Час должен быть числом от 0 до 23. Например: /time 9",
+  },
+  noProfile: {
+    en: "No profile yet. Send /start and I will ask four questions.",
+    uk: "Профілю ще немає. Напиши /start, і я поставлю чотири питання.",
+    fr: "Pas encore de profil. Envoyez /start et je poserai quatre questions.",
+    ru: "Профиля ещё нет. Напиши /start, и я задам четыре вопроса.",
+  },
+  deleted: {
+    en: "Account and all data deleted. Want to come back? Just /start.",
+    uk: "Видалив акаунт і всі дані. Захочеш повернутись — просто /start.",
+    fr: "Compte et données supprimés. Pour revenir : /start.",
+    ru: "Удалил аккаунт и все данные. Захочешь вернуться — просто /start.",
+  },
+  help: {
+    en: "/profile — your profile\n/time — delivery hour\n/pause and /resume — pause\n/site — sign in on the web\n/feedback — tell us what is wrong\n/delete — erase everything",
+    uk: "/profile — твій профіль\n/time — година доставки\n/pause і /resume — пауза\n/site — вхід на сайт\n/feedback — сказати, що не так\n/delete — видалити все",
+    fr: "/profile — votre profil\n/time — heure d'envoi\n/pause et /resume — pause\n/site — accès au site\n/feedback — dire ce qui ne va pas\n/delete — tout effacer",
+    ru: "/profile — твой профиль\n/time — час доставки\n/pause и /resume — пауза\n/site — вход на сайт\n/feedback — сказать, что не так\n/delete — удалить всё",
+  },
+  feedbackAsk: {
+    en: "What is wrong? Write it in one message — it goes straight to the person who builds this.",
+    uk: "Що не так? Напиши одним повідомленням — воно йде прямо до людини, яка це робить.",
+    fr: "Qu'est-ce qui ne va pas ? Écrivez-le en un message — il va directement à celui qui construit ça.",
+    ru: "Что не так? Напиши одним сообщением — оно идёт прямо к человеку, который это делает.",
+  },
+  feedbackThanks: {
+    en: "Got it. Thank you — this is how it gets better.",
+    uk: "Прийняв. Дякую — саме так воно й стає кращим.",
+    fr: "Bien reçu. Merci — c'est comme ça que ça s'améliore.",
+    ru: "Принял. Спасибо — именно так оно и становится лучше.",
+  },
+  unknown: {
+    en: "I do not know that command. /help shows what I can do.",
+    uk: "Не знаю такої команди. /help покаже, що я вмію.",
+    fr: "Je ne connais pas cette commande. /help montre ce que je sais faire.",
+    ru: "Не знаю такой команды. /help покажет, что я умею.",
+  },
+} satisfies Record<string, Phrase>;
+
+export type CopyKey = keyof typeof P;
+
+export const t = (key: CopyKey, locale: Locale): string => P[key][locale] ?? P[key].en;
+
+/** Поточна година доставки — окремо, бо всередині число й пояс. */
+export const timeNow = (locale: Locale, hour: number, zone: string): string => {
+  const h = `${String(hour).padStart(2, "0")}:00`;
+  const map: Phrase = {
+    en: `Right now the digest arrives at ${h} your time (${zone}).`,
+    uk: `Зараз добірка приходить о ${h} за твоїм часом (${zone}).`,
+    fr: `Actuellement la sélection arrive à ${h} votre heure (${zone}).`,
+    ru: `Сейчас подборка приходит в ${h} по твоему времени (${zone}).`,
+  };
+  return map[locale] ?? map.en;
+};
+
+export const timeSet = (locale: Locale, hour: number, zone: string): string => {
+  const h = `${String(hour).padStart(2, "0")}:00`;
+  const map: Phrase = {
+    en: `Done. Digests will arrive at ${h} your time (${zone}).`,
+    uk: `Готово. Добірки приходитимуть о ${h} за твоїм часом (${zone}).`,
+    fr: `C'est fait. Les sélections arriveront à ${h} votre heure (${zone}).`,
+    ru: `Готово. Подборки будут приходить в ${h} по твоему времени (${zone}).`,
+  };
+  return map[locale] ?? map.en;
+};
+
+/**
+ * Команди, які Telegram показує в меню бота.
+ *
+ * Реєструються через setMyCommands на кожну мову окремо, тож людина бачить
+ * підписи своєю. /start тут обов'язковий: без нього в новому чаті немає навіть
+ * кнопки, з якої почати.
+ */
+export const COMMANDS: Array<{ command: string; label: Phrase }> = [
+  { command: "start",    label: { en: "Start over", uk: "Почати спочатку", fr: "Recommencer", ru: "Начать заново" } },
+  { command: "profile",  label: { en: "Your profile", uk: "Твій профіль", fr: "Votre profil", ru: "Твой профиль" } },
+  { command: "time",     label: { en: "Delivery hour", uk: "Година доставки", fr: "Heure d'envoi", ru: "Час доставки" } },
+  { command: "pause",    label: { en: "Pause digests", uk: "Призупинити добірки", fr: "Mettre en pause", ru: "Приостановить" } },
+  { command: "resume",   label: { en: "Resume digests", uk: "Відновити добірки", fr: "Reprendre", ru: "Возобновить" } },
+  { command: "site",     label: { en: "Sign in on the web", uk: "Вхід на сайт", fr: "Accès au site", ru: "Вход на сайт" } },
+  { command: "feedback", label: { en: "Tell us what is wrong", uk: "Сказати, що не так", fr: "Signaler un problème", ru: "Сказать, что не так" } },
+  { command: "help",     label: { en: "What I can do", uk: "Що я вмію", fr: "Ce que je sais faire", ru: "Что я умею" } },
+  { command: "delete",   label: { en: "Erase everything", uk: "Видалити все", fr: "Tout effacer", ru: "Удалить всё" } },
+];

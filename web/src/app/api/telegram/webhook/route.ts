@@ -5,6 +5,7 @@ import { parseProfile } from "@/lib/parse";
 import { handleCommand, startBotOnboarding, continueBotOnboarding,
          handleOnboardingButton, handleOnboardingText } from "@/lib/bot";
 import { isLocale } from "@/lib/i18n";
+import { t as botCopy } from "@/lib/bot-copy";
 
 /**
  * Вебхук Telegram.
@@ -57,9 +58,9 @@ export async function POST(request: Request): Promise<Response> {
         `UPDATE users SET telegram_chat_id=?, connect_token=NULL, connect_expires_at=NULL,
            last_interaction_at=datetime('now') WHERE id=?`,
         String(chatId), user.id);
-      await send(env, chatId, "Готово. Перша добірка прийде завтра о 07:00 за твоїм часом.");
+      await send(env, chatId, botCopy("linked", locale));
     } else {
-      await send(env, chatId, "Посилання застаріло. Онови сторінку підключення й спробуй ще раз.");
+      await send(env, chatId, botCopy("linkExpired", locale));
     }
     return NextResponse.json({ ok: true });
   }
@@ -71,7 +72,7 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   if (text.startsWith("/")) {
-    await handleCommand(env, chatId, text);
+    await handleCommand(env, chatId, text, locale);
     return NextResponse.json({ ok: true });
   }
 
@@ -80,7 +81,7 @@ export async function POST(request: Request): Promise<Response> {
     if (await handleOnboardingButton(env, chatId, callback, update.callback_query?.id, locale)) {
       return NextResponse.json({ ok: true });
     }
-    await continueBotOnboarding(env, chatId, callback);
+    await continueBotOnboarding(env, chatId, callback, locale);
     return NextResponse.json({ ok: true });
   }
 
