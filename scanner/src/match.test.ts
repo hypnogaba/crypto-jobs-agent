@@ -158,3 +158,49 @@ describe("навчання на скаргах", () => {
       .toBeLessThan(scoreJob(j, withLoc).score);
   });
 });
+
+// ── Факти збігу ───────────────────────────────────────────────
+import type { MatchFact } from "./match.js";
+
+const prof = (over: Partial<Profile> = {}): Profile => ({
+  userId: "u1", spheres: ["operations"], industries: ["fintech"],
+  seniority: "senior", remoteMode: "remote_only", location: null, salaryMin: null, ...over,
+});
+
+const cand = (over: Partial<CandidateJob> = {}): CandidateJob => ({
+  id: "j1", company: "Acme", companyKey: "acme", title: "Ops Associate",
+  location: "Remote", remote: true, url: "https://acme.com/1",
+  tags: ["operations", "fintech", "senior"], postedAt: null,
+  salaryMin: null, salaryCurrency: null, ...over,
+});
+
+describe("facts", () => {
+  it("пише ідентифікатори, а не готовий текст", () => {
+    const f = scoreJob(cand(), prof()).facts;
+    expect(f).toContainEqual({ k: "sphere", v: "operations" } satisfies MatchFact);
+    expect(f).toContainEqual({ k: "industry", v: "fintech" } satisfies MatchFact);
+    expect(f).toContainEqual({ k: "level" } satisfies MatchFact);
+    expect(f).toContainEqual({ k: "remote" } satisfies MatchFact);
+  });
+
+  it("тримає порядок від сильнішого до слабшого", () => {
+    const ks = scoreJob(cand({ postedAt: new Date().toISOString() }), prof()).facts.map((x) => x.k);
+    expect(ks.indexOf("sphere")).toBeLessThan(ks.indexOf("industry"));
+    expect(ks.indexOf("industry")).toBeLessThan(ks.indexOf("level"));
+    expect(ks.indexOf("level")).toBeLessThan(ks.indexOf("remote"));
+    expect(ks.at(-1)).toBe("fresh");
+  });
+
+  it("дає різні факти різним вакансіям — саме цього бракувало", () => {
+    const a = scoreJob(cand(), prof()).facts;
+    const b = scoreJob(cand({ id: "j2", remote: false, location: "Berlin", tags: ["operations"] }),
+                       prof({ remoteMode: "relocate" })).facts;
+    expect(JSON.stringify(a)).not.toBe(JSON.stringify(b));
+  });
+
+  it("своя роль дає факт role, а не sphere", () => {
+    const f = scoreJob(cand({ tags: [], title: "Solidity Auditor" }),
+      prof({ spheres: [], customRole: "solidity audit" })).facts;
+    expect(f).toContainEqual({ k: "role", v: "solidity audit" } satisfies MatchFact);
+  });
+});

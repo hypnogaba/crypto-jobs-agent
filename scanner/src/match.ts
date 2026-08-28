@@ -37,9 +37,27 @@ export interface CandidateJob {
   salaryCurrency: string | null;
 }
 
+/**
+ * Причина збігу як дані, а не як речення.
+ *
+ * Сканер — окремий пакет і навмисно не бачить web/src/lib/vocab.ts, тому
+ * контракт між ними — саме цей JSON. Сканер пише ідентифікатори, сайт
+ * розкриває їх у назви за локаллю. Побічний виграш: у добірці більше не
+ * стоїть сире «operations» замість «Операції та проєкти».
+ */
+export type MatchFact =
+  | { k: "sphere"; v: string }
+  | { k: "role"; v: string }
+  | { k: "industry"; v: string }
+  | { k: "place"; v: string }
+  | { k: "level" }
+  | { k: "remote" }
+  | { k: "salary" }
+  | { k: "fresh" };
+
 export interface ScoredJob extends CandidateJob {
   score: number;
-  reasons: string[];
+  facts: MatchFact[];
 }
 
 const SENIORITY_ORDER = ["junior", "middle", "senior", "lead"];
@@ -61,7 +79,7 @@ export function matchesCustomRole(title: string, role: string | null | undefined
 
 export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): ScoredJob {
   let score = 0;
-  const reasons: string[] = [];
+  const facts: MatchFact[] = [];
   const tags = new Set(job.tags);
 
   // Сфера — головне. Індустрія лише підсилює збіг, але не замінює його:
@@ -70,26 +88,26 @@ export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): Score
   // і спливає тільки тоді, коли нічого кращого немає.
   const sphereHits = p.spheres.filter((s) => tags.has(s));
   score += sphereHits.length * 6;
-  if (sphereHits.length) reasons.push(`сфера: ${sphereHits.join(", ")}`);
+  for (const s of sphereHits) facts.push({ k: "sphere", v: s });
 
   // Своя назва ролі шукається в НАЗВІ вакансії, бо тегів під неї не існує.
   // Це і є те, що робить кнопку «мій варіант» справжньою, а не декоративною.
   const roleHit = matchesCustomRole(job.title, p.customRole);
-  if (roleHit) { score += 6; reasons.push(`роль: ${p.customRole}`); }
+  if (roleHit) { score += 6; facts.push({ k: "role", v: p.customRole! }); }
 
   // Штраф лише тоді, коли людина щось назвала й нічого не збіглося.
   if (!sphereHits.length && !roleHit && (p.spheres.length > 0 || p.customRole)) score -= 8;
 
   const industryHits = p.industries.filter((i) => tags.has(i));
   score += industryHits.length * 2;
-  if (industryHits.length) reasons.push(`індустрія: ${industryHits.join(", ")}`);
+  for (const i of industryHits) facts.push({ k: "industry", v: i });
 
   // Рівень: збіг тягне вгору, розрив у два щаблі — сильно вниз
   const w = p.tuning ?? { seniority: 1, location: 1, salary: 1 };
 
   if (p.seniority) {
     const jobLevel = SENIORITY_ORDER.find((l) => tags.has(l));
-    if (jobLevel === p.seniority) { score += 3; reasons.push("рівень збігається"); }
+    if (jobLevel === p.seniority) { score += 3; facts.push({ k: "level" }); }
     else if (jobLevel) {
       const gap = Math.abs(SENIORITY_ORDER.indexOf(jobLevel) - SENIORITY_ORDER.indexOf(p.seniority));
       score -= gap * 2 * w.seniority;
@@ -97,7 +115,7 @@ export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): Score
   }
 
   if (p.remoteMode === "remote_only") {
-    if (job.remote) { score += 3; reasons.push("віддалено"); }
+    if (job.remote) { score += 3; facts.push({ k: "remote" }); }
     else score -= 6;                       // майже завжди відсікає onsite
   } else if (job.remote) {
     score += 1;
@@ -105,7 +123,7 @@ export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): Score
 
   if (p.location) {
     const hit = job.location?.toLowerCase().includes(p.location.toLowerCase()) ?? false;
-    if (hit) { score += 3; reasons.push(`локація: ${p.location}`); }
+    if (hit) { score += 3; facts.push({ k: "place", v: p.location }); }
     // Скарга на локацію робить невідповідність дорогою. Без скарг вага 1,
     // і поведінка така сама, як була: просто немає бонусу.
     else if (w.location > 1) score -= 3 * (w.location - 1);
@@ -113,17 +131,17 @@ export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): Score
 
   // Зарплата — м'який пріоритет: вакансія без вилки НЕ карається
   if (p.salaryMin && job.salaryMin) {
-    if (job.salaryMin >= p.salaryMin) { score += 2; reasons.push("зарплата підходить"); }
+    if (job.salaryMin >= p.salaryMin) { score += 2; facts.push({ k: "salary" }); }
     else score -= 2 * w.salary;
   }
 
   if (job.postedAt) {
     const days = (now.getTime() - new Date(job.postedAt).getTime()) / 86_400_000;
-    if (days <= 3) { score += 2; reasons.push("свіжа"); }
+    if (days <= 3) { score += 2; facts.push({ k: "fresh" }); }
     else if (days <= 7) score += 1;
   }
 
-  return { ...job, score, reasons };
+  return { ...job, score, facts };
 }
 
 /**
