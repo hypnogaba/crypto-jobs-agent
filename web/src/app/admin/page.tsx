@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import Nav from "../nav";
 import { detectLocale } from "../actions";
-import { addCompany, reviveSource, saveSourceKey, replyToFeedback, dismissFeedback } from "./actions";
+import { addCompany, reviveSource, saveSourceKey, replyToFeedback, dismissFeedback, purgeNeverWorked, recheckSome } from "./actions";
 import { currentUser } from "@/lib/auth";
 import { all, one } from "@/lib/db";
 
@@ -21,6 +21,47 @@ const STATE = {
   degraded:   { tag: "tag-warn", c: "var(--warn)", text: "збоїть" },
   deprecated: { tag: "tag-bad",  c: "var(--bad)",  text: "мертве" },
 } as const;
+
+function SourceTable({ rows, total }: {
+  rows: Array<{ source_name: string; status: string; consecutive_fail_days: number; last_error: string | null }>;
+  total: number;
+}) {
+  return (
+    <div className="card mt-3 overflow-x-auto">
+      <table className="board">
+        <thead>
+          <tr><th>джерело</th><th>стан</th><th>днів</th><th>остання помилка</th><th /></tr>
+        </thead>
+        <tbody>
+          {rows.map((x) => {
+            const st = STATE[x.status as keyof typeof STATE] ?? STATE.degraded;
+            return (
+              <tr key={x.source_name} className="stripe" style={{ "--c": st.c } as React.CSSProperties}>
+                <td className="mono text-xs">{x.source_name}</td>
+                <td><span className={`tag ${st.tag}`}>{st.text}</span></td>
+                <td className="num text-xs">{x.consecutive_fail_days}</td>
+                <td className="text-xs" style={{ color: "var(--muted)" }}>{x.last_error?.slice(0, 80) ?? "—"}</td>
+                <td className="text-right">
+                  <form action={reviveSource}>
+                    <input type="hidden" name="source" value={x.source_name} />
+                    <button className="mono text-xs hover:underline" style={{ color: "var(--ember)" }}>
+                      воскресити
+                    </button>
+                  </form>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {total > rows.length && (
+        <p className="px-4 py-3 text-xs" style={{ color: "var(--muted)" }}>
+          Показано {rows.length} із {total}. Решта така сама.
+        </p>
+      )}
+    </div>
+  );
+}
 
 function Tile({ n, label, accent = false }: { n: number | string; label: string; accent?: boolean }) {
   return (
@@ -80,7 +121,17 @@ export default async function Admin() {
     "SELECT * FROM site_feedback WHERE handled_at IS NULL ORDER BY created_at DESC LIMIT 30");
 
   const peak = Math.max(1, ...sources.map((x) => x.jobs_last_run));
-  const broken = sources.filter((x) => x.status !== "ok");
+  // Три групи за тим, що з цим МОЖНА зробити, а не за кодом помилки.
+  // Окремий запит без ліміту: список джерел обрізаний до 120, і рахувати
+  // групи з нього означало б показувати неправдиві числа.
+  const broken = await all<{ source_name: string; status: string; last_ok_at: string | null;
+    consecutive_fail_days: number; last_error: string | null; jobs_last_run: number }>(
+    "SELECT * FROM sources_state WHERE status<>'ok' ORDER BY consecutive_fail_days DESC");
+  const isBlocked = (x: { last_error: string | null }) =>
+    /40[13]|429/.test(x.last_error ?? "");
+  const blocked = broken.filter(isBlocked);
+  const lost = broken.filter((x) => !isBlocked(x) && x.last_ok_at !== null);
+  const neverWorked = broken.filter((x) => !isBlocked(x) && x.last_ok_at === null);
 
   return (
     <>
@@ -160,41 +211,63 @@ export default async function Admin() {
         )}
 
         {broken.length > 0 && (
-          <section className="mt-12">
-            <h2 className="display text-xl">Потребує уваги</h2>
-            <p className="mt-1 text-sm" style={{ color: "var(--muted)" }}>
-              Джерело, недоступне два дні поспіль, помирає само. Якщо воно живе — воскреси.
-            </p>
-            <div className="card mt-4 overflow-x-auto">
-              <table className="board">
-                <thead>
-                  <tr><th>джерело</th><th>стан</th><th>днів</th><th>остання помилка</th><th /></tr>
-                </thead>
-                <tbody>
-                  {broken.map((x) => {
-                    const st = STATE[x.status as keyof typeof STATE] ?? STATE.degraded;
-                    return (
-                      <tr key={x.source_name} className="stripe" style={{ "--c": st.c } as React.CSSProperties}>
-                        <td className="mono text-xs">{x.source_name}</td>
-                        <td><span className={`tag ${st.tag}`}>{st.text}</span></td>
-                        <td className="num text-xs">{x.consecutive_fail_days}</td>
-                        <td className="text-xs" style={{ color: "var(--muted)" }}>
-                          {x.last_error?.slice(0, 80) ?? "—"}
-                        </td>
-                        <td className="text-right">
-                          <form action={reviveSource}>
-                            <input type="hidden" name="source" value={x.source_name} />
-                            <button className="mono text-xs hover:underline" style={{ color: "var(--ember)" }}>
-                              воскресити
-                            </button>
-                          </form>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+          <section className="mt-12 flex flex-col gap-8">
+            <div>
+              <h2 className="display text-xl">Потребує уваги</h2>
+              <p className="mt-1 text-sm" style={{ color: "var(--muted)" }}>
+                Згруповано за тим, що з цим можна зробити. Найбільша група не потребує нічого.
+              </p>
             </div>
+
+            {blocked.length > 0 && (
+              <div>
+                <div className="flex flex-wrap items-baseline justify-between gap-3">
+                  <h3 className="font-medium">Нас заблокували або обмежили · {blocked.length}</h3>
+                  <form action={recheckSome}>
+                    <input type="hidden" name="kind" value="blocked" />
+                    <button className="btn btn-quiet px-3 py-2 text-xs">Перевірити всі</button>
+                  </form>
+                </div>
+                <p className="mt-1 text-sm" style={{ color: "var(--ink-2)" }}>
+                  403 і 429 часто минають самі: інший заголовок, менша частота. Варте одного дотику.
+                </p>
+                <SourceTable rows={blocked.slice(0, 25)} total={blocked.length} />
+              </div>
+            )}
+
+            {lost.length > 0 && (
+              <div>
+                <div className="flex flex-wrap items-baseline justify-between gap-3">
+                  <h3 className="font-medium">Колись працювали, тепер ні · {lost.length}</h3>
+                  <form action={recheckSome}>
+                    <input type="hidden" name="kind" value="lost" />
+                    <button className="btn btn-quiet px-3 py-2 text-xs">Перевірити всі</button>
+                  </form>
+                </div>
+                <p className="mt-1 text-sm" style={{ color: "var(--ink-2)" }}>
+                  Це справжня втрата: компанія давала вакансії й перестала. Можливо, переїхала на іншу дошку.
+                </p>
+                <SourceTable rows={lost.slice(0, 25)} total={lost.length} />
+              </div>
+            )}
+
+            {neverWorked.length > 0 && (
+              <div className="card px-6 py-5">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div>
+                    <h3 className="font-medium">Дошки, яких не існує · {neverWorked.length}</h3>
+                    <p className="mt-1 max-w-prose text-sm" style={{ color: "var(--ink-2)" }}>
+                      Жодна з них не дала жодної вакансії за весь час: їх зібрали з посилань
+                      у чужих даних, не перевіривши. Система прибере їх сама після наступного
+                      прогону — дивитись тут нема на що.
+                    </p>
+                  </div>
+                  <form action={purgeNeverWorked}>
+                    <button className="btn px-4 py-2 text-sm whitespace-nowrap">Прибрати зараз</button>
+                  </form>
+                </div>
+              </div>
+            )}
           </section>
         )}
 
