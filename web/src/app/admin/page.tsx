@@ -60,6 +60,10 @@ export default async function Admin() {
   const keys = new Set((await all<{ source_name: string }>("SELECT source_name FROM source_keys"))
     .map((k) => k.source_name));
 
+  const feedback = await all<{ id: string; user_id: string | null; contact: string | null;
+    locale: string; page: string | null; message: string; created_at: string }>(
+    "SELECT * FROM site_feedback WHERE handled_at IS NULL ORDER BY created_at DESC LIMIT 30");
+
   const peak = Math.max(1, ...sources.map((x) => x.jobs_last_run));
   const broken = sources.filter((x) => x.status !== "ok");
 
@@ -79,6 +83,32 @@ export default async function Admin() {
           <Tile n={s?.sent ?? 0} label="надіслано" />
           <Tile n={s?.broken ?? 0} label="зламано" accent={(s?.broken ?? 0) > 0} />
         </div>
+
+        {feedback.length > 0 && (
+          <section className="mt-12">
+            <h2 className="display text-xl">Відгуки людей</h2>
+            <p className="mt-1 text-sm" style={{ color: "var(--muted)" }}>
+              Написане своїми словами. Кожен уже прилетів у Telegram — тут він лежить, щоб не загубитись.
+            </p>
+            <div className="ruled card mt-4">
+              {feedback.map((f) => (
+                <article key={f.id} className="px-6 py-5">
+                  <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+                    <span className="mono text-xs" style={{ color: "var(--ember)" }}>
+                      {f.created_at.slice(0, 16).replace("T", " ")}
+                    </span>
+                    <span className="eyebrow">{f.locale}</span>
+                    <span className="eyebrow">{f.user_id ? f.user_id.slice(0, 8) : "без акаунту"}</span>
+                    {f.contact && <span className="mono text-xs">{f.contact}</span>}
+                  </div>
+                  <p className="mt-2 whitespace-pre-line text-sm" style={{ color: "var(--ink)" }}>
+                    {f.message}
+                  </p>
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
 
         {broken.length > 0 && (
           <section className="mt-12">

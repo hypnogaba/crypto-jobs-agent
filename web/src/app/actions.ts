@@ -8,6 +8,7 @@ import { createSession, currentUser, destroySession, requireUser } from "@/lib/a
 import { parseProfile, type ParsedProfile } from "@/lib/parse";
 import { CvError, extractCvText } from "@/lib/cv";
 import { isLocale, localeFromHeader } from "@/lib/i18n";
+import { checkRate, recordFailure } from "@/lib/ratelimit";
 import type { Locale } from "@/lib/vocab";
 
 const DRAFT_COOKIE = "nr_draft";
@@ -185,6 +186,51 @@ export const listMatches = async (userId: string) =>
  * куку, тож людина може повернутись до системної теми, а не лишитись замкненою
  * в одному з двох виборів.
  */
+/**
+ * Вільний відгук із сайту.
+ *
+ * Пишеться в базу Й одразу летить власнику в Telegram. Тільки база означала б,
+ * що відгук лежить, доки хтось не відкриє адмінку; тільки повідомлення — що
+ * він зникне, якщо власник його змахне. Тому обидва.
+ */
+export async function sendFeedback(formData: FormData): Promise<void> {
+  const message = String(formData.get("message") ?? "").trim();
+  const contact = String(formData.get("contact") ?? "").trim().slice(0, 200) || null;
+  const page = String(formData.get("page") ?? "").slice(0, 200) || null;
+
+  if (message.length < 3) redirect("/feedback?error=empty");
+
+  const ip = (await headers()).get("cf-connecting-ip") ?? "unknown";
+  if (!(await checkRate(`feedback:${ip}`)).allowed) redirect("/feedback?error=tooMany");
+  await recordFailure(`feedback:${ip}`);
+
+  const locale = await detectLocale();
+  const user = await currentUser();
+
+  await run(
+    `INSERT INTO site_feedback (id,user_id,contact,locale,page,message) VALUES (?,?,?,?,?,?)`,
+    uuid(), user?.id ?? null, contact, locale, page, message.slice(0, 4000));
+
+  // Долетіти має одразу. Впало — відгук уже в базі, нічого не втрачено.
+  const { TELEGRAM_BOT_TOKEN, ADMIN_CHAT_ID } = await env();
+  if (TELEGRAM_BOT_TOKEN && ADMIN_CHAT_ID) {
+    const who = user ? `акаунт ${user.id.slice(0, 8)}` : "без акаунту";
+    const text = `Відгук із сайту (${locale}, ${who})` +
+      (page ? `\nСторінка: ${page}` : "") +
+      (contact ? `\nЗв'язок: ${contact}` : "") +
+      `\n\n${message.slice(0, 3000)}`;
+    try {
+      await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: ADMIN_CHAT_ID, text, disable_web_page_preview: true }),
+      });
+    } catch { /* база вже має запис — мовчки далі */ }
+  }
+
+  redirect("/feedback?sent=1");
+}
+
 export async function switchTheme(formData: FormData): Promise<void> {
   const chosen = String(formData.get("theme") ?? "");
   const jar = await cookies();
