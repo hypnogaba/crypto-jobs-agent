@@ -101,3 +101,62 @@ describe("fillMissingSummaries", () => {
     expect(out.size).toBe(0);
   });
 });
+
+// ── Доставка в Telegram ───────────────────────────────────────
+import { clampSummary, fitTelegram, formatDigest, sendTelegram, TELEGRAM_MAX, describeError } from "./digest.js";
+
+describe("sendTelegram", () => {
+  it("обрив мережі — це false, а не виняток на весь прогін", async () => {
+    const f = vi.fn().mockRejectedValue(Object.assign(new Error("fetch failed"), { cause: new Error("ECONNRESET") }));
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    await expect(sendTelegram("t", "123456789", "hi", "d1", "en", f as never)).resolves.toBe(false);
+  });
+
+  it("не-200 від Telegram — теж false", async () => {
+    const f = vi.fn().mockResolvedValue(new Response("Forbidden: bot was blocked", { status: 403 }));
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    await expect(sendTelegram("t", "123456789", "hi", "d1", "en", f as never)).resolves.toBe(false);
+  });
+
+  it("200 OK — true, і текст не довший за 4096", async () => {
+    const f = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+    const long = "x".repeat(TELEGRAM_MAX + 500);
+    await expect(sendTelegram("t", "123456789", long, "d1", "en", f as never)).resolves.toBe(true);
+    const body = JSON.parse((f.mock.calls[0]![1] as { body: string }).body) as { text: string };
+    expect(body.text.length).toBeLessThanOrEqual(TELEGRAM_MAX);
+  });
+});
+
+describe("describeError", () => {
+  it("витягує причину з e.cause", () => {
+    expect(describeError(Object.assign(new Error("fetch failed"), { cause: new Error("ENOTFOUND") })))
+      .toBe("fetch failed (ENOTFOUND)");
+    expect(describeError(new Error("plain"))).toBe("plain");
+  });
+});
+
+describe("стеля 4096", () => {
+  const job = (i: number, summary: string) => ({
+    id: `j${i}`, company: `Company ${i}`, companyKey: `c${i}`, title: "Senior Engineer",
+    location: "Paris", remote: true, url: `https://x.test/${i}`, tags: [], postedAt: null,
+    salaryMin: null, salaryCurrency: null, why: "why", summary });
+
+  it("clampSummary ріже по слову і ставить трикрапку", () => {
+    expect(clampSummary("short")).toBe("short");
+    expect(clampSummary(null)).toBeNull();
+    const cut = clampSummary("word ".repeat(300), 100)!;
+    expect(cut.length).toBeLessThanOrEqual(100);
+    expect(cut.endsWith("…")).toBe(true);
+  });
+
+  it("п'ять довгих описів усе одно влазять у повідомлення", () => {
+    const jobs = Array.from({ length: 5 }, (_, i) => job(i, "lorem ipsum ".repeat(120)));
+    const text = formatDigest(jobs, { jobs: 12_345, companies: 678 }, "uk");
+    expect(text.length).toBeLessThanOrEqual(TELEGRAM_MAX);
+    expect(fitTelegram(text)).toBe(text);
+  });
+
+  it("fitTelegram — останній запобіжник", () => {
+    expect(fitTelegram("a".repeat(5000)).length).toBe(TELEGRAM_MAX);
+  });
+});
