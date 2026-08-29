@@ -101,29 +101,38 @@ export async function saveProfile(formData: FormData): Promise<void> {
     await run("UPDATE users SET timezone=?, updated_at=datetime('now') WHERE id=?", timezone, user.id);
   }
 
-  await persistProfile(user.id, draft?.text ?? "", profile);
+  // «Змінити профіль» приходить без чернетки: людина правила лише галочки.
+  // Текст резюме, з якого їх колись розібрано, має пережити це редагування.
+  await persistProfile(user.id, draft?.text ?? null, profile);
   (await cookies()).delete(DRAFT_COOKIE);
   redirect("/telegram");
 }
 
 async function persistProfile(
-  userId: string, rawInput: string,
+  userId: string, rawInput: string | null,
   p: { spheres: string[]; industries: string[]; seniority: string | null; remoteMode: string;
        location: string | null; salaryMin: number | null; salaryCurrency: string | null }
 ): Promise<void> {
-  const isCv = rawInput.length > 800;
+  // Без нового тексту (null) три текстові стовпці лишаються як були: раніше
+  // редагування без чернетки ставило cv_text=NULL, raw_input='' і
+  // mode='freetext', і резюме зникало з профілю мовчки.
+  const keepText = rawInput === null;
+  const isCv = (rawInput ?? "").length > 800;
+  const textCols = keepText
+    ? "mode=profiles.mode, raw_input=profiles.raw_input, cv_text=profiles.cv_text"
+    : "mode=excluded.mode, raw_input=excluded.raw_input, cv_text=excluded.cv_text";
   await run(
     `INSERT INTO profiles (user_id,mode,raw_input,cv_text,spheres,industries,seniority,remote_mode,location,salary_min,salary_currency,updated_at)
      VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
      ON CONFLICT(user_id) DO UPDATE SET
-       mode=excluded.mode, raw_input=excluded.raw_input, cv_text=excluded.cv_text,
+       ${textCols},
        spheres=excluded.spheres, industries=excluded.industries, seniority=excluded.seniority,
        remote_mode=excluded.remote_mode, location=excluded.location,
        salary_min=excluded.salary_min, salary_currency=excluded.salary_currency,
        updated_at=datetime('now')`,
     userId, isCv ? "cv" : "freetext",
-    isCv ? null : rawInput,           // файл резюме не зберігаємо, лише розібраний текст
-    isCv ? rawInput.slice(0, 20_000) : null,
+    isCv || keepText ? null : rawInput,   // файл резюме не зберігаємо, лише розібраний текст
+    isCv ? rawInput!.slice(0, 20_000) : null,
     JSON.stringify(p.spheres), JSON.stringify(p.industries),
     p.seniority, p.remoteMode, p.location, p.salaryMin, p.salaryCurrency);
   await persistCountry(userId, p.location);
