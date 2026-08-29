@@ -5,6 +5,7 @@ import type { Locale } from "@/lib/vocab";
 import { cookies } from "next/headers";
 import { logout, switchLocale, switchTheme } from "./actions";
 import { LOCALES } from "@/lib/i18n";
+import { pathFor, type PublicPath } from "@/lib/seo";
 
 /** Три стани теми: світло, темрява, як у системі. Порожнє значення — системна. */
 const THEMES = [
@@ -30,10 +31,19 @@ function Logomark() {
   );
 }
 
-export default async function Nav({ locale }: { locale: Locale }) {
+/**
+ * @param urlPath  Публічна сторінка, на якій стоїть шапка (`/faq`), або нічого
+ *                 для сторінок застосунку. Від цього залежить перемикач мови:
+ *                 у (seo) мова живе в адресі, тож там це посилання на сусідню
+ *                 адресу, а кука нічого б не змінила — сторінка все одно
+ *                 віддала б мову свого відрізка. У застосунку навпаки: адреса
+ *                 одна на всі мови, і мову тримає саме кука.
+ */
+export default async function Nav({ locale, urlPath }: { locale: Locale; urlPath?: PublicPath }) {
   const user = await currentUser();
   const theme = (await cookies()).get("nr_theme")?.value ?? "system";
   const dim = "var(--muted)";
+  const home = urlPath ? pathFor(locale as Locale, "/") : "/";
 
   return (
     <header className="topbar">
@@ -42,7 +52,7 @@ export default async function Nav({ locale }: { locale: Locale }) {
           ще для незалогіненого. Меню-гамбургер тут зайвий: посилань мало,
           два рядки чесніші за приховану кнопку. */}
       <nav className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-5 py-4 sm:flex-nowrap sm:px-6 sm:py-5">
-        <Link href="/" className="flex items-center gap-2.5">
+        <Link href={home} className="flex items-center gap-2.5">
           <Logomark />
           <span className="flex items-baseline gap-2.5">
             <span className="display text-lg">NextRole</span>
@@ -53,17 +63,34 @@ export default async function Nav({ locale }: { locale: Locale }) {
         </Link>
 
         <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2 text-sm sm:gap-5" style={{ color: dim }}>
-          <form action={switchLocale} className="flex gap-2">
-            {LOCALES.map((l) => (
-              <button key={l.id} name="locale" value={l.id} type="submit"
-                className="pick mono text-xs uppercase"
-                data-on={l.id === locale}
-                aria-pressed={l.id === locale}
-                title={l.name} aria-label={l.name}>
-                {l.id}
-              </button>
-            ))}
-          </form>
+          {urlPath ? (
+            // Публічна сторінка: мова — це адреса. Посилання, а не кнопка, ще
+            // й тому, що так пошук бачить шлях до кожної мовної версії, а не
+            // лише тег hreflang у <head>.
+            <div className="flex gap-2">
+              {LOCALES.map((l) => (
+                <Link key={l.id} href={pathFor(l.id as Locale, urlPath)}
+                  className="pick mono text-xs uppercase"
+                  data-on={l.id === locale}
+                  hrefLang={l.id}
+                  title={l.name} aria-label={l.name}>
+                  {l.id}
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <form action={switchLocale} className="flex gap-2">
+              {LOCALES.map((l) => (
+                <button key={l.id} name="locale" value={l.id} type="submit"
+                  className="pick mono text-xs uppercase"
+                  data-on={l.id === locale}
+                  aria-pressed={l.id === locale}
+                  title={l.name} aria-label={l.name}>
+                  {l.id}
+                </button>
+              ))}
+            </form>
+          )}
 
           <form action={switchTheme} className="flex items-center gap-1">
             {THEMES.map((th) => (

@@ -18,9 +18,36 @@ import { t } from "./i18n";
 
 export const SITE = "https://nextrole.info";
 
-/** Публічні сторінки. Приватні під Disallow у robots.ts і сюди не входять. */
-export const PUBLIC_PATHS = ["/", "/faq", "/sources", "/privacy", "/feedback", "/login"] as const;
+/**
+ * Публічні сторінки. Приватні під Disallow у robots.ts і сюди не входять.
+ *
+ * /login тут немає навмисно: там одна кнопка в Telegram і майже нуль тексту.
+ * Тонка сторінка в карті сайту не ранжується, а лише розмиває обхід.
+ */
+export const PUBLIC_PATHS = ["/", "/faq", "/sources", "/privacy", "/feedback"] as const;
 export type PublicPath = (typeof PUBLIC_PATHS)[number];
+
+/**
+ * Мови, які мають власну адресу.
+ *
+ * Англійська лежить у корені (`/faq`), решта — з префіксом (`/uk/faq`).
+ * Англійська без префікса тому, що ці адреси вже в індексі, і переїзд на
+ * `/en/faq` коштував би 301 на кожній та просідання видачі ні за що.
+ *
+ * Усі чотири, а не лише пріоритетні en і uk: переклади для fr і ru давно
+ * написані, а перемикач мови в шапці інакше довелося б на публічних сторінках
+ * урізати до двох кнопок. Ціна адреси для мови, яка вже перекладена, — нуль.
+ */
+export const URL_LOCALES: readonly Locale[] = ["en", "uk", "fr", "ru"];
+
+/** Мови з префіксом — усе, крім англійської. Це і є набір для [locale]. */
+export const PREFIXED_LOCALES = URL_LOCALES.filter((l) => l !== "en");
+
+/** Адреса сторінки в конкретній мові. Англійська — без префікса. */
+export function pathFor(locale: Locale, path: PublicPath): string {
+  if (locale === "en") return path;
+  return path === "/" ? `/${locale}` : `/${locale}${path}`;
+}
 
 /**
  * Опис сторінки — окремо від i18n.ts навмисно.
@@ -36,7 +63,6 @@ const DESCRIPTIONS: Record<Locale, Partial<Record<PublicPath, string>>> = {
     "/sources": "Every job board and employer hiring system NextRole reads, named and linked. Checked daily; a broken source is replaced, never quietly counted as empty.",
     "/privacy": "What NextRole stores, what it never stores, and how to delete everything. Your CV file is never kept.",
     "/feedback": "Tell us what is missing or wrong. Every message is read.",
-    "/login": "Sign in to NextRole through Telegram. No password to remember.",
   },
   uk: {
     "/": "Скажіть один раз, яку роботу шукаєте. Щоранку надсилаємо п'ять відповідних вакансій у Telegram, кожну з живим посиланням.",
@@ -44,7 +70,6 @@ const DESCRIPTIONS: Record<Locale, Partial<Record<PublicPath, string>>> = {
     "/sources": "Усі дошки вакансій і системи наймання, які читає NextRole — з назвами й посиланнями. Перевіряємо щодня; зламане джерело замінюємо, а не рахуємо тихо як порожнє.",
     "/privacy": "Що NextRole зберігає, чого не зберігає ніколи і як видалити все. Файл резюме не лишається в нас.",
     "/feedback": "Напишіть, чого бракує або що працює не так. Читаємо кожне повідомлення.",
-    "/login": "Вхід у NextRole через Telegram. Пароль не потрібен.",
   },
   fr: {
     "/": "Dites-nous une seule fois ce que vous cherchez. Chaque matin, cinq offres correspondantes arrivent sur votre Telegram, chacune avec un lien actif.",
@@ -52,7 +77,6 @@ const DESCRIPTIONS: Record<Locale, Partial<Record<PublicPath, string>>> = {
     "/sources": "Tous les sites d'emploi et systèmes de recrutement que lit NextRole, nommés et liés. Vérifiés chaque jour.",
     "/privacy": "Ce que NextRole conserve, ce qu'il ne conserve jamais, et comment tout supprimer. Votre CV n'est jamais stocké.",
     "/feedback": "Dites-nous ce qui manque ou ne va pas. Chaque message est lu.",
-    "/login": "Connexion à NextRole via Telegram. Aucun mot de passe à retenir.",
   },
   ru: {
     "/": "Скажите один раз, какую работу ищете. Каждое утро присылаем пять подходящих вакансий в Telegram, каждую с живой ссылкой.",
@@ -60,7 +84,6 @@ const DESCRIPTIONS: Record<Locale, Partial<Record<PublicPath, string>>> = {
     "/sources": "Все доски вакансий и системы найма, которые читает NextRole — с названиями и ссылками. Проверяем ежедневно.",
     "/privacy": "Что NextRole хранит, чего не хранит никогда и как удалить всё. Файл резюме у нас не остаётся.",
     "/feedback": "Напишите, чего не хватает или что работает не так. Читаем каждое сообщение.",
-    "/login": "Вход в NextRole через Telegram. Пароль не нужен.",
   },
 };
 
@@ -78,13 +101,59 @@ export function descriptionFor(locale: Locale, path: PublicPath): string {
  */
 export function pageMeta(locale: Locale, path: PublicPath, title: string) {
   const description = descriptionFor(locale, path);
-  const url = path === "/" ? SITE : `${SITE}${path}`;
+  const self = pathFor(locale, path);
+  const url = self === "/" ? SITE : `${SITE}${self}`;
+
+  // hreflang. Кожна мова називає всі інші, включно з собою — так вимагає
+  // Google: набір посилань має бути взаємним, інакше він його ігнорує.
+  // x-default веде на англійську як на версію для тих, чиєї мови тут немає.
+  const languages: Record<string, string> = { "x-default": pathFor("en", path) };
+  for (const l of URL_LOCALES) languages[l] = pathFor(l, path);
+
   return {
     title,
     description,
-    alternates: { canonical: path },
-    openGraph: { url, title, description },
+    alternates: { canonical: self, languages },
+    openGraph: { url, title, description, locale },
     twitter: { title, description },
+  };
+}
+
+/** Назва сайту мовою людини. Використовується як title.default у root layout. */
+const SITE_TITLE: Record<Locale, string> = {
+  en: "NextRole — five jobs every morning",
+  uk: "NextRole — п'ять вакансій щоранку",
+  fr: "NextRole — cinq offres chaque matin",
+  ru: "NextRole — пять вакансий каждое утро",
+};
+
+/**
+ * Метадані root layout публічних сторінок.
+ *
+ * Canonical сюди не входить: він належить сторінці. Саме успадкування
+ * canonical з кореня й було багом, який усе це почав.
+ */
+export function rootMetadata(locale: Locale) {
+  const title = SITE_TITLE[locale];
+  const description = descriptionFor(locale, "/");
+  return {
+    metadataBase: new URL(SITE),
+    title: { default: title, template: "%s — NextRole" },
+    description,
+    openGraph: {
+      type: "website" as const,
+      siteName: "NextRole",
+      title,
+      description,
+      locale,
+      images: [{ url: "/og.png", width: 1200, height: 630, alt: title }],
+    },
+    twitter: {
+      card: "summary_large_image" as const,
+      title,
+      description,
+      images: ["/og.png"],
+    },
   };
 }
 
@@ -140,13 +209,16 @@ export function faqPageLd(locale: Locale, keys: readonly string[]) {
 }
 
 /** Хлібні крихти. Головна плюс поточна сторінка — глибше вкладення нема. */
-export function breadcrumbLd(name: string, path: PublicPath) {
+export function breadcrumbLd(locale: Locale, name: string, path: PublicPath) {
+  const home = pathFor(locale, "/");
   return {
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
     itemListElement: [
-      { "@type": "ListItem", position: 1, name: "NextRole", item: SITE },
-      { "@type": "ListItem", position: 2, name, item: `${SITE}${path}` },
+      // Крихта веде на головну тією ж мовою, що й сама сторінка: посилання
+      // з /uk/faq на англійську головну — це обірваний ланцюжок.
+      { "@type": "ListItem", position: 1, name: "NextRole", item: home === "/" ? SITE : `${SITE}${home}` },
+      { "@type": "ListItem", position: 2, name, item: `${SITE}${pathFor(locale, path)}` },
     ],
   };
 }

@@ -13,6 +13,23 @@ const nextConfig: NextConfig = {
   experimental: {
     cpus: 1,
     workerThreads: false,
+    // globalNotFound тут НЕ вмикаємо, хоч він і виглядає як розв'язок.
+    //
+    // Root layout тепер два — (app) бере мову з куки, (seo) з адреси, — тому
+    // єдиного каркаса для 404 не існує, і сторінка на неіснуючу адресу
+    // віддається голою службовою заглушкою Next. Штатна відповідь на це —
+    // app/global-not-found.tsx під прапорцем experimental.globalNotFound.
+    //
+    // У Next 16.2.12 воно не працює: прапорець доходить лише до
+    // webpack-лоадера (build/entries.js → isGlobalNotFoundEnabled), а збірка
+    // тут на Turbopack. Перевірено — прапорець потрапляє в
+    // required-server-files.json, файл лишається неврахованим, маршрут не
+    // з'являється. Обхід через catch-all + not-found.tsx у групі теж не
+    // допомагає: notFound() усе одно рендерить вбудовану заглушку.
+    //
+    // Статус і noindex при цьому правильні (404 + noindex), тож на пошук це
+    // не впливає — лише на вигляд. Повернути свою сторінку можна, коли
+    // globalNotFound доїде до Turbopack.
   },
   output: "standalone",
   // Збірка йде локально й на Cloudflare, не на спільному хостингу з
