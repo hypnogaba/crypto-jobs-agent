@@ -23,11 +23,14 @@ const P = {
     fr: "Bonjour. Chaque matin je vous envoie cinq offres choisies pour vous.\nQuatre questions, trente secondes.",
     ru: "Привет. Я каждое утро присылаю пять вакансий, подобранных под тебя.\nЧетыре вопроса, тридцать секунд.",
   },
+  // «Протягом години» — бо сайт уже поставив запит на першу добірку в чергу
+  // (delivery_requests); ту саму обіцянку дає кабінет. Далі — щодня о
+  // вибраній годині, її рухає /time.
   linked: {
-    en: "Done. The first five roles arrive tomorrow at 09:00. Send /time to move it.",
-    uk: "Готово. Перші п'ять вакансій прийдуть завтра о 09:00. Щоб змінити годину — /time.",
-    fr: "C'est fait. Les cinq premières offres arrivent demain à 09h00. Pour changer l'heure : /time.",
-    ru: "Готово. Первые пять вакансий придут завтра в 09:00. Чтобы изменить час — /time.",
+    en: "Done. The first five roles arrive within the hour, then every day at your hour. Send /time to move it.",
+    uk: "Готово. Перші п'ять вакансій прийдуть протягом години, далі — щодня о твоїй годині. Змінити її — /time.",
+    fr: "C'est fait. Les cinq premières offres arrivent dans l'heure, puis chaque jour à votre heure. Pour la changer : /time.",
+    ru: "Готово. Первые пять вакансий придут в течение часа, дальше — каждый день в твой час. Изменить его — /time.",
   },
   linkExpired: {
     en: "That link has expired. Refresh the connect page and try again.",
