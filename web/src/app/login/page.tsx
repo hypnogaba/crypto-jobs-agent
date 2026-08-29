@@ -4,6 +4,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import Shell from "../shell";
 import { detectLocale } from "../actions";
 import { t } from "@/lib/i18n";
+import { pageMeta } from "@/lib/seo";
 
 /**
  * Вхід без пароля.
@@ -14,7 +15,7 @@ import { t } from "@/lib/i18n";
 
 export async function generateMetadata(): Promise<Metadata> {
   const locale = await detectLocale();
-  return { title: t(locale, "auth.login") };
+  return pageMeta(locale, "/login", t(locale, "auth.login"));
 }
 
 export default async function Login() {

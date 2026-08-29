@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import Analytics from "./analytics";
+import JsonLd from "./json-ld";
+import { organizationLd, webSiteLd } from "@/lib/seo";
 import { detectLocale } from "./actions";
 import { Inter_Tight, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
@@ -36,10 +38,15 @@ export const metadata: Metadata = {
   // Головна без власної назви бере повний рядок.
   title: { default: TITLE, template: "%s — NextRole" },
   description: DESCRIPTION,
-  alternates: { canonical: "/" },
+  // Canonical тут НЕ ставимо. Next зливає метадані батька в дитину, тому
+  // alternates.canonical="/" у корені означав, що /faq, /sources і /privacy
+  // віддавали <link rel="canonical" href="https://nextrole.info/"> — тобто
+  // сайт сам просив пошук викинути власні сторінки з індексу. Кожна сторінка
+  // тепер оголошує свою адресу сама, через canonicalFor().
   openGraph: {
     type: "website",
-    url: SITE,
+    // url теж належить сторінці, не кореню: інакше всі сторінки шарять
+    // картку головної.
     siteName: "NextRole",
     title: TITLE,
     description: DESCRIPTION,
@@ -81,6 +88,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     <html lang={lang} data-theme={theme}
           className={`${ui.variable} ${mono.variable}`}>
       <body className="flex min-h-screen flex-col">
+        {/* Хто ми і що це за сайт. Один раз на весь сайт, не на сторінку. */}
+        <JsonLd data={organizationLd()} />
+        <JsonLd data={webSiteLd()} />
         {children}
         <Analytics />
       </body>

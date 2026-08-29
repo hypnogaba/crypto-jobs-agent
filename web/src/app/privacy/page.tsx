@@ -3,13 +3,14 @@ import Shell from "../shell";
 import Footer from "../footer";
 import { detectLocale } from "../actions";
 import { t } from "@/lib/i18n";
+import { pageMeta } from "@/lib/seo";
 
 const SECTIONS = ["collect", "cv", "why", "keep", "share", "rights", "cookies", "contact"];
 
 
 export async function generateMetadata(): Promise<Metadata> {
   const locale = await detectLocale();
-  return { title: t(locale, "privacy.title") };
+  return pageMeta(locale, "/privacy", t(locale, "privacy.title"));
 }
 
 export default async function Privacy() {

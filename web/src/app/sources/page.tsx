@@ -4,6 +4,7 @@ import Footer from "../footer";
 import { detectLocale } from "../actions";
 import { all, one } from "@/lib/db";
 import { t } from "@/lib/i18n";
+import { pageMeta } from "@/lib/seo";
 
 export const revalidate = 3600;
 
@@ -33,7 +34,7 @@ const ATTRIBUTED = [
 
 export async function generateMetadata(): Promise<Metadata> {
   const locale = await detectLocale();
-  return { title: t(locale, "sources.title") };
+  return pageMeta(locale, "/sources", t(locale, "sources.title"));
 }
 
 export default async function Sources() {

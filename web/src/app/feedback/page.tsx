@@ -4,6 +4,7 @@ import Shell from "../shell";
 import { detectLocale, sendFeedback } from "../actions";
 import { currentUser } from "@/lib/auth";
 import { t } from "@/lib/i18n";
+import { pageMeta } from "@/lib/seo";
 
 /**
  * Одне поле й кнопка. Ані категорій, ані оцінок у зірках: людина, яка хоче
@@ -12,7 +13,7 @@ import { t } from "@/lib/i18n";
 
 export async function generateMetadata(): Promise<Metadata> {
   const locale = await detectLocale();
-  return { title: t(locale, "fb.title") };
+  return pageMeta(locale, "/feedback", t(locale, "fb.title"));
 }
 
 export default async function Feedback({

@@ -1,9 +1,32 @@
+import type { Metadata } from "next";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import Nav from "./nav";
 import Footer from "./footer";
 import { detectLocale, startOnboarding } from "./actions";
 import { all, one } from "@/lib/db";
 import { t } from "@/lib/i18n";
+import { descriptionFor, SITE } from "@/lib/seo";
+
+/**
+ * Головна теж оголошує себе сама.
+ *
+ * Раніше вона покладалась на root layout — і разом з нею на нього покладались
+ * усі інші сторінки, через що кожна віддавала canonical головної. Тепер
+ * корінь не має canonical узагалі, тож головній потрібен свій.
+ *
+ * Назви тут немає навмисно: title.default із кореня — це вже назва головної,
+ * і повторювати її означало б тримати той самий рядок у двох місцях.
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  const locale = await detectLocale();
+  const description = descriptionFor(locale, "/");
+  return {
+    description,
+    alternates: { canonical: "/" },
+    openGraph: { url: SITE, description },
+    twitter: { description },
+  };
+}
 
 type FeedRow = {
   company: string;

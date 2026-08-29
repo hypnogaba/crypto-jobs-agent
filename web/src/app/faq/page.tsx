@@ -4,19 +4,25 @@ import Shell from "../shell";
 import Footer from "../footer";
 import { detectLocale } from "../actions";
 import { t } from "@/lib/i18n";
+import JsonLd from "../json-ld";
+import { pageMeta, faqPageLd, breadcrumbLd } from "@/lib/seo";
 
 const KEYS = ["cost", "apply", "sources", "cv", "why5", "wrong", "stop", "telegram", "languages", "dead"];
 
 
 export async function generateMetadata(): Promise<Metadata> {
   const locale = await detectLocale();
-  return { title: t(locale, "faq.title") };
+  return pageMeta(locale, "/faq", t(locale, "faq.title"));
 }
 
 export default async function Faq() {
   const locale = await detectLocale();
   return (
     <>
+      {/* Ті самі KEYS, що й видимий список нижче: розмітка й текст на
+          сторінці мусять збігатися, інакше Google знімає rich result. */}
+      <JsonLd data={faqPageLd(locale, KEYS)} />
+      <JsonLd data={breadcrumbLd(t(locale, "faq.title"), "/faq")} />
       <Shell locale={locale} eyebrow={t(locale, "nav.faq")} title={t(locale, "faq.title")}>
         <dl className="ruled card">
           {KEYS.map((k) => (
