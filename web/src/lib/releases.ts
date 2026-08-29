@@ -11,6 +11,46 @@ export const RELEASES: Release[] = [
     "date": "2026-08-29",
     "changes": [
       {
+        "hash": "584b46b",
+        "subject": "Мердж onboarding-echo: крок 02/02 показує слова людини й підстави"
+      },
+      {
+        "hash": "3b556d0",
+        "subject": "Французькі підказки терпимі до відсутніх акцентів"
+      },
+      {
+        "hash": "21513d6",
+        "subject": "Крок 02/02 показує слова людини й підставу під кожною галочкою"
+      },
+      {
+        "hash": "55bc6e6",
+        "subject": "Merge branch 'main' into seo-foundation"
+      },
+      {
+        "hash": "a7e7b7c",
+        "subject": "docs: виняток для Telegram у правилах WAF"
+      },
+      {
+        "hash": "6a51ed3",
+        "subject": "docs: захист від краулерів у Cloudflare, покроково"
+      },
+      {
+        "hash": "3f586f6",
+        "subject": "web: кожна сторінка оголошує себе пошуку сама"
+      },
+      {
+        "hash": "4f1349e",
+        "subject": "Місто обов'язкове там, де його обрали; свій варіант сфери на сайті"
+      },
+      {
+        "hash": "0fb8101",
+        "subject": "web: локації латиницею для en/fr, вилка в макеті на головній"
+      },
+      {
+        "hash": "2307819",
+        "subject": "Історія версій"
+      },
+      {
         "hash": "c5c09d0",
         "subject": "web: англійська як мова першого візиту, сталий приклад у макеті"
       },
@@ -582,4 +622,4 @@ export const RELEASES: Release[] = [
   }
 ];
 
-export const GENERATED_AT = "2026-08-29 16:16";
+export const GENERATED_AT = "2026-08-29 19:17";
