@@ -272,7 +272,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
                         </p>
                         <p className="tgmock-meta">{place(j)} · {money(j)}</p>
                         <p className="tgmock-why">
-                          {t(locale, "dash.why")}: <i>{t(locale, "tg.why")}</i>
+                          {t(locale, "dash.why")}: <i>{t(locale, `tg.why${(i % 5) + 1}`)}</i>
                         </p>
                         <p className="tgmock-url">{j.url}</p>
                       </div>
