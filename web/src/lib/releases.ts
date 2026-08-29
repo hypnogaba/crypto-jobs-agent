@@ -11,6 +11,14 @@ export const RELEASES: Release[] = [
     "date": "2026-08-29",
     "changes": [
       {
+        "hash": "a08a8bb",
+        "subject": "Безпека: прив'язка Telegram через посилання лише після підтвердження кнопкою; відповідь на фідбек — лише в чат нашого користувача"
+      },
+      {
+        "hash": "207016f",
+        "subject": "Історія версій після деплоїв 2026-08-29"
+      },
+      {
         "hash": "a35f5e7",
         "subject": "План: перша добірка по домовленості + витрати в доларах"
       },
@@ -546,4 +554,4 @@ export const RELEASES: Release[] = [
   }
 ];
 
-export const GENERATED_AT = "2026-08-29 14:08";
+export const GENERATED_AT = "2026-08-29 14:19";
