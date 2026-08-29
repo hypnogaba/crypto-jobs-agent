@@ -122,11 +122,13 @@ const P = {
     fr: "C'est fait. Je parlerai français désormais.",
     ru: "Готово. Дальше буду говорить по-русски.",
   },
+  // Підказуємо той самий підпис, що стоїть у перемикачі на сайті — «ua».
+  // Код мови `uk` теж приймається, але вчити треба того, що людина бачить.
   langBad: {
-    en: "Use /lang uk, /lang en, /lang fr or /lang ru.",
-    uk: "Напиши /lang uk, /lang en, /lang fr або /lang ru.",
-    fr: "Utilisez /lang uk, /lang en, /lang fr ou /lang ru.",
-    ru: "Напиши /lang uk, /lang en, /lang fr или /lang ru.",
+    en: "Use /lang ua, /lang en, /lang fr or /lang ru.",
+    uk: "Напиши /lang ua, /lang en, /lang fr або /lang ru.",
+    fr: "Utilisez /lang ua, /lang en, /lang fr ou /lang ru.",
+    ru: "Напиши /lang ua, /lang en, /lang fr или /lang ru.",
   },
   zoneBad: {
     en: "I do not know that zone. Write it like Europe/Paris, or a city: Kyiv, Berlin, Dubai.",

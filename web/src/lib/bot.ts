@@ -925,7 +925,7 @@ export async function handleCommand(
       break;
     }
 
-    // Мова: /lang uk, або без аргументу — кнопки.
+    // Мова: /lang ua (або сам код uk), без аргументу — кнопки.
     case "/lang": {
       const arg = (text.split(/\s+/)[1] ?? "").toLowerCase();
       if (!arg) { await sendLangKeyboard(env, chatId, locale); break; }
