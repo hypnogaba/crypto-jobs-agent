@@ -227,10 +227,10 @@ const WORD = {
     ru: "Готово.\n\n\u2713 Профиль сохранён\n\u25cb Подборки приходят в рабочие дни в {h} ({tz})\n\u25cf Ближайшая: {when}\n\nХочешь увидеть, как это выглядит, прямо сейчас?",
   },
   commands: {
-    en: "/profile — your profile, edit any field\n/time — delivery hour\n/lang — language\n/pause and /resume\n/site — sign in on the web",
-    uk: "/profile — твій профіль, правка по пунктах\n/time — година доставки\n/lang — мова\n/pause і /resume — пауза\n/site — вхід на сайт",
-    fr: "/profile — votre profil, champ par champ\n/time — heure d'envoi\n/lang — langue\n/pause et /resume\n/site — accès au site",
-    ru: "/profile — твой профиль, правка по пунктам\n/time — час доставки\n/lang — язык\n/pause и /resume — пауза\n/site — вход на сайт",
+    en: "/profile — your profile, edit any field\n/time — delivery hour\n/lang — language\n/pause and /resume\n/site — sign in on the web\n/news — channel @nextroleinfo",
+    uk: "/profile — твій профіль, правка по пунктах\n/time — година доставки\n/lang — мова\n/pause і /resume — пауза\n/site — вхід на сайт\n/news — канал @nextroleinfo",
+    fr: "/profile — votre profil, champ par champ\n/time — heure d'envoi\n/lang — langue\n/pause et /resume\n/site — accès au site\n/news — canal @nextroleinfo",
+    ru: "/profile — твой профиль, правка по пунктам\n/time — час доставки\n/lang — язык\n/pause и /resume — пауза\n/site — вход на сайт\n/news — канал @nextroleinfo",
   },
   // Підписи рядків у /profile — що саме редагувати.
   fSpheres:    { en: "Fields",     uk: "Сфери",      fr: "Domaines",  ru: "Сферы" },

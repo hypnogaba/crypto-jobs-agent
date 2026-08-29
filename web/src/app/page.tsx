@@ -305,6 +305,11 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
             <p className="mt-5 text-sm" style={{ color: "var(--faint)" }}>
               {t(locale, "tg.caption")}
             </p>
+            <p className="mt-3 text-sm">
+              <a href="https://t.me/nextroleinfo" target="_blank" rel="noreferrer" className="link">
+                {t(locale, "channel.cta")}
+              </a>
+            </p>
           </div>
 
           <div className="ruled card steplist min-w-0">

@@ -199,6 +199,9 @@ function FirstRun({ locale, hour, tz, connected, queued }:
       <p className="mt-4 text-xs" style={{ color: "var(--muted)" }}>
         {queued ? t(locale, "dash.queued") : t(locale, "first.testNote")}
       </p>
+      <p className="mt-2 text-xs">
+        <a href="https://t.me/nextroleinfo" target="_blank" rel="noreferrer" className="link">{t(locale, "channel.cta")}</a>
+      </p>
     </div>
   );
 }
