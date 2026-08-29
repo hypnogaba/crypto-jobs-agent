@@ -124,3 +124,25 @@ export function deriveCountry(
 ): string | null {
   return countryFromLocation(location ? fixLayout(location) : null);
 }
+
+/**
+ * Зона для акаунта, створеного в боті.
+ *
+ * Telegram поясу не надсилає, тому ботові акаунти досі отримували UTC — і
+ * «09:00» приходило об 11:00 у Париж і о 12:00 у Київ. Два підказки, обидві
+ * чесно приблизні: місто, яке людина написала (Львів → Europe/Kyiv), а без
+ * нього — мова інтерфейсу (uk → Київ, fr → Париж). Англійська й російська
+ * не кажуть про місце нічого — лишається UTC.
+ *
+ * Це здогад про розклад, не про країну: країну визначає лише deriveCountry.
+ */
+const LOCALE_TZ: Record<string, string> = { uk: "Europe/Kyiv", fr: "Europe/Paris" };
+
+export function timezoneFor(locale: string, location: string | null | undefined): string {
+  const country = deriveCountry(location);
+  if (country) {
+    const zone = Object.entries(TZ_COUNTRY).find(([, c]) => c === country)?.[0];
+    if (zone) return zone;
+  }
+  return LOCALE_TZ[locale] ?? "UTC";
+}

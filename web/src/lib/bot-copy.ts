@@ -150,6 +150,12 @@ const P = {
     fr: "Pour changer, envoyez /time et une heure, par exemple /time 9.",
     ru: "Чтобы изменить — напиши /time и час, например /time 9.",
   },
+  timeZoneHint: {
+    en: "The zone is a guess from your language or city, not measured. If it is wrong: /site, then Settings → Save — the site reads the zone from your browser.",
+    uk: "Зону я вгадую з мови чи міста, а не міряю. Якщо вона не та: /site, далі Налаштування → Зберегти — сайт бере зону з браузера.",
+    fr: "Le fuseau est deviné d'après votre langue ou votre ville, pas mesuré. S'il est faux : /site, puis Réglages → Enregistrer — le site lit le fuseau du navigateur.",
+    ru: "Зону я угадываю по языку или городу, а не измеряю. Если она не та: /site, затем Настройки → Сохранить — сайт берёт зону из браузера.",
+  },
   timeBad: {
     en: "The hour must be a number from 0 to 23. For example: /time 9",
     uk: "Година має бути числом від 0 до 23. Наприклад: /time 9",

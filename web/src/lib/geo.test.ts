@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { countryFromLocation, countryFromTimezone, deriveCountry, fixLayout } from "./geo.js";
+import { countryFromLocation, countryFromTimezone, deriveCountry, fixLayout, timezoneFor } from "./geo.js";
 
 describe("fixLayout", () => {
   it("розпізнає локацію в неправильній розкладці", () => {
@@ -88,5 +88,22 @@ describe("deriveCountry", () => {
   it("без жодного сигналу лишає порожнє", () => {
     expect(deriveCountry(null, "UTC")).toBeNull();
     expect(deriveCountry("десь", null)).toBeNull();
+  });
+});
+
+describe("timezoneFor", () => {
+  it("місто б'є мову", () => {
+    expect(timezoneFor("en", "Львів")).toBe("Europe/Kyiv");
+    expect(timezoneFor("uk", "Paris")).toBe("Europe/Paris");
+    expect(timezoneFor("ru", "Warsaw")).toBe("Europe/Warsaw");
+  });
+  it("без міста — з мови, і лише там, де мова щось каже про місце", () => {
+    expect(timezoneFor("uk", null)).toBe("Europe/Kyiv");
+    expect(timezoneFor("fr", "")).toBe("Europe/Paris");
+    expect(timezoneFor("en", null)).toBe("UTC");
+    expect(timezoneFor("ru", null)).toBe("UTC");
+  });
+  it("невпізнане місто — знову з мови", () => {
+    expect(timezoneFor("fr", "Springfield")).toBe("Europe/Paris");
   });
 });

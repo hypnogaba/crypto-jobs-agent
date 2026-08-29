@@ -10,6 +10,7 @@ import { parseProfile } from "./parse";
 import { t as say, timeNow, timeSet } from "./bot-copy";
 import type { Locale } from "./vocab";
 import { persistCountry } from "@/lib/profile-country";
+import { timezoneFor } from "./geo";
 import { callTelegram, sendText } from "./telegram-send";
 
 /** Команди бота. Кабінет у чаті — мінімальний, повний лишається на сайті. */
@@ -288,7 +289,7 @@ async function finishOnboarding(
     await run(
       `INSERT INTO users (id,telegram_chat_id,locale,timezone,delivery_hour,last_interaction_at)
        VALUES (?,?,?,?,9,datetime('now'))`,
-      userId, String(chatId), locale, "UTC");
+      userId, String(chatId), locale, timezoneFor(locale, draft.location));
   }
 
   await run(
@@ -429,7 +430,7 @@ export async function handleDocument(
     if (!existing) {
       await run(
         `INSERT INTO users (id,telegram_chat_id,locale,timezone,delivery_hour,last_interaction_at)
-         VALUES (?,?,?,?,9,datetime('now'))`, userId, String(chatId), locale, "UTC");
+         VALUES (?,?,?,?,9,datetime('now'))`, userId, String(chatId), locale, timezoneFor(locale, parsed.location));
     }
 
     await run(
@@ -552,7 +553,9 @@ export async function handleCommand(
       const zone = row?.timezone ?? "UTC";
 
       if (arg === undefined) {
-        await send(env, chatId, `${timeNow(locale, current, zone)}\n\n${say("timeUsage", locale)}`);
+        // Зону бот лише вгадує з мови чи міста — і каже про це прямо.
+        await send(env, chatId,
+          `${timeNow(locale, current, zone)}\n${say("timeZoneHint", locale)}\n\n${say("timeUsage", locale)}`);
         break;
       }
 
