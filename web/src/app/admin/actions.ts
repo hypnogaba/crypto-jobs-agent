@@ -274,3 +274,28 @@ export async function toggleBoard(formData: FormData): Promise<void> {
     String(formData.get("id") ?? ""));
   revalidatePath("/admin");
 }
+
+/**
+ * Перемикач цілої дошки, а не однієї рубрики.
+ *
+ * DOU — це 24 рядки в таблиці: сама дошка й 23 рубрики. Вимикати їх по
+ * одному безглуздо, тому вимикаємо групою. Мітка рубрики — «DOU · Python»,
+ * тож група — це все, що починається з «DOU».
+ */
+export async function toggleBoardGroup(formData: FormData): Promise<void> {
+  await requireAdmin();
+  const country = String(formData.get("country") ?? "");
+  const board = String(formData.get("board") ?? "");
+  if (!country || !board) return;
+
+  // Вимикаємо, якщо увімкнена хоч одна; вмикаємо, коли вимкнені всі.
+  await run(
+    `UPDATE country_boards
+        SET enabled = CASE WHEN EXISTS (
+              SELECT 1 FROM country_boards x
+               WHERE x.country=?1 AND (x.label=?2 OR x.label LIKE ?2 || ' · %') AND x.enabled=1
+            ) THEN 0 ELSE 1 END
+      WHERE country=?1 AND (label=?2 OR label LIKE ?2 || ' · %')`,
+    country, board);
+  revalidatePath("/admin");
+}

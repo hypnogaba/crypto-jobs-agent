@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import Nav from "../nav";
 import { detectLocale } from "../actions";
-import { addCompany, reviveSource, saveSourceKey, replyToFeedback, dismissFeedback, purgeNeverWorked, recheckSome, applyProposal, dismissProposal, applyAllProposals, addBoard, toggleBoard } from "./actions";
+import { addCompany, reviveSource, saveSourceKey, replyToFeedback, dismissFeedback, purgeNeverWorked, recheckSome, applyProposal, dismissProposal, applyAllProposals, addBoard, toggleBoard, toggleBoardGroup } from "./actions";
 import { currentUser } from "@/lib/auth";
 import { all, one } from "@/lib/db";
 import { RELEASES } from "@/lib/releases";
@@ -205,6 +205,32 @@ export default async function Admin() {
     `SELECT b.*, s.jobs_last_run, s.status
        FROM country_boards b LEFT JOIN sources_state s ON s.source_name = b.name
       ORDER BY b.country, b.label`);
+
+  /**
+   * Країни, де вже є люди, але дошок немає.
+   *
+   * Дошки ніхто не знаходить сам: discover шукає компанії на ATS, а не
+   * національні дошки. Тому єдиний спосіб дізнатися, для якої країни варто
+   * пошукати фіди, — побачити, звідки прийшли люди.
+   */
+  const gaps = await all<{ country: string; people: number }>(
+    `SELECT p.country, COUNT(*) people
+       FROM profiles p
+      WHERE p.country IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM country_boards b
+                         WHERE b.country = p.country AND b.enabled = 1)
+      GROUP BY p.country ORDER BY people DESC`);
+
+  // Рубрики однієї дошки — це не окремі дошки. «DOU · Python» належить
+  // до «DOU», тому в таблиці показуємо дошку, а рубрики ховаємо всередину.
+  const boardGroups = [...boards.reduce((acc, b) => {
+    const name = b.label.split(" · ")[0]!;
+    const key = `${b.country}|${name}`;
+    const g = acc.get(key) ?? { country: b.country, name, rows: [] as typeof boards };
+    g.rows.push(b);
+    acc.set(key, g);
+    return acc;
+  }, new Map<string, { country: string; name: string; rows: typeof boards }>()).values()];
 
   // ── Зростання ───────────────────────────────────────────────────────────
   const scanDays = await all<{ d: string; jobs: number; companies: number }>(
@@ -523,35 +549,78 @@ export default async function Admin() {
               <Tile n={spend?.localJobs ?? 0} label="з країною в кеші" />
             </div>
 
-            {boards.length > 0 && (
+            {gaps.length > 0 && (
+              <div className="card mt-3 px-5 py-4">
+                <p className="eyebrow">країни, де є люди, а дошок немає</p>
+                <p className="mt-2 text-xs" style={{ color: "var(--ink-2)" }}>
+                  {gaps.map((g) => `${g.country} · ${g.people}`).join("   ")}
+                </p>
+                <p className="mt-2 text-xs" style={{ color: "var(--muted)" }}>
+                  Дошки не знаходяться самі: щотижневий пошук збирає компанії на ATS,
+                  а не національні дошки. Фід для країни треба знайти й додати нижче.
+                </p>
+              </div>
+            )}
+
+            {boardGroups.length > 0 && (
               <div className="card mt-3 overflow-x-auto">
                 <table className="board">
                   <thead>
-                    <tr><th>країна</th><th>дошка</th><th>стан</th><th className="num">вакансій</th><th /></tr>
+                    <tr><th>країна</th><th>дошка</th><th>стан</th><th className="num">рубрик</th>
+                        <th className="num">вакансій</th><th /></tr>
                   </thead>
                   <tbody>
-                    {boards.map((b) => (
-                      <tr key={b.id}>
-                        <td className="mono text-xs">{b.country}</td>
-                        <td className="text-xs">{b.label}</td>
-                        <td>
-                          <span className={`tag ${b.enabled === 0 ? "tag-flat" : b.status === "deprecated" ? "tag-bad"
-                            : b.status === "degraded" ? "tag-warn" : "tag-ok"}`}>
-                            {b.enabled === 0 ? "вимкнено" : b.status === "deprecated" ? "мертве"
-                              : b.status === "degraded" ? "збоїть" : b.status === "ok" ? "працює" : "ще не читали"}
-                          </span>
-                        </td>
-                        <td className="num text-xs">{b.jobs_last_run ?? "—"}</td>
-                        <td className="text-right">
-                          <form action={toggleBoard}>
-                            <input type="hidden" name="id" value={b.id} />
-                            <button className="mono text-xs hover:underline" style={{ color: "var(--ember)" }}>
-                              {b.enabled === 0 ? "увімкнути" : "вимкнути"}
-                            </button>
-                          </form>
-                        </td>
-                      </tr>
-                    ))}
+                    {boardGroups.map((g) => {
+                      const on = g.rows.filter((r) => r.enabled === 1).length;
+                      const jobs = g.rows.reduce((n, r) => n + (r.jobs_last_run ?? 0), 0);
+                      const bad = g.rows.filter((r) => r.status === "deprecated").length;
+                      const soso = g.rows.filter((r) => r.status === "degraded").length;
+                      return (
+                        <tr key={`${g.country}|${g.name}`}>
+                          <td className="mono text-xs">{g.country}</td>
+                          <td className="text-xs">
+                            {g.rows.length > 1 ? (
+                              <details>
+                                <summary style={{ cursor: "pointer" }}>{g.name}</summary>
+                                <div className="mono mt-2 text-xs" style={{ color: "var(--muted)" }}>
+                                  {g.rows.map((r) => (
+                                    <div key={r.id} className="flex items-center justify-between gap-4 py-0.5">
+                                      <span>{r.label.split(" · ")[1] ?? r.label}</span>
+                                      <span>{r.jobs_last_run ?? "—"}</span>
+                                      <form action={toggleBoard}>
+                                        <input type="hidden" name="id" value={r.id} />
+                                        <button className="mono text-xs hover:underline"
+                                                style={{ color: "var(--ember)" }}>
+                                          {r.enabled === 0 ? "увімкнути" : "вимкнути"}
+                                        </button>
+                                      </form>
+                                    </div>
+                                  ))}
+                                </div>
+                              </details>
+                            ) : g.name}
+                          </td>
+                          <td>
+                            <span className={`tag ${on === 0 ? "tag-flat" : bad > 0 ? "tag-bad"
+                              : soso > 0 ? "tag-warn" : "tag-ok"}`}>
+                              {on === 0 ? "вимкнено" : bad > 0 ? `мертвих ${bad}`
+                                : soso > 0 ? `збоїть ${soso}` : "працює"}
+                            </span>
+                          </td>
+                          <td className="num text-xs">{on === g.rows.length ? g.rows.length : `${on} / ${g.rows.length}`}</td>
+                          <td className="num text-xs">{jobs || "—"}</td>
+                          <td className="text-right">
+                            <form action={toggleBoardGroup}>
+                              <input type="hidden" name="country" value={g.country} />
+                              <input type="hidden" name="board" value={g.name} />
+                              <button className="mono text-xs hover:underline" style={{ color: "var(--ember)" }}>
+                                {on === 0 ? "увімкнути всі" : "вимкнути всі"}
+                              </button>
+                            </form>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
