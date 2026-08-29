@@ -28,3 +28,11 @@ describe("GET /go/:id", () => {
     expect(run).not.toHaveBeenCalled();
   });
 });
+
+describe("GET /go/:id — адреса з отруєної стрічки", () => {
+  it("не-https адресу не відкриває, веде на головну", async () => {
+    one.mockResolvedValue({ user_id: "u1", url: "javascript:alert(1)" });
+    const res = await call("s1");
+    expect(res.headers.get("location")).toBe("https://nextrole.info/");
+  });
+});

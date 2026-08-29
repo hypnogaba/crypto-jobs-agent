@@ -13,6 +13,7 @@
  */
 import { NextResponse } from "next/server";
 import { one, run } from "@/lib/db";
+import { safeJobUrl } from "../../../lib/safe-url";
 
 export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
   const { id } = await ctx.params;
@@ -25,5 +26,9 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   await run("UPDATE sent SET applied_at=COALESCE(applied_at, datetime('now')) WHERE id=?", id);
   await run("UPDATE users SET last_interaction_at=datetime('now') WHERE id=?", row.user_id);
 
-  return NextResponse.redirect(row.url, 302);
+  // Адреса з бази, але база наповнюється чужими стрічками. Не-https туди
+  // не пускаємо: інакше отруєна стрічка робила б із нас редирект куди завгодно.
+  const target = safeJobUrl(row.url);
+  if (!target) return NextResponse.redirect(`${base}/`, 302);
+  return NextResponse.redirect(target, 302);
 }

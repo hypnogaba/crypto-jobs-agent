@@ -191,12 +191,12 @@ const LAZY: Array<{
 }> = [
   {
     re: /^https?:\/\/(?:boards|job-boards)\.greenhouse\.io\/([^/]+)\/jobs\/(\d+)/,
-    api: (m) => `https://boards-api.greenhouse.io/v1/boards/${m[1]}/jobs/${m[2]}`,
+    api: (m) => `https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(m[1]!)}/jobs/${m[2]}`,
     pick: (b) => (b as { content?: string }).content ?? null,
   },
   {
     re: /^https?:\/\/ats\.rippling\.com\/([^/]+)\/jobs\/([0-9a-f-]+)/i,
-    api: (m) => `https://api.rippling.com/platform/api/ats/v1/board/${m[1]}/jobs/${m[2]}`,
+    api: (m) => `https://api.rippling.com/platform/api/ats/v1/board/${encodeURIComponent(m[1]!)}/jobs/${m[2]}`,
     // description — це НЕ рядок, а { company, role }. Беремо role і блурб
     // компанії навіть не бачимо.
     pick: (b) => (b as { description?: { role?: string } }).description?.role ?? null,
@@ -205,7 +205,7 @@ const LAZY: Array<{
     // SmartRecruiters сам відділяє опис ролі від блурбу компанії, тож
     // беремо саме jobDescription і не покладаємось на евристику.
     re: /^https?:\/\/jobs\.smartrecruiters\.com\/([^/]+)\/([^/?#]+)/,
-    api: (m) => `https://api.smartrecruiters.com/v1/companies/${m[1]}/postings/${m[2]}`,
+    api: (m) => `https://api.smartrecruiters.com/v1/companies/${encodeURIComponent(m[1]!)}/postings/${encodeURIComponent(m[2]!)}`,
     pick: (b) => {
       const secs = (b as { jobAd?: { sections?: Record<string, { text?: string }> } }).jobAd?.sections;
       if (!secs) return null;

@@ -29,7 +29,15 @@ const iso = (v: string): string | null => {
 const decode = (v: string): string =>
   v.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
    .replace(/&quot;/g, '"').replace(/&#0?39;|&apos;/g, "'").replace(/&nbsp;/g, " ")
-   .replace(/&#(\d+);/g, (_, n: string) => String.fromCodePoint(Number(n)));
+   .replace(/&#(\d+);/g, (all: string, n: string) => {
+     // fromCodePoint кидає на &#99999999; — одна така сутність у чужій
+     // стрічці валила б усю дошку на цей прогін.
+     const cp = Number(n);
+     return Number.isFinite(cp) && cp > 0 && cp <= 0x10ffff ? String.fromCodePoint(cp) : all;
+   });
+
+/** Заголовок довший за це — не заголовок; ріжемо ДО регулярок. */
+const TITLE_MAX = 300;
 
 const items = (xml: string): Array<{ title: string; link: string; date: string }> =>
   [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].map((m) => {
@@ -61,7 +69,9 @@ export interface ParsedTitle {
  * живій стрічці дала вакансію з містом «$1000–2000». Тире буває трьох видів,
  * бо його ставлять люди.
  */
-const SALARY = /^(від|from|до|up\s*to)?\s*\$\s*(\d[\d\s]*)(?:\s*[–—-]\s*\$?\s*(\d[\d\s]*))?\+?$/i;
+// Числа без внутрішніх пробілів у групі — «\d[\d\s]*» перед «\s*[–—-]» був
+// двозначним і на довгому невідповідному хвості давав квадратичний перебір.
+const SALARY = /^(від|from|до|up\s*to)?\s*\$\s*(\d+(?: \d{3})*)(?:\s*[–—-]\s*\$?\s*(\d+(?: \d{3})*))?\+?$/i;
 
 /** «до» задає стелю, а не підлогу. */
 const CEILING = /^(до|up\s*to)$/i;
@@ -95,7 +105,7 @@ function parseSalary(part: string): { min: number | null; max: number | null } |
  * «команду платежів».
  */
 export function parseBoardTitle(raw: string): ParsedTitle | null {
-  const clean = decode(raw).replace(/\s+/g, " ").trim();
+  const clean = decode(raw.slice(0, TITLE_MAX)).replace(/\s+/g, " ").trim();
   if (!clean) return null;
 
   const cut = clean.lastIndexOf(" в ");

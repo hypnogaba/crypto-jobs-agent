@@ -10,4 +10,6 @@ EnvironmentFile=/etc/nextrole-scanner.env
 ExecStart=/usr/bin/node dist/scan.js
 StandardOutput=journal
 StandardError=journal
+# Стеля пам'яті: чужа стрічка на гігабайт не має класти весь VPS.
+MemoryMax=512M
 TimeoutStartSec=3600

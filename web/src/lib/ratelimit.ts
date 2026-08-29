@@ -3,14 +3,27 @@ import { one, run } from "./db";
 /**
  * Просте вікняне обмеження на D1.
  *
- * Вхід і реєстрація були єдиними ендпоінтами без жодного гальма: пароль можна
- * було підбирати нескінченно. Рахуємо спроби у вікні й блокуємо на час.
+ * Рахуємо спроби у вікні за ключем (зазвичай адреса з cf-connecting-ip) і
+ * блокуємо на час. Стан у базі, а не в пам'яті: ізоляти Workers живуть
+ * недовго, і лічильник у пам'яті скидався б сам собою.
  */
 
 export interface Limits { windowMinutes: number; maxAttempts: number; blockMinutes: number }
 
-/** Підбір пароля: жорстко. */
-export const AUTH_LIMITS: Limits = { windowMinutes: 15, maxAttempts: 8, blockMinutes: 30 };
+/**
+ * Жорсткий ліміт — для того, що має вигляд підбору. Сьогодні це вебхук
+ * Telegram із неправильним секретом: справжній Telegram у секреті ніколи
+ * не помиляється, тож кожна невдача тут — чужа.
+ */
+export const STRICT_LIMITS: Limits = { windowMinutes: 15, maxAttempts: 8, blockMinutes: 30 };
+export const WEBHOOK_401_LIMITS: Limits = STRICT_LIMITS;
+
+/**
+ * Початок анкети з головної: без сесії, з викликом моделі всередині. Без
+ * ліміту це був би відкритий кран на рахунок Anthropic і на таблицю users.
+ * Двадцять на годину з однієї адреси — з запасом для офісу за NAT.
+ */
+export const ONBOARD_LIMITS: Limits = { windowMinutes: 60, maxAttempts: 20, blockMinutes: 60 };
 
 /**
  * Відгук: м'яко. Він рахує УСПІШНІ надсилання, а не невдачі, і за однією
@@ -32,7 +45,7 @@ export function decide(row: AttemptRow | null, now: Date): RateVerdict {
 }
 
 /** Чистий підрахунок наступного стану після невдалої спроби. */
-export function nextState(row: AttemptRow | null, now: Date, limits: Limits = AUTH_LIMITS): AttemptRow {
+export function nextState(row: AttemptRow | null, now: Date, limits: Limits = STRICT_LIMITS): AttemptRow {
   const windowExpired = !row ||
     (now.getTime() - new Date(row.window_start).getTime()) > limits.windowMinutes * 60_000;
   const attempts = windowExpired ? 1 : row.attempts + 1;
@@ -51,7 +64,7 @@ export async function checkRate(key: string): Promise<RateVerdict> {
 }
 
 /** Викликається ПІСЛЯ невдалої спроби (або, з м'якими лімітами, після кожної). */
-export async function recordFailure(key: string, limits: Limits = AUTH_LIMITS): Promise<void> {
+export async function recordFailure(key: string, limits: Limits): Promise<void> {
   const row = await one<AttemptRow>(
     "SELECT attempts,window_start,blocked_until FROM auth_attempts WHERE key=?", key);
   const next = nextState(row, new Date(), limits);

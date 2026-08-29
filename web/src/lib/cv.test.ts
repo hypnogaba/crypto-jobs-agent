@@ -32,3 +32,17 @@ describe("extractCvText", () => {
     expect(t.length).toBeLessThanOrEqual(20_000);
   });
 });
+
+describe("extractPdf: розпакувальна бомба", () => {
+  it("зупиняється на стелі, а не розгортає гігабайти", async () => {
+    // 6 МБ нулів стискаються в кілька кілобайт; стеля на потік — 2 МБ.
+    const zeros = new Uint8Array(6 * 1024 * 1024);
+    const cs = new CompressionStream("deflate");
+    const packed = new Uint8Array(await new Response(new Blob([zeros]).stream().pipeThrough(cs)).arrayBuffer());
+    const enc = new TextEncoder();
+    const pdf = new Uint8Array([...enc.encode("%PDF-1.4\n1 0 obj<</Length 1>>stream\n"), ...packed, ...enc.encode("\nendstream\n")]);
+    const file = new File([pdf], "bomb.pdf", { type: "application/pdf" });
+    await expect(extractCvText(file)).rejects.toThrow(CvError);
+    await expect(extractCvText(file)).rejects.toThrow("tooBig");
+  });
+});

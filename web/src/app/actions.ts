@@ -9,12 +9,40 @@ import { parseProfile, type ParsedProfile } from "@/lib/parse";
 import { CvError, extractCvText } from "@/lib/cv";
 import { isLocale, localeFromHeader } from "@/lib/i18n";
 import { safeTimezone } from "@/lib/digest-time";
-import { FEEDBACK_LIMITS, checkRate, recordFailure } from "@/lib/ratelimit";
-import type { Locale } from "@/lib/vocab";
+import { FEEDBACK_LIMITS, ONBOARD_LIMITS, checkRate, recordFailure } from "@/lib/ratelimit";
+import { INDUSTRIES, REMOTE_MODES, SENIORITY, SPHERES, type Locale } from "@/lib/vocab";
 import { persistCountry } from "@/lib/profile-country";
 import { sendText } from "@/lib/telegram-send";
 
 const DRAFT_COOKIE = "nr_draft";
+
+/**
+ * Чернетка живе в куці, а браузери ріжуть куки після ~4 КБ — мовчки.
+ * Раніше сюди клалось до 20 000 символів, і довге резюме просто губилось
+ * на шляху до /onboarding. Текст різницею не страждає: чотири поля профілю
+ * вже розібрано, а повний текст піде в базу лише як «резюме», яке й так
+ * обрізається.
+ */
+const DRAFT_TEXT_MAX = 2_500;
+
+/** Довжина вільних полів профілю, яка ще схожа на місто чи код валюти. */
+const SHORT_FIELD_MAX = 120;
+
+const allowed = (values: string[], vocab: ReadonlyArray<{ id: string }>): string[] => {
+  const ids = new Set(vocab.map((v) => v.id));
+  return [...new Set(values.filter((v) => ids.has(v)))];
+};
+
+/**
+ * Один ліміт на анкету без сесії: і крок 1 (виклик моделі), і крок 2
+ * (новий рядок users + позачергова добірка). Ключ — адреса від Cloudflare.
+ */
+async function guardOnboarding(): Promise<void> {
+  const ip = (await headers()).get("cf-connecting-ip") ?? "unknown";
+  const key = `onboard:${ip}`;
+  if (!(await checkRate(key)).allowed) redirect("/?error=tooMany");
+  await recordFailure(key, ONBOARD_LIMITS);
+}
 
 const env = async (): Promise<Record<string, string | undefined>> =>
   getCloudflareContext().env as unknown as Record<string, string | undefined>;
@@ -30,6 +58,7 @@ export async function detectLocale(): Promise<Locale> {
 
 /** Крок 1: вільний текст або резюме. Розбір іде в куку-чернетку до реєстрації. */
 export async function startOnboarding(formData: FormData): Promise<void> {
+  await guardOnboarding();
   let text = String(formData.get("input") ?? "").trim();
 
   // Резюме файлом — та сама гілка логіки, лише інший спосіб отримати текст
@@ -48,7 +77,7 @@ export async function startOnboarding(formData: FormData): Promise<void> {
   const parsed = await parseProfile(text, ANTHROPIC_API_KEY ?? null);
 
   const jar = await cookies();
-  jar.set(DRAFT_COOKIE, JSON.stringify({ text: text.slice(0, 20_000), parsed }), {
+  jar.set(DRAFT_COOKIE, JSON.stringify({ text: text.slice(0, DRAFT_TEXT_MAX), parsed }), {
     httpOnly: true, sameSite: "lax", secure: true, path: "/", maxAge: 3600,
   });
   redirect("/onboarding");
@@ -85,14 +114,19 @@ export async function saveProfile(formData: FormData): Promise<void> {
   // підроблене значення мовчки стало б розкладом доставки.
   const timezone = timezoneFrom(formData);
 
+  // Усе, що має словник, звіряємо зі словником; вільні поля обрізаємо.
+  // Форма й так дає лише ці значення, але форма — не межа довіри.
+  const seniorityRaw = String(formData.get("seniority") ?? "");
+  const remoteRaw = String(formData.get("remoteMode") ?? "remote_only");
+  const salaryMinRaw = Number.parseInt(String(formData.get("salaryMin") ?? ""), 10);
   const profile = {
-    spheres: formData.getAll("spheres").map(String),
-    industries: formData.getAll("industries").map(String),
-    seniority: String(formData.get("seniority") ?? "") || null,
-    remoteMode: String(formData.get("remoteMode") ?? "remote_only"),
-    location: String(formData.get("location") ?? "").trim() || null,
-    salaryMin: Number.parseInt(String(formData.get("salaryMin") ?? ""), 10) || null,
-    salaryCurrency: String(formData.get("salaryCurrency") ?? "").trim() || null,
+    spheres: allowed(formData.getAll("spheres").map(String), SPHERES),
+    industries: allowed(formData.getAll("industries").map(String), INDUSTRIES),
+    seniority: SENIORITY.some((s) => s.id === seniorityRaw) ? seniorityRaw : null,
+    remoteMode: REMOTE_MODES.some((m) => m.id === remoteRaw) ? remoteRaw : "remote_only",
+    location: String(formData.get("location") ?? "").trim().slice(0, SHORT_FIELD_MAX) || null,
+    salaryMin: Number.isFinite(salaryMinRaw) && salaryMinRaw > 0 && salaryMinRaw < 10_000_000 ? salaryMinRaw : null,
+    salaryCurrency: String(formData.get("salaryCurrency") ?? "").trim().slice(0, 8) || null,
     wishes: String(formData.get("wishes") ?? "").trim().slice(0, 2000) || null,
   };
   // Звідки прийшла форма: /profile повертає на себе, перший прохід — далі
@@ -100,6 +134,7 @@ export async function saveProfile(formData: FormData): Promise<void> {
   const back = String(formData.get("back") ?? "") === "profile" ? "/profile?saved=1" : "/telegram";
 
   if (!user) {
+    await guardOnboarding();
     // Ще немає акаунта — створюємо мовчки, без пошти й пароля.
     // Особа людини — це її Telegram, і вона підтвердить її наступним кроком.
     // Просити тут пароль означало б поставити анкету посеред дії.
@@ -242,8 +277,14 @@ export async function recordFeedback(formData: FormData): Promise<void> {
   redirect("/dashboard?queued=1");
 }
 
-export const listMatches = async (userId: string) =>
-  all<{ id: string; company: string; title: string; location: string | null; url: string;
+/**
+ * Добірки поточної людини. Id береться із сесії, не з аргументу: цей файл —
+ * "use server", і кожен експорт тут є HTTP-ендпоінтом, який можна викликати
+ * з будь-яким аргументом.
+ */
+export async function listMatches() {
+  const user = await requireUser();
+  return all<{ id: string; company: string; title: string; location: string | null; url: string;
         why_fits: string; match_facts: string; summary: string | null;
         salary_min: number | null; salary_currency: string | null;
         applied_at: string | null; hidden_at: string | null;
@@ -252,7 +293,8 @@ export const listMatches = async (userId: string) =>
             j.summary,j.salary_min,j.salary_currency,
             s.applied_at,s.hidden_at,s.created_at,s.digest_id
      FROM sent s JOIN jobs_cache j ON j.id = s.job_id
-     WHERE s.user_id=? ORDER BY s.created_at DESC LIMIT 50`, userId);
+     WHERE s.user_id=? ORDER BY s.created_at DESC LIMIT 50`, user.id);
+}
 
 /**
  * Стан вакансії в кабінеті.
@@ -358,7 +400,29 @@ export async function switchTheme(formData: FormData): Promise<void> {
   } else {
     jar.delete("nr_theme");
   }
-  redirect((await headers()).get("referer")?.replace(/^https?:\/\/[^/]+/, "") || "/");
+  redirect(await backToReferer());
+}
+
+/**
+ * Шлях повернення після перемикача в навігації.
+ *
+ * Лише шлях із того самого origin. Голий зріз схеми й хоста віддавав би
+ * «//evil.com» із referer «https://nextrole.info//evil.com» — а це вже
+ * відкритий редирект.
+ */
+async function backToReferer(): Promise<string> {
+  const h = await headers();
+  const ref = h.get("referer");
+  if (!ref) return "/";
+  try {
+    const url = new URL(ref);
+    const here = h.get("host");
+    if (here && url.host !== here) return "/";
+    const path = url.pathname + url.search;
+    return /^\/(?!\/)/.test(path) ? path : "/";
+  } catch {
+    return "/";
+  }
 }
 
 export async function switchLocale(formData: FormData): Promise<void> {
@@ -367,5 +431,5 @@ export async function switchLocale(formData: FormData): Promise<void> {
   (await cookies()).set("nr_locale", chosen, { path: "/", maxAge: 31_536_000, sameSite: "lax" });
   const user = await currentUser();
   if (user) await run("UPDATE users SET locale=? WHERE id=?", chosen, user.id);
-  redirect((await headers()).get("referer")?.replace(/^https?:\/\/[^/]+/, "") || "/");
+  redirect(await backToReferer());
 }

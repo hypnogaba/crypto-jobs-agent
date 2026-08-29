@@ -1,43 +1,18 @@
 import { cookies } from "next/headers";
-import { all, one, run, uuid } from "./db";
+import { one, run, uuid } from "./db";
 
 /**
- * Аутентифікація на власних силах: PBKDF2 із WebCrypto (доступний у Workers)
- * і сесія в базі. Раніше в застосунку не було захисту взагалі — userId лежав
- * у непідписаній куці, і будь-хто, підставивши чужий id, відкривав чужий кабінет.
+ * Сесія в базі, непрозорий id у куці. Раніше в застосунку не було захисту
+ * взагалі — userId лежав у непідписаній куці, і будь-хто, підставивши чужий
+ * id, відкривав чужий кабінет.
+ *
+ * Паролів більше немає: вхід лише через Telegram (одноразове посилання з
+ * бота). Код PBKDF2 прибрано разом із формою входу — мертвий код із
+ * криптографією всередині лише вводить в оману під час перевірок.
  */
 
 const SESSION_COOKIE = "nr_session";
 const SESSION_DAYS = 30;
-const PBKDF2_ITERATIONS = 210_000;
-
-const enc = new TextEncoder();
-const toHex = (b: ArrayBuffer): string =>
-  [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
-
-async function derive(password: string, saltHex: string): Promise<string> {
-  const salt = Uint8Array.from(saltHex.match(/.{2}/g)!.map((h) => Number.parseInt(h, 16)));
-  const key = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveBits"]);
-  const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt, iterations: PBKDF2_ITERATIONS, hash: "SHA-256" }, key, 256);
-  return toHex(bits);
-}
-
-export async function hashPassword(password: string): Promise<string> {
-  const salt = toHex(crypto.getRandomValues(new Uint8Array(16)).buffer);
-  return `pbkdf2$${PBKDF2_ITERATIONS}$${salt}$${await derive(password, salt)}`;
-}
-
-export async function verifyPassword(password: string, stored: string): Promise<boolean> {
-  const [scheme, , salt, expected] = stored.split("$");
-  if (scheme !== "pbkdf2" || !salt || !expected) return false;
-  const actual = await derive(password, salt);
-  // Порівняння сталого часу — щоб не зливати хеш через таймінг
-  if (actual.length !== expected.length) return false;
-  let diff = 0;
-  for (let i = 0; i < actual.length; i++) diff |= actual.charCodeAt(i) ^ expected.charCodeAt(i);
-  return diff === 0;
-}
 
 export interface SessionUser {
   id: string;
@@ -86,6 +61,8 @@ export async function destroySession(): Promise<void> {
   const id = jar.get(SESSION_COOKIE)?.value;
   if (id) await run("DELETE FROM sessions WHERE id=?", id);
   jar.delete(SESSION_COOKIE);
+  // Вихід — зручний момент прибрати протерміноване: нічого не чекає на відповідь.
+  await pruneSessions();
 }
 
 export async function currentUser(): Promise<SessionUser | null> {
@@ -129,6 +106,3 @@ export async function requireAdmin(): Promise<SessionUser> {
 export async function pruneSessions(): Promise<void> {
   await run("DELETE FROM sessions WHERE expires_at < ?", new Date().toISOString());
 }
-
-export const listSessions = (userId: string) =>
-  all<{ id: string; expires_at: string }>("SELECT id,expires_at FROM sessions WHERE user_id=?", userId);

@@ -88,3 +88,18 @@ describe("cleanUrl", () => {
     expect(cleanUrl("не адреса")).toBe("не адреса");
   });
 });
+
+import { parseBoardTitle as parseTitleGuard } from "./boards.js";
+
+describe("захист від чужої стрічки", () => {
+  it("сутність поза Unicode не валить розбір", () => {
+    const p = parseTitleGuard("Python Developer&#99999999; в Acme, Київ");
+    expect(p?.company).toBe("Acme");
+  });
+  it("довжелезний заголовок розбирається швидко", () => {
+    const evil = "$" + "1 ".repeat(20_000) + "x";
+    const t0 = Date.now();
+    parseTitleGuard(`Роль в Компанія, ${evil}`);
+    expect(Date.now() - t0).toBeLessThan(200);
+  });
+});

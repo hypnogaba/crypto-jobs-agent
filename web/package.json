@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "postinstall": "npm run cf-typegen",
+    "prebuild": "npm run cf-typegen",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
