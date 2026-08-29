@@ -9,6 +9,7 @@ import { t } from "@/lib/i18n";
 import { factLabels, parseFacts } from "@/lib/facts";
 import { dayLabel, formatWhen, nextDelivery } from "@/lib/digest-time";
 import { zoneName } from "@/lib/tz";
+import { toLatin } from "@/lib/geo";
 import type { Locale } from "@/lib/vocab";
 
 type Match = Awaited<ReturnType<typeof listMatches>>[number];
@@ -44,6 +45,11 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     list.push(m);
     digests.set(m.digest_id, list);
   }
+
+  // Те саме, що на головній: локація з дошки лишається в базі як є, а на
+  // англійському й французькому екрані показується латиницею.
+  const place = (m: Match): string | null =>
+    m.location && (locale === "en" || locale === "fr") ? toLatin(m.location) : m.location;
 
   const money = (m: Match): string | null =>
     m.salary_min
@@ -114,7 +120,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                                 {m.company} <span style={{ color: "var(--muted)" }}>·</span> {m.title}
                               </h3>
                               <p className="mono mt-1 text-xs" style={{ color: "var(--muted)" }}>
-                                {[m.location, money(m)].filter(Boolean).join(" · ") || "—"}
+                                {[place(m), money(m)].filter(Boolean).join(" · ") || "—"}
                               </p>
                             </div>
                             {!m.applied_at && (

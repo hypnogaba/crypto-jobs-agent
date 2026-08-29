@@ -17,13 +17,14 @@ export async function generateMetadata(): Promise<Metadata> {
  * збереження — сюди ж. Текст резюме це не чіпає: без чернетки
  * persistProfile лишає raw_input/cv_text як були.
  */
-export default async function Profile({ searchParams }: { searchParams: Promise<{ saved?: string }> }) {
+export default async function Profile({ searchParams }: { searchParams: Promise<{ saved?: string; error?: string }> }) {
   const locale = await detectLocale();
   const user = await currentUser();
   if (!user) redirect("/login");
-  const { saved } = await searchParams;
+  const { saved, error } = await searchParams;
 
   const row = await one<{ spheres: string; industries: string; seniority: string | null;
+    custom_role: string | null; custom_industry: string | null;
     remote_mode: string; location: string | null; salary_min: number | null; salary_currency: string | null;
     wishes: string | null }>(
     "SELECT * FROM profiles WHERE user_id=?", user.id);
@@ -32,8 +33,9 @@ export default async function Profile({ searchParams }: { searchParams: Promise<
   return (
     <Shell locale={locale} title={t(locale, "profile.title")} lede={t(locale, "profile.lede")}>
       {saved && <p className="tag tag-ok mb-5 inline-block">{t(locale, "settings.saved")}</p>}
-      <ProfileForm locale={locale} back="profile" pre={{
+      <ProfileForm locale={locale} back="profile" error={error} pre={{
         spheres: parseList(row.spheres), industries: parseList(row.industries),
+        customRole: row.custom_role, customIndustry: row.custom_industry,
         seniority: row.seniority, remoteMode: row.remote_mode, location: row.location,
         salaryMin: row.salary_min, salaryCurrency: row.salary_currency, wishes: row.wishes,
       }} />

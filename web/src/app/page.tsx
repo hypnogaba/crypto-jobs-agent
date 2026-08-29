@@ -4,6 +4,7 @@ import Footer from "./footer";
 import { detectLocale, startOnboarding } from "./actions";
 import { all, one } from "@/lib/db";
 import { t } from "@/lib/i18n";
+import { toLatin } from "@/lib/geo";
 
 type FeedRow = {
   company: string;
@@ -66,8 +67,20 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
 
   const feed = await all<FeedRow>(FEED_SQL).catch(() => [] as FeedRow[]);
 
-  const place = (j: FeedRow) =>
-    j.location ?? (j.remote ? t(locale, "feed.remote") : t(locale, "tg.noLocation"));
+  /**
+   * Локація в стрічці.
+   *
+   * Кирилиця тут не випадковість: національні дошки віддають «Київ, Львів»
+   * саме так, і в базі це лишається як є. Але людині з англійським чи
+   * французьким інтерфейсом такий рядок нічого не каже — він навіть не
+   * читається. Для латинських локалей транслітеруємо на показ; для uk і ru
+   * лишаємо оригінал, бо там переклад назви — це погіршення, а не поміч.
+   */
+  const latin = locale === "en" || locale === "fr";
+  const place = (j: FeedRow) => {
+    const raw = j.location ?? (j.remote ? t(locale, "feed.remote") : t(locale, "tg.noLocation"));
+    return latin ? toLatin(raw) : raw;
+  };
 
   const steps = [1, 2, 3, 4].map((n) => ({
     n, title: t(locale, `home.step${n}`), body: t(locale, `home.step${n}d`),
@@ -96,15 +109,20 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
    * лишаються справжніми — вигадані тільки самі ролі, і підпис під макетом
    * (`tg.caption`) про це прямо каже. Жива вибірка нікуди не поділася: вона
    * поруч, у стрічці ліворуч, і там усе справжнє.
+   *
+   * Зарплата стоїть в обох картках навмисно. Поки макет тягнув живі рядки,
+   * там двічі поспіль випадало «no range given» — більшість оголошень вилки
+   * не називає, — і рядок читався як «даних немає», а не як формат. Вилка
+   * показує, що поле взагалі буває заповненим.
    */
   const mock = [
     // Ключ «чому ти» стоїть біля ролі, а не рахується з індексу: доки картки
     // приїжджали з бази, рядок був якийсь із п'яти й до вакансії не пасував —
     // менеджеру партнерств діставався бекенд і Go. Тепер обидві пари підібрані.
     { company: "Connecta Consulting", title: "International Partnerships Manager",
-      place: "Paris", why: "tg.why4" },
+      place: "Paris", salary: 4000, why: "tg.why4" },
     { company: "Everstar", title: "Senior Platform Engineer",
-      place: "Paris, Lyon", why: "tg.why1" },
+      place: "Paris, Lyon", salary: 5700, why: "tg.why1" },
   ];
 
   return (
@@ -283,7 +301,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
                         <p className="tgmock-jobline">
                           <b>{i + 1}</b> · <b>{j.company}</b> — {j.title}
                         </p>
-                        <p className="tgmock-meta">{j.place} · {t(locale, "tg.noSalary")}</p>
+                        <p className="tgmock-meta">{j.place} · {num(j.salary)} EUR</p>
                         <p className="tgmock-why">
                           {t(locale, "dash.why")}: <i>{t(locale, j.why)}</i>
                         </p>

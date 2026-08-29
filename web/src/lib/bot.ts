@@ -9,7 +9,7 @@ import { isLocale, LOCALES } from "./i18n";
 import { CvError, extractCvText } from "./cv";
 import { parseProfile } from "./parse";
 import { t as say, tf, timeNow, timeSet } from "./bot-copy";
-import type { Locale } from "./vocab";
+import { parseModes, serializeModes, toggleMode, type Locale } from "./vocab";
 import { persistCountry } from "@/lib/profile-country";
 import { timezoneFor } from "./geo";
 import { isKnownZone, timezoneFromCity, zoneForHour, zoneName } from "./tz";
@@ -163,8 +163,9 @@ export async function handleOnboardingButton(
   }
 
   // Кілька відповідей: перемикаємо й перемальовуємо те саме питання
-  if ((step === "spheres" || step === "industries") && value !== "__next") {
+  if ((step === "spheres" || step === "industries" || step === "where") && value !== "__next") {
     if (step === "spheres") draft.spheres = toggle(draft.spheres, value);
+    else if (step === "where") draft.remoteMode = toggleMode(draft.remoteMode, value);
     else draft.industries = toggle(draft.industries, value);
     await saveState(chatId, step, draft, null);
     if (row.message_id) {
@@ -185,7 +186,6 @@ export async function handleOnboardingButton(
 
   // Одна відповідь — або «Готово» в списку з кількома
   if (step === "seniority") draft.seniority = value;
-  if (step === "where") draft.remoteMode = value;
   if (step === "salary") {
     if (value === "__other") {
       await saveState(chatId, "salary", draft, null);
@@ -324,7 +324,11 @@ export async function handleOnboardingText(
   // Місто: коротка відповідь вільним текстом, далі — останнє питання.
   if (row.step === "city") {
     const draft = readDraft(row.draft);
-    draft.location = text.slice(0, 120).trim() || null;
+    const city = text.slice(0, 120).trim();
+    // Порожня відповідь не проходить: питання ставиться лише тому, хто сам
+    // обрав місце, а профіль без міста лишається без країни й без місцевих дошок.
+    if (!city) { await send(env, chatId, questionText("city", locale)); return true; }
+    draft.location = city;
     const goto = nextStep("city", draft);
     if (!goto) { await finishOnboarding(env, chatId, draft, locale, row.message_id); return true; }
     await saveState(chatId, goto, draft, null);
@@ -397,7 +401,7 @@ async function finishOnboarding(
     JSON.stringify(draft.spheres), draft.customRole ?? null,
     JSON.stringify(draft.industries), draft.customIndustry ?? null,
     draft.seniority, draft.customSeniority ?? null,
-    draft.remoteMode ?? "remote_only", draft.location ?? null,
+    serializeModes(parseModes(draft.remoteMode)) || "remote_only", draft.location ?? null,
     draft.salaryMin, draft.salaryCurrency, draft.wishes?.trim() || null);
 
   await persistCountry(userId, draft.location ?? null);
@@ -527,8 +531,9 @@ export async function handleEditButton(
     return true;
   }
 
-  if ((step === "spheres" || step === "industries") && value !== "__next") {
+  if ((step === "spheres" || step === "industries" || step === "where") && value !== "__next") {
     if (step === "spheres") draft.spheres = toggle(draft.spheres, value);
+    else if (step === "where") { draft.remoteMode = toggleMode(draft.remoteMode, value); draft.customWhere = null; }
     else draft.industries = toggle(draft.industries, value);
     await saveState(chatId, row.step as Step, draft, null);
     if (row.message_id) {
@@ -539,7 +544,6 @@ export async function handleEditButton(
   }
 
   if (step === "seniority") { draft.seniority = value; draft.customSeniority = null; }
-  if (step === "where") { draft.remoteMode = value; draft.customWhere = null; }
   if (step === "salary") {
     if (value === "__other") { await send(env, chatId, askOtherAmount(locale)); return true; }
     const n = Number.parseInt(value, 10);
