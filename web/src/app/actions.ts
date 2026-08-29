@@ -7,7 +7,7 @@ import { all, one, run, uuid } from "@/lib/db";
 import { createSession, currentUser, destroySession, requireUser } from "@/lib/auth";
 import { parseProfile, type ParsedProfile } from "@/lib/parse";
 import { CvError, extractCvText } from "@/lib/cv";
-import { isLocale, localeFromHeader } from "@/lib/i18n";
+import { DEFAULT_LOCALE, isLocale } from "@/lib/i18n";
 import { safeTimezone } from "@/lib/digest-time";
 import { FEEDBACK_LIMITS, ONBOARD_LIMITS, checkRate, recordFailure } from "@/lib/ratelimit";
 import { INDUSTRIES, REMOTE_MODES, SENIORITY, SPHERES, type Locale } from "@/lib/vocab";
@@ -53,7 +53,7 @@ export async function detectLocale(): Promise<Locale> {
   if (chosen && isLocale(chosen)) return chosen;
   const user = await currentUser();
   if (user && isLocale(user.locale)) return user.locale;
-  return localeFromHeader((await headers()).get("accept-language"));
+  return DEFAULT_LOCALE;
 }
 
 /** Крок 1: вільний текст або резюме. Розбір іде в куку-чернетку до реєстрації. */

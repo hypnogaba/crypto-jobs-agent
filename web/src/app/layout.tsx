@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
-import { cookies, headers } from "next/headers";
-import { isLocale, localeFromHeader } from "@/lib/i18n";
+import { cookies } from "next/headers";
 import Analytics from "./analytics";
+import { detectLocale } from "./actions";
 import { Inter_Tight, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -70,10 +70,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 
   // lang мусить збігатися з тим, що на сторінці: інтерфейс має чотири мови, дві
   // з них кириличні. Зашите "en" ламало читалки з екрана й перенос слів.
-  const picked = jar.get("nr_locale")?.value;
-  const lang = picked && isLocale(picked)
-    ? picked
-    : localeFromHeader((await headers()).get("accept-language"));
+  //
+  // Саме detectLocale, а не читання куки тут-таки: сторінки беруть мову ним,
+  // і він знає ще й users.locale. Акаунт із бота приходить на сайт без куки —
+  // раніше французький текст їхав у <html lang="en">. Для гостя виклик не
+  // коштує нічого: без куки сесії він виходить одразу, до бази не йде.
+  const lang = await detectLocale();
 
   return (
     <html lang={lang} data-theme={theme}

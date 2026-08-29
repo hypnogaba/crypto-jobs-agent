@@ -10,8 +10,6 @@ type FeedRow = {
   title: string;
   location: string | null;
   remote: number;
-  salary_min: number | null;
-  salary_currency: string | null;
   url: string;
 };
 
@@ -27,15 +25,13 @@ type FeedRow = {
  * видаляє, тож свіжість — це вікно, а не DELETE. Індекс idx_jobs_fetched є.
  */
 const FEED_SQL = `
-  SELECT company, title, location, remote, salary_min, salary_currency, url
+  SELECT company, title, location, remote, url
   FROM (
-    SELECT company, title, location, remote, salary_min, salary_currency, url,
-           posted_at, fetched_at,
+    SELECT company, title, location, remote, url, posted_at, fetched_at,
            ROW_NUMBER() OVER (PARTITION BY company_key
                               ORDER BY posted_at DESC, fetched_at DESC) per_company
     FROM (
-      SELECT company, company_key, title, location, remote, salary_min,
-             salary_currency, url, posted_at, fetched_at,
+      SELECT company, company_key, title, location, remote, url, posted_at, fetched_at,
              ROW_NUMBER() OVER (PARTITION BY dedupe_key
                                 ORDER BY posted_at DESC, fetched_at DESC) dup
       FROM jobs_cache
@@ -72,8 +68,6 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
 
   const place = (j: FeedRow) =>
     j.location ?? (j.remote ? t(locale, "feed.remote") : t(locale, "tg.noLocation"));
-  const money = (j: FeedRow) =>
-    j.salary_min ? `${num(j.salary_min)} ${j.salary_currency ?? ""}`.trim() : t(locale, "tg.noSalary");
 
   const steps = [1, 2, 3, 4].map((n) => ({
     n, title: t(locale, `home.step${n}`), body: t(locale, `home.step${n}d`),
@@ -89,8 +83,29 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
     { hour: "09:00", title: t(locale, "home.deliver"), body: t(locale, "home.deliverd") },
   ];
 
-  // Макет цитує справжні відкриті ролі з того самого запиту — жодних вигаданих.
-  const mock = feed.slice(0, 2);
+  /**
+   * Макет — приклад, а не жива вибірка.
+   *
+   * Раніше сюди йшли два найсвіжіші рядки з того самого запиту. Виходило
+   * чесно, але лотерейно: кеш о будь-якій годині міг віддати дві українські
+   * вакансії, і перше, що бачив француз чи німець на головній, — «Київ,
+   * Львів» кирилицею. Вітрина не має залежати від того, який сканер відпрацював
+   * останнім.
+   *
+   * Тому дві сталі картки латиницею. Формат, порядок полів і клавіатура нижче
+   * лишаються справжніми — вигадані тільки самі ролі, і підпис під макетом
+   * (`tg.caption`) про це прямо каже. Жива вибірка нікуди не поділася: вона
+   * поруч, у стрічці ліворуч, і там усе справжнє.
+   */
+  const mock = [
+    // Ключ «чому ти» стоїть біля ролі, а не рахується з індексу: доки картки
+    // приїжджали з бази, рядок був якийсь із п'яти й до вакансії не пасував —
+    // менеджеру партнерств діставався бекенд і Go. Тепер обидві пари підібрані.
+    { company: "Connecta Consulting", title: "International Partnerships Manager",
+      place: "Paris", why: "tg.why4" },
+    { company: "Everstar", title: "Senior Platform Engineer",
+      place: "Paris, Lyon", why: "tg.why1" },
+  ];
 
   return (
     <>
@@ -262,25 +277,20 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
                   <div className="tgmock-bubble">
                     <p>{t(locale, "tg.greeting")}</p>
 
-                    {mock.length > 0 ? mock.map((j, i) => (
-                      <div key={`${j.company}-${i}`}>
+                    {mock.map((j, i) => (
+                      <div key={j.company}>
                         <hr className="tgmock-rule" />
                         <p className="tgmock-jobline">
                           <b>{i + 1}</b> · <b>{j.company}</b> — {j.title}
                         </p>
-                        <p className="tgmock-meta">{place(j)} · {money(j)}</p>
+                        <p className="tgmock-meta">{j.place} · {t(locale, "tg.noSalary")}</p>
                         <p className="tgmock-why">
-                          {t(locale, "dash.why")}: <i>{t(locale, `tg.why${(i % 5) + 1}`)}</i>
+                          {t(locale, "dash.why")}: <i>{t(locale, j.why)}</i>
                         </p>
                         {/* У справжній добірці це посилання /go/<id>: без сирої адреси. */}
                         <p className="tgmock-url">{t(locale, "dash.apply")}</p>
                       </div>
-                    )) : (
-                      <>
-                        <hr className="tgmock-rule" />
-                        <p className="tgmock-meta">{t(locale, "feed.quiet")}</p>
-                      </>
-                    )}
+                    ))}
 
                     <hr className="tgmock-rule" />
                     <p className="tgmock-more">{t(locale, "tg.more")}</p>
@@ -304,11 +314,6 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
 
             <p className="mt-5 text-sm" style={{ color: "var(--faint)" }}>
               {t(locale, "tg.caption")}
-            </p>
-            <p className="mt-3 text-sm">
-              <a href="https://t.me/nextroleinfo" target="_blank" rel="noreferrer" className="link">
-                {t(locale, "channel.cta")}
-              </a>
             </p>
           </div>
 
