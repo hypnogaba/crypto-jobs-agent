@@ -60,10 +60,14 @@ export async function detectLocale(): Promise<Locale> {
 export async function startOnboarding(formData: FormData): Promise<void> {
   await guardOnboarding();
   let text = String(formData.get("input") ?? "").trim();
+  // Резюме це чи тези — знає лише ця сторінка. Далі вгадувати нема за чим:
+  // довжина тексту про це не каже (див. міграцію 0017).
+  let source: "cv" | "freetext" = "freetext";
 
   // Резюме файлом — та сама гілка логіки, лише інший спосіб отримати текст
   const file = formData.get("cv");
   if (file instanceof File && file.size > 0) {
+    source = "cv";
     try {
       text = await extractCvText(file);
     } catch (e) {
@@ -88,8 +92,8 @@ export async function startOnboarding(formData: FormData): Promise<void> {
    */
   const id = uuid();
   await run(
-    "INSERT INTO onboarding_drafts (id,text,parsed) VALUES (?,?,?)",
-    id, text.slice(0, DRAFT_TEXT_MAX), JSON.stringify(parsed));
+    "INSERT INTO onboarding_drafts (id,text,parsed,source) VALUES (?,?,?,?)",
+    id, text.slice(0, DRAFT_TEXT_MAX), JSON.stringify(parsed), source);
   await sweepDrafts();
 
   const jar = await cookies();
@@ -99,18 +103,20 @@ export async function startOnboarding(formData: FormData): Promise<void> {
   redirect("/onboarding");
 }
 
-export async function readDraft(): Promise<{ text: string; parsed: ParsedProfile } | null> {
+export async function readDraft(): Promise<{ text: string; parsed: ParsedProfile; source: string } | null> {
   const id = (await cookies()).get(DRAFT_COOKIE)?.value;
   if (!id) return null;
   // Прострочену чернетку не віддаємо навіть тоді, коли прибиральник до неї ще
   // не дійшов: кука живе годину, рядок — добу, і читати текст, який ми
   // пообіцяли не тримати, не можна через одну лише розбіжність у розкладі.
-  const row = await one<{ text: string; parsed: string }>(
-    `SELECT text, parsed FROM onboarding_drafts
+  const row = await one<{ text: string; parsed: string; source: string | null }>(
+    `SELECT text, parsed, source FROM onboarding_drafts
       WHERE id=? AND created_at >= datetime('now', ?)`, id, DRAFT_TTL);
   if (!row) return null;
-  try { return { text: row.text, parsed: JSON.parse(row.parsed) as ParsedProfile }; }
-  catch { return null; }
+  try {
+    return { text: row.text, parsed: JSON.parse(row.parsed) as ParsedProfile,
+             source: row.source ?? "freetext" };
+  } catch { return null; }
 }
 
 /** Чернетку прибираємо разом із кукою: текст людини не має пережити анкету. */
@@ -175,6 +181,10 @@ export async function saveProfile(formData: FormData): Promise<void> {
     customRole: String(formData.get("customRole") ?? "").trim().slice(0, SHORT_FIELD_MAX) || null,
     customIndustry: String(formData.get("customIndustry") ?? "").trim().slice(0, SHORT_FIELD_MAX) || null,
     seniority: SENIORITY.some((s) => s.id === seniorityRaw) ? seniorityRaw : null,
+    customSeniority: String(formData.get("customSeniority") ?? "").trim().slice(0, SHORT_FIELD_MAX) || null,
+    // Витяг із резюме людина бачить і може виправити — тому він приходить
+    // формою, а не тягнеться з чернетки повз неї.
+    cvHighlights: String(formData.get("cvHighlights") ?? "").trim().slice(0, 300) || null,
     remoteMode: serializeModes(modes) || "remote_only",
     location,
     salaryMin: Number.isFinite(salaryMinRaw) && salaryMinRaw > 0 && salaryMinRaw < 10_000_000 ? salaryMinRaw : null,
@@ -203,7 +213,7 @@ export async function saveProfile(formData: FormData): Promise<void> {
       `INSERT INTO users (id,locale,timezone,delivery_hour,last_interaction_at)
        VALUES (?,?,?,9,datetime('now'))`,
       id, await detectLocale(), timezone);
-    await persistProfile(id, draft?.text ?? "", profile);
+    await persistProfile(id, draft?.text ?? "", draft?.source ?? "freetext", profile);
     await dropDraft();
     await createSession(id);
     redirect("/telegram");
@@ -218,44 +228,49 @@ export async function saveProfile(formData: FormData): Promise<void> {
 
   // «Змінити профіль» приходить без чернетки: людина правила лише галочки.
   // Текст резюме, з якого їх колись розібрано, має пережити це редагування.
-  await persistProfile(user.id, draft?.text ?? null, profile);
+  await persistProfile(user.id, draft?.text ?? null, draft?.source ?? "freetext", profile);
   await dropDraft();
   redirect(back);
 }
 
 async function persistProfile(
-  userId: string, rawInput: string | null,
+  userId: string, rawInput: string | null, source: string,
   p: { spheres: string[]; industries: string[]; customRole: string | null;
-       customIndustry: string | null; seniority: string | null; remoteMode: string;
+       customIndustry: string | null; seniority: string | null; customSeniority: string | null;
+       remoteMode: string;
        location: string | null; salaryMin: number | null; salaryCurrency: string | null;
-       wishes: string | null }
+       wishes: string | null; cvHighlights: string | null }
 ): Promise<void> {
   // Без нового тексту (null) три текстові стовпці лишаються як були: раніше
   // редагування без чернетки ставило cv_text=NULL, raw_input='' і
   // mode='freetext', і резюме зникало з профілю мовчки.
   const keepText = rawInput === null;
-  const isCv = (rawInput ?? "").length > 800;
+  // Резюме це чи тези — каже чернетка, а не довжина рядка. Стара мірка
+  // («більше 800 символів») робила з довгих тез резюме: mode='cv',
+  // raw_input=NULL, і слова людини зникали з профілю.
+  const isCv = source === "cv";
   const textCols = keepText
     ? "mode=profiles.mode, raw_input=profiles.raw_input, cv_text=profiles.cv_text"
     : "mode=excluded.mode, raw_input=excluded.raw_input, cv_text=excluded.cv_text";
   await run(
-    `INSERT INTO profiles (user_id,mode,raw_input,cv_text,spheres,custom_role,industries,custom_industry,seniority,remote_mode,location,salary_min,salary_currency,wishes,updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+    `INSERT INTO profiles (user_id,mode,raw_input,cv_text,spheres,custom_role,industries,custom_industry,seniority,custom_seniority,remote_mode,location,salary_min,salary_currency,wishes,cv_highlights,updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
      ON CONFLICT(user_id) DO UPDATE SET
        ${textCols},
        spheres=excluded.spheres, custom_role=excluded.custom_role,
        industries=excluded.industries, custom_industry=excluded.custom_industry,
-       seniority=excluded.seniority,
+       seniority=excluded.seniority, custom_seniority=excluded.custom_seniority,
        remote_mode=excluded.remote_mode, location=excluded.location,
        salary_min=excluded.salary_min, salary_currency=excluded.salary_currency,
-       wishes=excluded.wishes,
+       wishes=excluded.wishes, cv_highlights=excluded.cv_highlights,
        updated_at=datetime('now')`,
     userId, isCv ? "cv" : "freetext",
     isCv || keepText ? null : rawInput,   // файл резюме не зберігаємо, лише розібраний текст
     isCv ? rawInput!.slice(0, 20_000) : null,
     JSON.stringify(p.spheres), p.customRole,
     JSON.stringify(p.industries), p.customIndustry,
-    p.seniority, p.remoteMode, p.location, p.salaryMin, p.salaryCurrency, p.wishes);
+    p.seniority, p.customSeniority,
+    p.remoteMode, p.location, p.salaryMin, p.salaryCurrency, p.wishes, p.cvHighlights);
   await persistCountry(userId, p.location);
 
 }

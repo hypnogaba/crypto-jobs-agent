@@ -775,24 +775,33 @@ export async function handleDocument(
          VALUES (?,?,?,?,9,datetime('now'))`, userId, String(chatId), locale, timezoneFor(locale, parsed.location));
     }
 
+    // Резюме в боті пише те саме, що й резюме на сайті. Досі цей запит
+    // брав самі лише галочки: назва ролі, індустрія своїми словами, витяг
+    // (стек, роки, мови) і побажання з тексту губились мовчки — тобто
+    // людина з бота отримувала гірший підбір, ніж та сама людина з сайту.
     await run(
-      `INSERT INTO profiles (user_id,mode,cv_text,spheres,industries,seniority,remote_mode,location,salary_min,salary_currency,updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,datetime('now'))
+      `INSERT INTO profiles (user_id,mode,cv_text,spheres,industries,seniority,remote_mode,location,salary_min,salary_currency,custom_role,custom_industry,custom_seniority,cv_highlights,wishes,updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
        ON CONFLICT(user_id) DO UPDATE SET
          mode=excluded.mode, cv_text=excluded.cv_text, spheres=excluded.spheres,
          industries=excluded.industries, seniority=excluded.seniority,
          remote_mode=excluded.remote_mode, location=excluded.location,
          salary_min=excluded.salary_min, salary_currency=excluded.salary_currency,
+         custom_role=excluded.custom_role, custom_industry=excluded.custom_industry,
+         custom_seniority=excluded.custom_seniority, cv_highlights=excluded.cv_highlights,
+         wishes=excluded.wishes,
          updated_at=datetime('now')`,
       userId, "cv", text.slice(0, 20_000),
       JSON.stringify(parsed.spheres), JSON.stringify(parsed.industries),
-      parsed.seniority, remoteMode, parsed.location, parsed.salaryMin, parsed.salaryCurrency);
+      parsed.seniority, remoteMode, parsed.location, parsed.salaryMin, parsed.salaryCurrency,
+      parsed.customRole, parsed.customIndustry, parsed.customSeniority,
+      parsed.cvHighlights, parsed.leftover);
 
     await persistCountry(userId, parsed.location);
 
     await run("DELETE FROM bot_state WHERE chat_id=?", String(chatId));
       await send(env, chatId, `${say("cvDone", locale)}\n\n${summary({
-      spheres: parsed.spheres, industries: parsed.industries, customRole: null,
+      spheres: parsed.spheres, industries: parsed.industries, customRole: parsed.customRole,
       seniority: parsed.seniority, remoteMode,
       salaryMin: parsed.salaryMin, salaryCurrency: parsed.salaryCurrency,
     }, locale)}`);

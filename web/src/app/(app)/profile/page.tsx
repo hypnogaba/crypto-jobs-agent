@@ -25,6 +25,7 @@ export default async function Profile({ searchParams }: { searchParams: Promise<
 
   const row = await one<{ spheres: string; industries: string; seniority: string | null;
     custom_role: string | null; custom_industry: string | null;
+    custom_seniority: string | null; cv_highlights: string | null;
     remote_mode: string; location: string | null; salary_min: number | null; salary_currency: string | null;
     wishes: string | null }>(
     "SELECT * FROM profiles WHERE user_id=?", user.id);
@@ -36,6 +37,7 @@ export default async function Profile({ searchParams }: { searchParams: Promise<
       <ProfileForm locale={locale} back="profile" error={error} pre={{
         spheres: parseList(row.spheres), industries: parseList(row.industries),
         customRole: row.custom_role, customIndustry: row.custom_industry,
+        customSeniority: row.custom_seniority, cvHighlights: row.cv_highlights,
         seniority: row.seniority, remoteMode: row.remote_mode, location: row.location,
         salaryMin: row.salary_min, salaryCurrency: row.salary_currency, wishes: row.wishes,
       }} />

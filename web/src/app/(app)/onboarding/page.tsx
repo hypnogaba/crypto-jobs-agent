@@ -25,17 +25,19 @@ export default async function Onboarding({ searchParams }: { searchParams: Promi
   // on-call»), і саме за це підбір дає до +6 балів. Досі тут стояв жорсткий
   // wishes: null — усе, що людина написала поза словником, зникало мовчки.
   let pre: ProfilePre | null = draft
-    ? { ...draft.parsed, wishes: draft.parsed.leftover, customRole: null, customIndustry: null }
+    ? { ...draft.parsed, wishes: draft.parsed.leftover }
     : null;
   if (!pre && user) {
     const row = await one<{ spheres: string; industries: string; seniority: string | null;
       custom_role: string | null; custom_industry: string | null;
+      custom_seniority: string | null; cv_highlights: string | null;
       remote_mode: string; location: string | null; salary_min: number | null; salary_currency: string | null;
       wishes: string | null }>(
       "SELECT * FROM profiles WHERE user_id=?", user.id);
     if (row) pre = {
       spheres: parseList(row.spheres), industries: parseList(row.industries),
       customRole: row.custom_role, customIndustry: row.custom_industry,
+      customSeniority: row.custom_seniority, cvHighlights: row.cv_highlights,
       seniority: row.seniority, remoteMode: row.remote_mode, location: row.location,
       salaryMin: row.salary_min, salaryCurrency: row.salary_currency, wishes: row.wishes };
   }

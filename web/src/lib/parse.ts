@@ -36,6 +36,22 @@ export interface ParsedProfile {
    * profiles.wishes, звідки підбір дає за нього до +6 балів.
    */
   leftover: string | null;
+  /**
+   * Роль словами людини, коли жодна з одинадцяти сфер її не називає:
+   * «Technical Recruiter», «Grant Writer». Регулярки такого не вміють —
+   * тут працює лише модель. Шукається в НАЗВІ вакансії (matchesCustomRole).
+   */
+  customRole: string | null;
+  /** Індустрія словами людини: «climate tech», «esports». */
+  customIndustry: string | null;
+  /** Рівень словами людини, коли junior/middle/senior/lead не про неї. */
+  customSeniority: string | null;
+  /**
+   * Стек, роки, мови, ринки — те з резюме, чого не ловить жодна кнопка.
+   * Досі cv_text розбирали на галочки й забували; тепер витяг лишається
+   * при профілі й іде в промпт переранжування.
+   */
+  cvHighlights: string | null;
 }
 
 /**
@@ -239,12 +255,18 @@ export function parseLocally(text: string): ParsedProfile {
     salaryCurrency: currency,
     evidence,
     leftover: null,
+    // Своїх слів словник не вигадує: назву ролі, якої немає в жодному
+    // списку, може дати лише модель, що бачить речення цілком.
+    customRole: null,
+    customIndustry: null,
+    customSeniority: null,
+    cvHighlights: null,
   };
 }
 
 const SYSTEM = `Ти розбираєш опис пошуку роботи або резюме у структуру.
 Відповідай ЛИШЕ валідним JSON без пояснень, за схемою:
-{"spheres":[],"industries":[],"seniority":null,"remoteMode":[],"location":null,"salaryMin":null,"salaryCurrency":null,"evidence":{},"leftover":null}
+{"spheres":[],"industries":[],"seniority":null,"remoteMode":[],"location":null,"salaryMin":null,"salaryCurrency":null,"evidence":{},"leftover":null,"customRole":null,"customIndustry":null,"customSeniority":null,"cvHighlights":null}
 
 spheres — з набору: ${SPHERES.map((s) => s.id).join(", ")}
 industries — з набору: ${INDUSTRIES.map((i) => i.id).join(", ")}
@@ -264,6 +286,19 @@ evidence — чому саме ти так вирішив. Ключі: "sphere:<
   із тексту людини, не довший за 48 символів і не переказ своїми словами. Для
   кожного значення, яке ти поставив, має бути запис; чого не ставив — того не
   згадуй.
+customRole — точна назва ролі СЛОВАМИ ЛЮДИНИ: «technical recruiter»,
+  «ecosystem lead», «chief of staff». Береться з резюме або з тез, навіть
+  якщо сфера зі списку вже стоїть: сфера — це категорія, а це назва, за
+  якою шукають вакансію. До 60 символів. Назви в тексті немає — null.
+customIndustry — індустрія словами людини, якої немає в списку вище:
+  «climate tech», «esports», «логістика». До 60 символів, інакше null.
+customSeniority — рівень словами людини, коли junior/middle/senior/lead не
+  про неї: «head of BD», «founder», «staff+». До 60 символів, інакше null.
+cvHighlights — ЛИШЕ для резюме: стек, роки досвіду, мови, ринки, найбільші
+  досягнення — одним рядком до 300 символів, словами людини. Це не переказ
+  біографії, а те, за чим шукають: «8 років BD у Web3, Solana та Cosmos,
+  EN/FR/UA, підняв 12 партнерств». Тексту резюме немає — null.
+
 leftover — усе важливе для пошуку роботи, що НЕ вмістилося в поля вище:
   «тільки стартапи», «без on-call», «команда до 30 людей», «англомовна
   команда». Одним рядком, словами людини, до 400 символів. Немає такого — null.
@@ -277,6 +312,8 @@ interface RawParsed {
   spheres?: unknown; industries?: unknown; seniority?: unknown; remoteMode?: unknown;
   location?: unknown; salaryMin?: unknown; salaryCurrency?: unknown;
   evidence?: unknown; leftover?: unknown;
+  customRole?: unknown; customIndustry?: unknown; customSeniority?: unknown;
+  cvHighlights?: unknown;
 }
 
 const str = (v: unknown, max: number): string | null => {
@@ -402,5 +439,13 @@ export function mergeParsed(parsed: RawParsed, local: ParsedProfile, text: strin
     salaryCurrency: salaryMin ? (str(parsed.salaryCurrency, 8) ?? local.salaryCurrency) : null,
     evidence,
     leftover: str(parsed.leftover, 400),
+    // Своя роль стоїть поруч зі сферою, а не замість неї: сфера — категорія
+    // («партнерства»), роль — те, що написано в назві вакансії («ecosystem
+    // lead»). Саме назва дає +6 у matchesCustomRole, тож гасити її через те,
+    // що галочка вже є, означало б викинути найточніше слово з резюме.
+    customRole: str(parsed.customRole, 60),
+    customIndustry: str(parsed.customIndustry, 60),
+    customSeniority: seniority ? null : str(parsed.customSeniority, 60),
+    cvHighlights: str(parsed.cvHighlights, 300),
   };
 }
