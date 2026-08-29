@@ -60,3 +60,52 @@ export function dayLabel(createdAt: string, timezone: string, locale: Locale, no
 
   return `${day}, ${time}`;
 }
+
+/** Частини локального часу в зоні: рік-місяць-день, година, день тижня 0..6 (нд=0). */
+function partsIn(tz: string, at: Date): { y: number; m: number; d: number; h: number; wd: number } {
+  const f = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz, hour12: false, weekday: "short",
+    year: "numeric", month: "numeric", day: "numeric", hour: "numeric",
+  });
+  const p = Object.fromEntries(f.formatToParts(at).map((x) => [x.type, x.value]));
+  const wd = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(p.weekday);
+  return { y: +p.year, m: +p.month, d: +p.day, h: +p.hour % 24, wd };
+}
+
+/** Момент, коли в зоні tz настає локальна дата y-m-d о h:00. Ітерація по зсуву — без бібліотек. */
+function zonedTime(tz: string, y: number, m: number, d: number, h: number): Date {
+  let guess = Date.UTC(y, m - 1, d, h);
+  for (let i = 0; i < 3; i++) {
+    const p = partsIn(tz, new Date(guess));
+    const seen = Date.UTC(p.y, p.m - 1, p.d, p.h);
+    const want = Date.UTC(y, m - 1, d, h);
+    if (seen === want) break;
+    guess += want - seen;
+  }
+  return new Date(guess);
+}
+
+/**
+ * Найближча планова доставка: робочий день (Пн–Пт) у зоні людини о hour:00,
+ * не раніше за now. Той самий алгоритм у scanner/src/digest-copy.ts.
+ */
+export function nextDelivery(tz: string, hour: number, now: Date): Date {
+  const zone = safe(tz);
+  const p = partsIn(zone, now);
+  for (let add = 0; add < 8; add++) {
+    const day = new Date(Date.UTC(p.y, p.m - 1, p.d + add, 12));
+    const wd = day.getUTCDay();
+    if (wd === 0 || wd === 6) continue;
+    const at = zonedTime(zone, day.getUTCFullYear(), day.getUTCMonth() + 1, day.getUTCDate(), hour);
+    if (at.getTime() >= now.getTime()) return at;
+  }
+  return now;
+}
+
+/** «понеділок, 31 серпня, 09:00» мовою людини, у її зоні. */
+export function formatWhen(at: Date, tz: string, locale: Locale): string {
+  const zone = safe(tz);
+  const day = new Intl.DateTimeFormat(intlOf(locale), { timeZone: zone, weekday: "long", day: "numeric", month: "long" }).format(at);
+  const time = new Intl.DateTimeFormat("en-GB", { timeZone: zone, hour: "2-digit", minute: "2-digit", hour12: false }).format(at);
+  return `${day}, ${time}`;
+}
