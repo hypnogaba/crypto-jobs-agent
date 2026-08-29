@@ -114,10 +114,41 @@ export function pageMeta(locale: Locale, path: PublicPath, title: string) {
     title,
     description,
     alternates: { canonical: self, languages },
-    openGraph: { url, title, description, locale },
-    twitter: { title, description },
+    // Картка збирається З БАЗОВИХ полів, а не з самих лише своїх.
+    //
+    // Next зливає метадані ПЛОСКО: варто дитині оголосити `openGraph`, і
+    // батьківський `openGraph` замінюється цілком, а не доповнюється. Тут
+    // стояло `{ url, title, description, locale }` — і кожна публічна
+    // сторінка мовчки втрачала `images`, `type` і `siteName` з root layout.
+    // Далі Next бере `twitter.images` саме з `openGraph.images`, а без
+    // картинок ставить `card: "summary"` замість `summary_large_image`.
+    // Наслідок: посилання на /faq, /sources, /privacy у Telegram і Twitter —
+    // голий рядок замість картки. Перевірено на живому сайті: og:image не
+    // було ні на одній сторінці, включно з головною.
+    openGraph: { ...openGraphCard(title, description), url, locale },
+    twitter: twitterCard(title, description),
   };
 }
+
+/** Зображення картки. Одне на весь сайт — і root layout, і кожна сторінка. */
+const OG_IMAGE = "/og.png";
+
+/** Спільні поля og-картки: усе, що дитина мусить перенести за собою. */
+export const openGraphCard = (title: string, description: string) => ({
+  type: "website" as const,
+  siteName: "NextRole",
+  title,
+  description,
+  images: [{ url: OG_IMAGE, width: 1200, height: 630, alt: title }],
+});
+
+/** Те саме для Twitter: без images він мовчки падає на вузьку картку. */
+export const twitterCard = (title: string, description: string) => ({
+  card: "summary_large_image" as const,
+  title,
+  description,
+  images: [OG_IMAGE],
+});
 
 /** Назва сайту мовою людини. Використовується як title.default у root layout. */
 const SITE_TITLE: Record<Locale, string> = {
@@ -140,20 +171,8 @@ export function rootMetadata(locale: Locale) {
     metadataBase: new URL(SITE),
     title: { default: title, template: "%s — NextRole" },
     description,
-    openGraph: {
-      type: "website" as const,
-      siteName: "NextRole",
-      title,
-      description,
-      locale,
-      images: [{ url: "/og.png", width: 1200, height: 630, alt: title }],
-    },
-    twitter: {
-      card: "summary_large_image" as const,
-      title,
-      description,
-      images: ["/og.png"],
-    },
+    openGraph: { ...openGraphCard(title, description), locale },
+    twitter: twitterCard(title, description),
   };
 }
 
