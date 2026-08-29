@@ -6,7 +6,8 @@ import {
 describe("порядок питань", () => {
   it("веде від сфер до зарплати й зупиняється", () => {
     expect(STEPS[0]).toBe("spheres");
-    expect(nextStep("spheres")).toBe("industries");
+    expect(nextStep("spheres")).toBe("wishes");
+    expect(nextStep("wishes")).toBe("industries");
     expect(nextStep("salary")).toBeNull();
   });
 
@@ -18,7 +19,9 @@ describe("порядок питань", () => {
   });
 
   it("не питає міста в того, хто хоче лише віддалено", () => {
-    expect(nextStep("where", { ...emptyDraft(), remoteMode: "remote_only" })).toBe("salary");
+    // Без міста пояс невідомий, тож далі — «котра година», а не зарплата.
+    expect(nextStep("where", { ...emptyDraft(), remoteMode: "remote_only" })).toBe("tz");
+    expect(nextStep("where", { ...emptyDraft(), remoteMode: "remote_only", timezone: "Europe/Kyiv" })).toBe("salary");
   });
 
   // Хто вже написав місце своїми словами на попередньому кроці, не має
@@ -29,7 +32,8 @@ describe("порядок питань", () => {
 
   it("без чернетки поводиться як раніше", () => {
     expect(nextStep("where")).toBe("city");
-    expect(nextStep("city")).toBe("salary");
+    expect(nextStep("city")).toBe("tz");
+    expect(nextStep("tz")).toBe("salary");
   });
 });
 
@@ -95,5 +99,70 @@ describe("тексти", () => {
 
   it("порожня зарплата не вигадує число", () => {
     expect(summary(emptyDraft(), "uk")).toContain("Не важливо");
+  });
+});
+
+// ── Побажання, вільний текст і правка по пунктах ──────────────
+import { EDITABLE, freeTextAction, profileMenu, profileUpdateFor } from "./bot-onboarding";
+
+describe("вільний текст поза командами", () => {
+  it("у підключеної людини стає побажанням, а не новою анкетою", () => {
+    expect(freeTextAction(true, true, false)).toBe("wish");
+  });
+
+  it("посеред анкети нічого не перезапускає", () => {
+    expect(freeTextAction(true, true, true)).toBe("useButtons");
+    expect(freeTextAction(false, false, true)).toBe("useButtons");
+  });
+
+  it("реєструє лише того, кого ще немає", () => {
+    expect(freeTextAction(false, false, false)).toBe("register");
+    expect(freeTextAction(true, false, false)).toBe("hint");
+  });
+});
+
+describe("побажання в анкеті", () => {
+  it("стоять одразу після сфер і мають кнопку «Пропустити»", () => {
+    expect(nextStep("spheres")).toBe("wishes");
+    expect(nextStep("wishes")).toBe("industries");
+    const rows = keyboard("wishes", emptyDraft(), "uk");
+    expect(rows).toEqual([[{ text: "Пропустити", callback_data: "ob:wishes:__next" }]]);
+  });
+
+  it("потрапляють у підсумок", () => {
+    expect(summary({ ...emptyDraft(), spheres: ["design"], wishes: "без on-call" }, "uk"))
+      .toContain("«без on-call»");
+    expect(summary({ ...emptyDraft(), spheres: ["design"] }, "uk")).toContain("Дизайн");
+  });
+});
+
+describe("правка по пунктах", () => {
+  it("меню /profile відкриває кожне редаговане поле", () => {
+    const data = profileMenu("uk").flat().map((b) => b.callback_data);
+    for (const step of EDITABLE) expect(data).toContain(`ed:${step}`);
+    expect(data).toContain("ed:lang");
+    expect(profileMenu("uk").flat().map((b) => b.text))
+      .toEqual(["Сфери", "Індустрії", "Рівень", "Місце", "Зарплата", "Побажання", "Мова", "Година"]);
+  });
+
+  it("клавіатура з префіксом ed: не плутається з онбордингом", () => {
+    const rows = keyboard("spheres", { ...emptyDraft(), spheres: ["qa"] }, "uk", { prefix: "ed" });
+    const flat = rows.flat();
+    expect(flat.every((b) => b.callback_data.startsWith("ed:"))).toBe(true);
+    expect(flat[flat.length - 1]!.callback_data).toBe("ed:spheres:__next");
+  });
+
+  it("пише лише своє поле", () => {
+    const draft = { ...emptyDraft(), spheres: ["design"], customRole: "motion", salaryMin: 90_000,
+                    salaryCurrency: "USD", wishes: " тільки стартапи " };
+    expect(profileUpdateFor("spheres", draft)).toEqual({
+      set: "spheres=?, custom_role=?", params: ['["design"]', "motion"] });
+    expect(profileUpdateFor("salary", draft)).toEqual({
+      set: "salary_min=?, salary_currency=?", params: [90_000, "USD"] });
+    expect(profileUpdateFor("wishes", draft)).toEqual({ set: "wishes=?", params: ["тільки стартапи"] });
+    expect(profileUpdateFor("seniority", { ...draft, seniority: null, customSeniority: "founder" }))
+      .toEqual({ set: "seniority=?, custom_seniority=?", params: [null, "founder"] });
+    // Година живе в users, не в profiles
+    expect(profileUpdateFor("tz", draft)).toBeNull();
   });
 });

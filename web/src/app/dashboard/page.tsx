@@ -196,7 +196,7 @@ function FirstRun({ locale, hour, connected }: { locale: Locale; hour: number; c
       </ul>
       <div className="mt-9 flex flex-wrap items-center gap-4">
         {!connected && <a href="/telegram" className="btn">{t(locale, "telegram.button")}</a>}
-        <a href="/onboarding" className="link text-sm">{t(locale, "first.edit")}</a>
+        <a href="/profile" className="link text-sm">{t(locale, "first.edit")}</a>
       </div>
     </div>
   );

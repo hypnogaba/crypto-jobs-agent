@@ -1,0 +1,13 @@
+[Unit]
+Description=NextRole — швидка відповідь на «Ще п'ять»
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/nextrole-scanner
+EnvironmentFile=/etc/nextrole-scanner.env
+ExecStart=/usr/bin/node dist/digest.js --requests-only
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=600

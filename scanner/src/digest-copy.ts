@@ -40,9 +40,19 @@ const P = {
   from: {
     en: "from", uk: "від", fr: "à partir de", ru: "от",
   },
+  // Кнопка лишає callback_data `not_relevant`, щоб вебхук не ламався;
+  // змінився лише напис: «уточнити» кличе до діалогу, а не до скарги.
   notRelevant: {
-    en: "Not what I need", uk: "Не те, що треба",
-    fr: "Pas ce qu'il me faut", ru: "Не то, что нужно",
+    en: "Refine", uk: "Уточнити", fr: "Préciser", ru: "Уточнить",
+  },
+  apply: {
+    en: "Apply", uk: "Податися", fr: "Postuler", ru: "Откликнуться",
+  },
+  capReached: {
+    en: "That's the limit for today — 20 jobs. The rest comes tomorrow morning.",
+    uk: "Ліміт на сьогодні — 20 вакансій. Решта прийде завтра вранці.",
+    fr: "C'est la limite pour aujourd'hui — 20 offres. La suite arrive demain matin.",
+    ru: "Лимит на сегодня — 20 вакансий. Остальное придёт завтра утром.",
   },
   more: {
     en: "Five more", uk: "Ще п'ять", fr: "Cinq de plus", ru: "Ещё пять",
@@ -77,24 +87,51 @@ export const thin = (locale: Locale, got: number, want: number): string => {
   return map[locale] ?? map.en;
 };
 
-export const scanned = (locale: Locale, jobs: number, companies: number): string => {
-  const n = jobs.toLocaleString(intlOf(locale));
-  const map: Phrase = {
-    en: `Scanned ${n} jobs at ${companies} companies.`,
-    uk: `Переглянуто ${n} вакансій у ${companies} компаніях.`,
-    fr: `${n} offres passées en revue dans ${companies} entreprises.`,
-    ru: `Просмотрено ${n} вакансий в ${companies} компаниях.`,
-  };
-  return map[locale] ?? map.en;
+/**
+ * Назви сфер та індустрій людською мовою.
+ *
+ * Повний словник живе на сайті (web/src/lib/vocab.ts), і сканер його
+ * навмисно не імпортує. Але в рядку «чому ти» сире «finance-legal» виглядає
+ * як помилка, тому тут — маленька копія лише назв. Невідомий id повертається
+ * як є: краще сирий рядок, ніж порожнеча.
+ */
+const LABELS: Record<string, Phrase> = {
+  engineering:     { en: "Engineering",           uk: "Інженерія",              fr: "Ingénierie",           ru: "Инженерия" },
+  "data-ai":       { en: "Data & AI",             uk: "Дані та AI",             fr: "Données et IA",        ru: "Данные и AI" },
+  product:         { en: "Product",               uk: "Продукт",                fr: "Produit",              ru: "Продукт" },
+  design:          { en: "Design",                uk: "Дизайн",                 fr: "Design",               ru: "Дизайн" },
+  devrel:          { en: "DevRel & Community",    uk: "DevRel і спільнота",     fr: "DevRel et communauté", ru: "DevRel и сообщество" },
+  partnerships:    { en: "Partnerships & BD",     uk: "Партнерства і BD",       fr: "Partenariats et BD",   ru: "Партнёрства и BD" },
+  operations:      { en: "Operations & Programs", uk: "Операції та проєкти",    fr: "Opérations",           ru: "Операции и проекты" },
+  marketing:       { en: "Marketing & Growth",    uk: "Маркетинг і зростання",  fr: "Marketing",            ru: "Маркетинг и рост" },
+  sales:           { en: "Sales & Success",       uk: "Продажі",                fr: "Ventes",               ru: "Продажи" },
+  security:        { en: "Security",              uk: "Безпека",                fr: "Sécurité",             ru: "Безопасность" },
+  qa:              { en: "QA & Testing",          uk: "QA і тестування",        fr: "QA et tests",          ru: "QA и тестирование" },
+  support:         { en: "Support",               uk: "Підтримка",              fr: "Support",              ru: "Поддержка" },
+  "finance-legal": { en: "Finance & Legal",       uk: "Фінанси і право",        fr: "Finance et juridique", ru: "Финансы и право" },
+  web3:      { en: "Web3 & Crypto",  uk: "Web3 і крипта",        fr: "Web3 et crypto",  ru: "Web3 и крипта" },
+  ai:        { en: "AI & Deep Tech", uk: "AI і deep-tech",       fr: "IA et deep tech", ru: "AI и deep tech" },
+  fintech:   { en: "Fintech",        uk: "Фінтех",               fr: "Fintech",         ru: "Финтех" },
+  health:    { en: "Health & Bio",   uk: "Здоров'я і біо",       fr: "Santé et bio",    ru: "Здоровье и био" },
+  games:     { en: "Games",          uk: "Ігри",                 fr: "Jeux",            ru: "Игры" },
+  ecommerce: { en: "E-commerce",     uk: "E-commerce",           fr: "E-commerce",      ru: "E-commerce" },
+  defence:   { en: "Defence Tech",   uk: "Оборонні технології",  fr: "Défense",         ru: "Оборонные технологии" },
+  nonprofit: { en: "Non-profit",     uk: "Некомерційний сектор", fr: "Associatif",      ru: "Некоммерческий сектор" },
 };
+
+export const labelOf = (id: string, locale: Locale): string =>
+  LABELS[id]?.[locale] ?? LABELS[id]?.en ?? id;
+
+/** Назва мови для системного промпту моделі: «uk» їй каже менше, ніж слово. */
+export const languageName = (locale: Locale): string =>
+  ({ en: "English", uk: "Ukrainian", fr: "French", ru: "Russian" })[locale] ?? "English";
 
 /**
  * Рядок «чому ти» без моделі — з ідентифікаторів причин збігу.
  *
  * Досі explainLocally писав українською для всіх, і без ключа Anthropic саме
- * цей рядок бачив кожен француз. Сфери й індустрії лишаються сирими
- * ідентифікаторами: словник назв живе на сайті, сканер його навмисно не
- * бачить (див. MatchFact у match.ts).
+ * цей рядок бачив кожен француз. Сфери й індустрії підставляються вже
+ * назвами через labelOf, а не сирими id.
  */
 export type WhyBit =
   | { k: "sphere"; v: string }
@@ -106,8 +143,8 @@ export type WhyBit =
 
 const WHY: Record<WhyBit["k"], (v: string) => Phrase> = {
   sphere: (v) => ({
-    en: `${v} is one of your fields`, uk: `це ${v}, одна з твоїх сфер`,
-    fr: `${v}, un de vos domaines`, ru: `это ${v}, одна из твоих сфер`,
+    en: `${v} is one of your fields`, uk: `це «${v}», одна з твоїх сфер`,
+    fr: `${v}, un de vos domaines`, ru: `это «${v}», одна из твоих сфер`,
   }),
   role: (v) => ({
     en: `${v}, as you asked`, uk: `це ${v}, як ти й просив`,
@@ -131,7 +168,9 @@ const WHY: Record<WhyBit["k"], (v: string) => Phrase> = {
 
 export const whyLine = (locale: Locale, bits: WhyBit[]): string => {
   const words = bits.map((b) => {
-    const ph = WHY[b.k]("v" in b ? b.v : "");
+    // Сфера й індустрія приходять як id словника — показуємо назву.
+    const v = "v" in b ? (b.k === "role" ? b.v : labelOf(b.v, locale)) : "";
+    const ph = WHY[b.k](v);
     return ph[locale] ?? ph.en;
   });
   return `${words.join(", ")}.`;

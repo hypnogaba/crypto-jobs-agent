@@ -6,20 +6,24 @@ describe("parseArgs", () => {
     // Саме тут ховалась поломка: argv.indexOf("--user") дає −1, і наївне
     // argv[i + 1] повертало argv[0] — шлях до node. Значення непорожнє, тож
     // кожен плановий прогін шукав користувача з id '/usr/local/bin/node'.
-    expect(parseArgs([])).toEqual({ force: false, onlyUser: null });
+    expect(parseArgs([])).toEqual({ force: false, onlyUser: null, requestsOnly: false });
   });
 
   it("--force сам по собі не робить із чогось onlyUser", () => {
-    expect(parseArgs(["--force"])).toEqual({ force: true, onlyUser: null });
+    expect(parseArgs(["--force"])).toEqual({ force: true, onlyUser: null, requestsOnly: false });
   });
 
   it("читає --user, коли він справді є", () => {
-    expect(parseArgs(["--user", "u1"])).toEqual({ force: false, onlyUser: "u1" });
-    expect(parseArgs(["--force", "--user", "u1"])).toEqual({ force: true, onlyUser: "u1" });
+    expect(parseArgs(["--user", "u1"])).toEqual({ force: false, onlyUser: "u1", requestsOnly: false });
+    expect(parseArgs(["--force", "--user", "u1"])).toEqual({ force: true, onlyUser: "u1", requestsOnly: false });
+  });
+
+  it("--requests-only вмикає швидкий шлях", () => {
+    expect(parseArgs(["--requests-only"]).requestsOnly).toBe(true);
   });
 
   it("--user без значення не вигадує його", () => {
-    expect(parseArgs(["--user"])).toEqual({ force: false, onlyUser: null });
+    expect(parseArgs(["--user"])).toEqual({ force: false, onlyUser: null, requestsOnly: false });
   });
 });
 
@@ -103,7 +107,7 @@ describe("fillMissingSummaries", () => {
 });
 
 // ── Доставка в Telegram ───────────────────────────────────────
-import { clampSummary, fitTelegram, formatDigest, isBlocked, sendTelegram, TELEGRAM_MAX, describeError } from "./digest.js";
+import { clampSummary, fitTelegram, fitDigest, formatDigest, isBlocked, sendTelegram, TELEGRAM_MAX, DIGEST_MAX, describeError, escapeHtml, stripHtml } from "./digest.js";
 
 describe("sendTelegram", () => {
   it("обрив мережі — це false, а не виняток на весь прогін", async () => {
@@ -127,8 +131,36 @@ describe("sendTelegram", () => {
     const f = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
     const long = "x".repeat(TELEGRAM_MAX + 500);
     await expect(sendTelegram("t", "123456789", long, "d1", "en", f as never)).resolves.toEqual({ ok: true, status: 200 });
-    const body = JSON.parse((f.mock.calls[0]![1] as { body: string }).body) as { text: string };
+    const body = JSON.parse((f.mock.calls[0]![1] as { body: string }).body) as { text: string; parse_mode: string };
     expect(body.text.length).toBeLessThanOrEqual(TELEGRAM_MAX);
+    expect(body.parse_mode).toBe("HTML");
+  });
+
+  it("кнопка «Уточнити» зберігає callback_data not_relevant", async () => {
+    const f = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+    await sendTelegram("t", "123456789", "hi", "d1", "uk", f as never);
+    const body = JSON.parse((f.mock.calls[0]![1] as { body: string }).body) as
+      { reply_markup: { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> } };
+    expect(body.reply_markup.inline_keyboard[0]![0]).toEqual({ text: "Уточнити", callback_data: "fb:d1:not_relevant" });
+  });
+
+  it("Telegram не розібрав HTML — повторює без тегів", async () => {
+    const f = vi.fn()
+      .mockResolvedValueOnce(new Response("Bad Request: can't parse entities", { status: 400 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 200 }));
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    await expect(sendTelegram("t", "123456789", "<b>x</b> &amp; y", "d1", "en", f as never)).resolves.toEqual({ ok: true, status: 200 });
+    const body = JSON.parse((f.mock.calls[1]![1] as { body: string }).body) as { text: string; parse_mode?: string };
+    expect(body.text).toBe("x & y");
+    expect(body.parse_mode).toBeUndefined();
+  });
+});
+
+describe("escapeHtml", () => {
+  it("екранує все, що Telegram сприйняв би за тег", () => {
+    expect(escapeHtml('<C++ & "Go">')).toBe("&lt;C++ &amp; &quot;Go&quot;&gt;");
+    expect(escapeHtml(null)).toBe("");
+    expect(stripHtml("<a href=\"x\">A &amp; B</a>")).toBe("A & B");
   });
 });
 
@@ -141,10 +173,10 @@ describe("describeError", () => {
 });
 
 describe("стеля 4096", () => {
-  const job = (i: number, summary: string) => ({
+  const job = (i: number, summary: string, why = "why") => ({
     id: `j${i}`, company: `Company ${i}`, companyKey: `c${i}`, title: "Senior Engineer",
     location: "Paris", remote: true, url: `https://x.test/${i}`, tags: [], postedAt: null,
-    salaryMin: null, salaryCurrency: null, why: "why", summary });
+    salaryMin: null, salaryCurrency: null, why, summary, sentId: `sent-${i}` });
 
   it("clampSummary ріже по слову і ставить трикрапку", () => {
     expect(clampSummary("short")).toBe("short");
@@ -156,9 +188,36 @@ describe("стеля 4096", () => {
 
   it("п'ять довгих описів усе одно влазять у повідомлення", () => {
     const jobs = Array.from({ length: 5 }, (_, i) => job(i, "lorem ipsum ".repeat(120)));
-    const text = formatDigest(jobs, { jobs: 12_345, companies: 678 }, "uk");
-    expect(text.length).toBeLessThanOrEqual(TELEGRAM_MAX);
+    const text = fitDigest(jobs, "uk");
+    expect(text.length).toBeLessThanOrEqual(DIGEST_MAX);
     expect(fitTelegram(text)).toBe(text);
+  });
+
+  it("довше за 3900 — спершу зникають описи, потім хвіст", () => {
+    // Описи по 500 після clampSummary плюс довгі назви — п'ять карток не влазять у 3900.
+    const jobs = Array.from({ length: 5 }, (_, i) =>
+      ({ ...job(i, "lorem ipsum ".repeat(200), "w".repeat(700)), title: "Senior Engineer ".repeat(25) }));
+    const text = fitDigest(jobs, "en");
+    expect(text.length).toBeLessThanOrEqual(DIGEST_MAX);
+    expect(text).not.toContain("lorem ipsum");
+    expect(text).toContain("Why you: ");
+    // Без описів усе ще задовго (5 × 700 «чому ти») — карток стає менше, але
+    // жоден тег не розірваний.
+    expect(text.match(/<a /g)!.length).toBeLessThan(5);
+    expect(text.match(/<a /g)!.length).toBe(text.match(/<\/a>/g)!.length);
+  });
+
+  it("картка: HTML-екранування, посилання «Податися» на /go/<sentId>, без рядка «Переглянуто»", () => {
+    const j = { ...job(1, "Own the <ACATS> flow & more."), company: "A&B <Labs>", title: "C++ Dev" };
+    const text = formatDigest([j], "uk");
+    expect(text).toContain("<b>A&amp;B &lt;Labs&gt;</b>");
+    expect(text).toContain("Own the &lt;ACATS&gt; flow &amp; more.");
+    expect(text).toContain('<a href="https://nextrole.info/go/sent-1">Податися</a>');
+    expect(text).not.toContain("https://x.test/1");
+    expect(text).not.toMatch(/Переглянуто/);
+    expect(formatDigest([j], "fr")).toContain(">Postuler</a>");
+    expect(formatDigest([j], "ru")).toContain(">Откликнуться</a>");
+    expect(formatDigest([j], "en")).toContain(">Apply</a>");
   });
 
   it("fitTelegram — останній запобіжник", () => {
@@ -167,7 +226,7 @@ describe("стеля 4096", () => {
 });
 
 // ── Розклад і відкладені добірки ─────────────────────────────
-import { hadDigestToday, isDue, localDate, parseDbTime, pendingIsStale } from "./digest.js";
+import { hadDigestToday, isDue, isWeekdayIn, localDate, parseDbTime, pendingIsStale, remainingToday, scheduledServedToday, sentToday, DAILY_CAP } from "./digest.js";
 
 describe("isDue", () => {
   // 2026-08-29T07:30Z = 09:30 у Парижі, 10:30 у Києві
@@ -214,6 +273,64 @@ describe("pendingIsStale", () => {
   });
 });
 
+describe("isWeekdayIn", () => {
+  it("день тижня рахується в поясі людини", () => {
+    // 2026-08-29 — субота. 2026-08-28T22:30Z: у Києві вже субота 01:30,
+    // а в Лос-Анджелесі ще п'ятниця 15:30.
+    const now = new Date("2026-08-28T22:30:00Z");
+    expect(isWeekdayIn("Europe/Kyiv", now)).toBe(false);
+    expect(isWeekdayIn("America/Los_Angeles", now)).toBe(true);
+    // Неділя 2026-08-30 — теж вихідний.
+    expect(isWeekdayIn("UTC", new Date("2026-08-30T12:00:00Z"))).toBe(false);
+    expect(isWeekdayIn("UTC", new Date("2026-08-31T12:00:00Z"))).toBe(true);
+  });
+  it("невідомий пояс — за UTC, без винятку", () => {
+    expect(isWeekdayIn("Mars/Olympus", new Date("2026-08-31T12:00:00Z"))).toBe(true);
+  });
+});
+
+describe("денна стеля", () => {
+  const now = new Date("2026-08-31T10:00:00Z");
+  const sent = (t: string, status = "sent") => ({ sent_at: t, status });
+
+  it("рахує лише доставлене локального сьогодні", () => {
+    const rows = [
+      sent("2026-08-31T07:05:00.000Z"),
+      sent("2026-08-30 23:30:00"),            // у Києві це вже 31-ше
+      sent("2026-08-30T07:05:00.000Z"),       // учора всюди
+      { sent_at: null, status: "pending" },
+      sent("2026-08-31T08:00:00.000Z", "failed"),
+    ];
+    expect(sentToday("Europe/Kyiv", now, rows)).toHaveLength(2);
+    expect(sentToday("UTC", now, rows)).toHaveLength(1);
+  });
+
+  it("remainingToday не йде нижче нуля", () => {
+    expect(remainingToday(0)).toBe(DAILY_CAP);
+    expect(remainingToday(17)).toBe(3);
+    expect(remainingToday(25)).toBe(0);
+  });
+});
+
+describe("scheduledServedToday", () => {
+  const now = new Date("2026-08-31T10:00:00Z");
+  it("планова добірка вже була — другої не буде", () => {
+    expect(scheduledServedToday("UTC", now, [{ sent_at: "2026-08-31T07:05:00.000Z", status: "sent" }], [])).toBe(true);
+  });
+  it("доставка на запит «ще» плановою не вважається", () => {
+    // handled_at запиту стоїть за секунди від sent_at — це одна операція.
+    expect(scheduledServedToday("UTC", now,
+      [{ sent_at: "2026-08-31T01:00:03.000Z", status: "sent" }], ["2026-08-31 01:00:05"])).toBe(false);
+  });
+  it("учорашня, pending і failed — не рахуються", () => {
+    expect(scheduledServedToday("UTC", now, [
+      { sent_at: "2026-08-30T07:05:00.000Z", status: "sent" },
+      { sent_at: null, status: "pending" },
+      { sent_at: "2026-08-31T07:05:00.000Z", status: "failed" },
+    ], [])).toBe(false);
+  });
+});
+
 // ── Порядок кроків deliverTo ─────────────────────────────────
 import { deliverTo, type RunContext, type UserRow } from "./digest.js";
 
@@ -233,19 +350,19 @@ function fakeD1(answers: Array<[RegExp, unknown[]]>) {
 const user = (o: Partial<UserRow> = {}): UserRow => ({
   id: "user-1", telegram_chat_id: "123456789", locale: "en", timezone: "Europe/Paris", delivery_hour: 9,
   status: "active", last_interaction_at: null, spheres: "[]", industries: "[]", seniority: null,
-  remote_mode: "any", location: null, salary_min: null, country: null, custom_role: null,
+  remote_mode: "any", location: null, salary_min: null, country: null, custom_role: null, wishes: null,
   seniority_weight: null, location_weight: null, salary_weight: null, ...o });
 
 const ctxOf = (d1: unknown, o: Partial<RunContext> = {}): RunContext => ({
   d1: d1 as RunContext["d1"], cfg: { anthropicApiKey: null } as RunContext["cfg"],
-  now: new Date("2026-08-29T10:05:00Z"), // 12:05 у Парижі — година 9 вже минула
-  botToken: "tok", force: false, scanned: { jobs: 1, companies: 1 }, requested: new Set(), delivered: 0, ...o });
+  now: new Date("2026-08-28T10:05:00Z"), // п'ятниця, 12:05 у Парижі — година 9 вже минула
+  botToken: "tok", force: false, requested: new Set(), delivered: 0, ...o });
 
 const pendingRows = [
-  [/status='pending'/, [{ digest_id: "dg-1", created_at: "2026-08-29 09:00:00" }]],
-  [/FROM sent s JOIN jobs_cache/, [{ company: "Acme", title: "Eng", location: null, remote: 1,
+  [/status='pending'/, [{ digest_id: "dg-1", created_at: "2026-08-28 09:00:00" }]],
+  [/FROM sent s JOIN jobs_cache/, [{ sent_id: "s-1", company: "Acme", title: "Eng", location: null, remote: 1,
     url: "https://x.test/1", why_fits: "why", salary_min: null, salary_currency: null, summary: null }]],
-  [/created_at >= datetime/, [{ created_at: "2026-08-29 09:00:00" }]],
+  [/created_at >= datetime/, [{ created_at: "2026-08-28 09:00:00", sent_at: null, status: "pending" }]],
 ] as Array<[RegExp, unknown[]]>;
 
 describe("deliverTo", () => {
@@ -284,10 +401,36 @@ describe("deliverTo", () => {
 
   it("без Telegram pending — кінцевий стан, і «сьогодні вже було» не породжує нову", async () => {
     const f = vi.spyOn(globalThis, "fetch");
+    vi.spyOn(console, "log").mockImplementation(() => {});
     const { d1, executed } = fakeD1(pendingRows);
     const ctx = ctxOf(d1);
     await deliverTo(user({ telegram_chat_id: null }), ctx);
     expect(f).not.toHaveBeenCalled();
     expect(executed).toEqual([]);
+  });
+
+  it("у вихідний планова добірка не йде, а запит «ще» — йде", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const saturday = new Date("2026-08-29T10:05:00Z");
+    const { d1, executed } = fakeD1([[/created_at >= datetime/, []]]);
+    await deliverTo(user(), ctxOf(d1, { now: saturday }));
+    expect(executed).toEqual([]);
+    // На запит без кандидатів: запит закривається, а «нічого нового» іде.
+    await deliverTo(user(), ctxOf(d1, { now: saturday, requested: new Set(["user-1"]) }));
+    expect(executed.some((e) => /UPDATE delivery_requests SET handled_at/.test(e.sql))).toBe(true);
+  });
+
+  it("на запит понад 20 за день — коротке повідомлення і закритий запит", async () => {
+    const f = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const today = Array.from({ length: 20 }, (_, i) =>
+      ({ created_at: "2026-08-28 07:00:00", sent_at: `2026-08-28T07:00:${String(i).padStart(2, "0")}.000Z`, status: "sent" }));
+    const { d1, executed } = fakeD1([[/created_at >= datetime/, today]]);
+    await deliverTo(user(), ctxOf(d1, { requested: new Set(["user-1"]) }));
+    expect(executed.some((e) => /UPDATE delivery_requests SET handled_at/.test(e.sql))).toBe(true);
+    expect(executed.some((e) => /INSERT/.test(e.sql))).toBe(false);
+    const body = JSON.parse((f.mock.calls[0]![1] as { body: string }).body) as { text: string };
+    expect(body.text).toContain("20");
   });
 });

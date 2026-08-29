@@ -1,0 +1,13 @@
+[Unit]
+Description=Кожні дві хвилини: чи хтось натиснув «Ще п'ять»
+
+[Timer]
+# Без відкритих запитів прогін — один SELECT і вихід, тому часто — дешево.
+# Persistent=false: пропущені запуски надолужувати нема сенсу, наступний
+# за дві хвилини і так підбере всі відкриті запити.
+OnCalendar=*:0/2
+Persistent=false
+Unit=nextrole-requests.service
+
+[Install]
+WantedBy=timers.target

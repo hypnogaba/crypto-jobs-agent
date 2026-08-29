@@ -82,6 +82,7 @@ export default async function Nav({ locale }: { locale: Locale }) {
           {user ? (
             <>
               <Link href="/dashboard" className="hover:opacity-70">{t(locale, "dash.title")}</Link>
+              <Link href="/profile" className="hover:opacity-70">{t(locale, "nav.profile")}</Link>
               <Link href="/settings" className="hover:opacity-70">{t(locale, "dash.settings")}</Link>
               {user.isAdmin && (
                 <Link href="/admin" className="mono text-xs hover:opacity-70" style={{ color: "var(--ember)" }}>

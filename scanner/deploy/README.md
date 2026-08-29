@@ -28,7 +28,8 @@ chown root:root /etc/nextrole-scanner.env
 ```bash
 cp deploy/*.service deploy/*.timer /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable --now nextrole-scan.timer nextrole-watchdog.timer
+systemctl enable --now nextrole-scan.timer nextrole-watchdog.timer \
+  nextrole-digest.timer nextrole-requests.timer
 ```
 
 ## Перевірка
@@ -60,4 +61,8 @@ rsync -av --delete --exclude .env --exclude src --exclude node_modules \
   ./package.json ./package-lock.json ./dist <host>:/opt/nextrole-scanner/
 ```
 
-Перезапуск не потрібен: обидва юніти типу `oneshot` і запускаються таймерами.
+Перезапуск не потрібен: усі юніти типу `oneshot` і запускаються таймерами.
+
+`nextrole-digest.timer` ходить щогодини й шле планові добірки (пн–пт у поясі
+людини, одна на день). `nextrole-requests.timer` ходить кожні дві хвилини й
+обслуговує лише кнопку «Ще п'ять» — без відкритих запитів це один SELECT.

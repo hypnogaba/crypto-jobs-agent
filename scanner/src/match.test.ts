@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { explainLocally, linksToAggregator, pickTop, scoreJob, type CandidateJob, type Profile } from "./match.js";
+import { explainLocally, explainSystem, linksToAggregator, pickTop, scoreJob, wishBonus, type CandidateJob, type Profile } from "./match.js";
 
 const p: Profile = {
   userId: "u1", spheres: ["partnerships", "devrel"], industries: ["web3"],
@@ -58,7 +58,8 @@ describe("explainLocally", () => {
   it("пише про людину, а не переказує вакансію", () => {
     const [top] = pickTop([job()], p, 1);
     const why = explainLocally(top!, p, "uk");
-    expect(why).toContain("partnerships");
+    expect(why).toContain("Партнерства і BD");
+    expect(why).not.toContain("partnerships");
     expect(why).toContain("віддалено");
   });
   it("ніколи не повертає порожній рядок", () => {
@@ -68,7 +69,8 @@ describe("explainLocally", () => {
   it("говорить мовою людини, а не лише українською", () => {
     // Без ключа Anthropic це єдиний рядок «чому ти», який бачить француз.
     const [top] = pickTop([job()], p, 1);
-    expect(explainLocally(top!, p, "fr")).toBe("partnerships, un de vos domaines, secteur web3, entièrement à distance.");
+    expect(explainLocally(top!, p, "fr")).toBe("Partenariats et BD, un de vos domaines, secteur Web3 et crypto, entièrement à distance.");
+    expect(explainLocally(top!, p, "ru")).toContain("Партнёрства и BD");
     expect(explainLocally(top!, p, "en")).toContain("fully remote");
     expect(explainLocally(top!, p, "ru")).toContain("удалённо");
     expect(explainLocally(top!, p)).not.toMatch(/[а-яіїє]/i);
@@ -249,5 +251,28 @@ describe("facts", () => {
     const f = scoreJob(cand({ tags: [], title: "Solidity Auditor" }),
       prof({ spheres: [], customRole: "solidity audit" })).facts;
     expect(f).toContainEqual({ k: "role", v: "solidity audit" } satisfies MatchFact);
+  });
+});
+
+describe("побажання (wishes)", () => {
+  it("+2 за кожне окреме слово ≥4 символів у назві чи описі, стеля +6", () => {
+    const j = { title: "Startup Growth Lead", summary: "Fully remote, four-day week at a small startup." };
+    expect(wishBonus(j, null)).toBe(0);
+    expect(wishBonus(j, "")).toBe(0);
+    expect(wishBonus(j, "тільки стартапи")).toBe(0);
+    expect(wishBonus(j, "startup only")).toBe(2);
+    expect(wishBonus(j, "startup startup remote")).toBe(4);       // повтор не рахується
+    expect(wishBonus(j, "startup remote week four-day lead")).toBe(6);
+    expect(wishBonus(j, "no banks")).toBe(0);                     // «no» коротше за 4
+  });
+  it("бонус впливає на бал і не карає за відсутність", () => {
+    const wished = scoreJob(job({ title: "Startup Partnerships Lead" }), { ...p, wishes: "startup" });
+    const plain = scoreJob(job({ title: "Startup Partnerships Lead" }), p);
+    expect(wished.score - plain.score).toBe(2);
+    expect(scoreJob(job(), { ...p, wishes: "startup" }).score).toBe(scoreJob(job(), p).score);
+  });
+  it("системний промпт називає мову словом", () => {
+    expect(explainSystem("fr")).toContain("Answer in French");
+    expect(explainSystem("uk")).toContain("Answer in Ukrainian");
   });
 });
