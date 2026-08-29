@@ -122,7 +122,15 @@ export default function ProfileForm({ locale, pre, back, error, quote, evidence 
 
   // Порожній розбір — це теж відповідь, і краще сказати про це прямо, ніж
   // показати порожню форму так, ніби ми щось зрозуміли.
-  const nothing = Boolean(quote) && Object.keys(evidence ?? {}).length === 0;
+  //
+  // Рахується по ЗАПОВНЕНОМУ, а не по підставах. Спершу тут стояло
+  // «підстав немає» — але модель уміє поставити галочку, чия цитата не
+  // пройшла звірку, і тоді порада «познач кнопки сам» стояла б просто над
+  // уже позначеними кнопками.
+  const nothing = Boolean(quote)
+    && spheres.size === 0 && industries.size === 0
+    && !pre.seniority && modes.length === 0
+    && !pre.location && !pre.salaryMin && !pre.wishes;
 
   return (
     <form action={saveProfile}>
