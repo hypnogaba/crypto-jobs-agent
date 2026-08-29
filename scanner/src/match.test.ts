@@ -247,6 +247,16 @@ describe("facts", () => {
     expect(JSON.stringify(a)).not.toBe(JSON.stringify(b));
   });
 
+  // «Тільки віддалено» — це тепер набір з одного елемента, а не одне значення.
+  // Хто згоден і на офіс у своєму місті, і на переїзд, не має отримувати
+  // мінус шість за кожну вакансію з адресою.
+  it("не карає за офіс того, хто обрав і місто, і переїзд", () => {
+    const onsite = cand({ id: "j3", remote: false, location: "Berlin" });
+    const strict = scoreJob(onsite, prof({ remoteMode: "remote_only" })).score;
+    const open = scoreJob(onsite, prof({ remoteMode: "remote_or_city,relocate" })).score;
+    expect(open).toBeGreaterThan(strict);
+  });
+
   it("своя роль дає факт role, а не sphere", () => {
     const f = scoreJob(cand({ tags: [], title: "Solidity Auditor" }),
       prof({ spheres: [], customRole: "solidity audit" })).facts;

@@ -63,8 +63,10 @@ export const label = (
  * місті» — суперечність, і виграє те, що ширше.
  */
 export const parseModes = (raw: string | null | undefined): RemoteModeId[] => {
-  const ids = new Set(REMOTE_MODES.map((m) => m.id as string));
-  const list = [...new Set((raw ?? "").split(",").map((s) => s.trim()).filter((s) => ids.has(s)))];
+  // Порядок завжди словниковий, а не той, у якому людина натискала: інакше
+  // той самий набір показувався б по-різному в боті й на сайті.
+  const written = new Set((raw ?? "").split(",").map((s) => s.trim()));
+  const list = REMOTE_MODES.map((m) => m.id).filter((id) => written.has(id));
   const wide = list.filter((m) => m !== "remote_only");
   return (wide.length ? wide : list) as RemoteModeId[];
 };
