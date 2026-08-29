@@ -290,7 +290,7 @@ export default async function Admin() {
 
   // Пошти тут навмисно немає: панель відкривають на людях і показують з
   // екрана, а для питання «де застрягли» досить восьми символів ідентифікатора.
-  const people = await all<{ id: string; created_at: string; locale: string; status: string;
+  const people = await all<{ id: string; created_at: string | null; locale: string; status: string;
     tg: number; country: string | null; spheres: string | null; sent: number;
     more: number; nope: number; last_seen: string | null }>(`
     SELECT u.id, u.created_at, u.locale, u.status,
@@ -438,7 +438,7 @@ export default async function Admin() {
                           style={{ "--c": x.sent > 0 ? "var(--ok)" : "var(--warn)" } as React.CSSProperties}>
                         <td className="mono text-xs">{x.id.slice(0, 8)}</td>
                         <td className="mono text-xs" style={{ color: "var(--muted)" }}>
-                          {x.created_at.slice(0, 10)}
+                          {x.created_at?.slice(0, 10) ?? "—"}
                         </td>
                         <td className="text-xs">
                           {sphereCount(x.spheres) > 0
