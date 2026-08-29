@@ -46,6 +46,12 @@ export interface SessionUser {
   locale: string;
   status: string;
   isAdmin: boolean;
+  /**
+   * Часовий пояс людини. Лежить у сесії, а не добирається окремим запитом:
+   * його читає кожна внутрішня сторінка, щоб тихо доповнити зону, коли в
+   * базі досі стоїть UTC.
+   */
+  timezone: string;
 }
 
 /**
@@ -89,8 +95,8 @@ export async function currentUser(): Promise<SessionUser | null> {
 
   const row = await one<{
     id: string; email: string | null; telegram_chat_id: string | null;
-    locale: string; status: string; expires_at: string;
-  }>(`SELECT u.id,u.email,u.telegram_chat_id,u.locale,u.status,s.expires_at
+    locale: string; status: string; timezone: string; expires_at: string;
+  }>(`SELECT u.id,u.email,u.telegram_chat_id,u.locale,u.status,u.timezone,s.expires_at
       FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ?`, sid);
 
   if (!row) return null;
@@ -102,7 +108,7 @@ export async function currentUser(): Promise<SessionUser | null> {
 
   return {
     id: row.id, email: row.email, telegramChatId: row.telegram_chat_id,
-    locale: row.locale, status: row.status,
+    locale: row.locale, status: row.status, timezone: row.timezone,
     isAdmin: await isAdminUser(row.email, row.telegram_chat_id),
   };
 }

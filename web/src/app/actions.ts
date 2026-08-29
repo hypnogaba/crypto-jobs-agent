@@ -3,7 +3,7 @@
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { all, run, uuid } from "@/lib/db";
+import { all, one, run, uuid } from "@/lib/db";
 import { createSession, currentUser, destroySession, requireUser } from "@/lib/auth";
 import { parseProfile, type ParsedProfile } from "@/lib/parse";
 import { CvError, extractCvText } from "@/lib/cv";
@@ -286,6 +286,30 @@ export async function sendFeedback(formData: FormData): Promise<void> {
   }
 
   redirect("/feedback?sent=1");
+}
+
+/**
+ * Зона, яку тихо надіслав браузер.
+ *
+ * Викликається лише тоді, коли в базі досі UTC. Ніколи не затирає вже
+ * відому зону і ніколи не ставить UTC: порожній чи підроблений сигнал не
+ * має псувати розклад доставки.
+ *
+ * Разом із зоною перераховується країна — без неї людині не показуються
+ * національні дошки, і саме через це вони досі не діставались нікому.
+ */
+export async function recordTimezone(raw: string): Promise<void> {
+  const user = await currentUser();
+  if (!user || user.timezone !== "UTC") return;
+
+  const tz = safeTimezone(raw);
+  if (tz === "UTC") return;
+
+  await run("UPDATE users SET timezone=?, updated_at=datetime('now') WHERE id=? AND timezone='UTC'", tz, user.id);
+
+  const p = await one<{ location: string | null }>(
+    "SELECT location FROM profiles WHERE user_id=?", user.id);
+  if (p) await persistCountry(user.id, p.location);
 }
 
 export async function switchTheme(formData: FormData): Promise<void> {
