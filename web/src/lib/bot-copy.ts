@@ -46,6 +46,21 @@ const P = {
     fr: "Je cherche — ça arrive dans quelques minutes. Au plus 20 offres par jour, le reste demain.",
     ru: "Ищу — придёт через пару минут. Максимум 20 вакансий в день, остальное завтра.",
   },
+  // Кнопки під «Готово»: тестова добірка зараз або чекати планової.
+  firstNow:    { en: "Send 5 now", uk: "Прислати 5 зараз", fr: "Envoyer 5 maintenant", ru: "Прислать 5 сейчас" },
+  firstWait:   { en: "I’ll wait", uk: "Чекатиму", fr: "J’attendrai", ru: "Подожду" },
+  firstQueued: {
+    en: "Looking — five roles for your profile arrive in a couple of minutes, so you can see how the bot works. Then as agreed: {when}.",
+    uk: "Шукаю — п'ять вакансій під твій профіль прийдуть за пару хвилин, щоб ти побачив, як працює бот. Далі — як домовилися: {when}.",
+    fr: "Je cherche — cinq postes pour votre profil arrivent dans deux minutes, pour voir comment le bot fonctionne. Ensuite, comme convenu : {when}.",
+    ru: "Ищу — пять вакансий под твой профиль придут через пару минут, чтобы ты увидел, как работает бот. Дальше — как договорились: {when}.",
+  },
+  firstAgreed: {
+    en: "Agreed. See you {when}.",
+    uk: "Домовились. До зустрічі {when}.",
+    fr: "Entendu. À {when}.",
+    ru: "Договорились. До встречи {when}.",
+  },
   // Вільний текст від підключеної людини — це побажання, а не нова анкета.
   // Раніше такий текст переписував профіль порожніми сферами.
   wishNoted: {

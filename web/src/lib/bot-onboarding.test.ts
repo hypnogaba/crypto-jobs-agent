@@ -103,7 +103,7 @@ describe("тексти", () => {
 });
 
 // ── Побажання, вільний текст і правка по пунктах ──────────────
-import { EDITABLE, freeTextAction, profileMenu, profileUpdateFor } from "./bot-onboarding";
+import { EDITABLE, freeTextAction, profileMenu, profileUpdateFor, readyText } from "./bot-onboarding";
 
 describe("вільний текст поза командами", () => {
   it("у підключеної людини стає побажанням, а не новою анкетою", () => {
@@ -164,5 +164,13 @@ describe("правка по пунктах", () => {
       .toEqual({ set: "seniority=?, custom_seniority=?", params: [null, "founder"] });
     // Година живе в users, не в profiles
     expect(profileUpdateFor("tz", draft)).toBeNull();
+  });
+});
+
+describe("readyText", () => {
+  it("підставляє годину, зону й дату", () => {
+    const s = readyText("uk", { h: "09:00", tz: "Париж", when: "понеділок, 31 серпня, 09:00" });
+    expect(s).toContain("робочі дні о 09:00 (Париж)");
+    expect(s).toContain("Найближча: понеділок, 31 серпня, 09:00");
   });
 });

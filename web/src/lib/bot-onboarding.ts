@@ -218,13 +218,13 @@ const WORD = {
     fr: "Écrivez votre rôle avec vos mots, par exemple : recrutement technique, rédaction de subventions, audit de smart contracts.",
     ru: "Напиши свою роль своими словами — например: технический рекрутинг, grant writing, аудит смартконтрактов.",
   },
-  // Три кроки, а не гола готовність. І «завтра о 09:00» тут більше не
-  // писали б правду: профіль одразу замовляє позачергову добірку.
+  // Три кроки з датою: планова добірка йде лише в робочі дні, а перша —
+  // тільки на прохання (кнопка «Прислати 5 зараз»), не автоматично.
   ready: {
-    en: "You are set.\n\n\u2713 Profile saved\n\u25cf First batch \u2014 within the hour\n\u25cb Then \u2014 every day at your time",
-    uk: "Готово.\n\n\u2713 Профіль збережено\n\u25cf Перша добірка \u2014 протягом години\n\u25cb Далі \u2014 щодня у твій час",
-    fr: "C'est prêt.\n\n\u2713 Profil enregistré\n\u25cf Première sélection \u2014 dans l'heure\n\u25cb Ensuite \u2014 chaque jour à votre heure",
-    ru: "Готово.\n\n\u2713 Профиль сохранён\n\u25cf Первая подборка \u2014 в течение часа\n\u25cb Дальше \u2014 каждый день в твоё время",
+    en: "You are set.\n\n\u2713 Profile saved\n\u25cb Batches come on weekdays at {h} ({tz})\n\u25cf Next one: {when}\n\nWant to see how it looks right now?",
+    uk: "Готово.\n\n\u2713 Профіль збережено\n\u25cb Добірки приходять у робочі дні о {h} ({tz})\n\u25cf Найближча: {when}\n\nХочеш побачити, як це виглядає, вже зараз?",
+    fr: "C'est prêt.\n\n\u2713 Profil enregistré\n\u25cb Les sélections arrivent en semaine à {h} ({tz})\n\u25cf Prochaine : {when}\n\nVoir à quoi ça ressemble dès maintenant ?",
+    ru: "Готово.\n\n\u2713 Профиль сохранён\n\u25cb Подборки приходят в рабочие дни в {h} ({tz})\n\u25cf Ближайшая: {when}\n\nХочешь увидеть, как это выглядит, прямо сейчас?",
   },
   commands: {
     en: "/profile — your profile, edit any field\n/time — delivery hour\n/lang — language\n/pause and /resume\n/site — sign in on the web",
@@ -422,5 +422,5 @@ export function freeTextAction(known: boolean, hasProfile: boolean, inFlow: bool
   return "register";
 }
 
-export const readyText = (locale: Locale): string =>
-  `${say(WORD.ready, locale)}\n\n${say(WORD.commands, locale)}`;
+export const readyText = (locale: Locale, v: { h: string; tz: string; when: string }): string =>
+  `${say(WORD.ready, locale).replace("{h}", v.h).replace("{tz}", v.tz).replace("{when}", v.when)}\n\n${say(WORD.commands, locale)}`;

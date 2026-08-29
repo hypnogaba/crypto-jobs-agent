@@ -4,7 +4,7 @@ import { one, run } from "@/lib/db";
 import { WEBHOOK_401_LIMITS, checkRate, recordFailure } from "@/lib/ratelimit";
 import { handleCommand, startBotOnboarding, continueBotOnboarding,
          handleOnboardingButton, handleOnboardingText, handleWhyButton, handleDocument,
-         handleDeleteButton, handleEditButton, handleLangButton, handleStartButton } from "@/lib/bot";
+         handleDeleteButton, handleEditButton, handleFirstButton, handleLangButton, handleStartButton } from "@/lib/bot";
 import { freeTextAction } from "@/lib/bot-onboarding";
 import { isLocale } from "@/lib/i18n";
 import { t as botCopy, tf as botCopyF } from "@/lib/bot-copy";
@@ -164,6 +164,7 @@ async function handle(env: Env, raw: unknown): Promise<void> {
     const cbId = update.callback_query?.id;
     if (await handleDeleteButton(env, chatId, callback, cbId, locale)) return;
     if (await handleStartButton(env, chatId, callback, cbId, locale)) return;
+    if (await handleFirstButton(env, chatId, callback, cbId, locale)) return;
     if (await handleEditButton(env, chatId, callback, cbId, locale)) return;
     if (await handleLangButton(env, chatId, callback, cbId)) return;
     // Кнопки онбордингу йдуть першими: реакції на добірку мають префікс fb:

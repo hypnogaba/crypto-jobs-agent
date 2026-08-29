@@ -12,7 +12,8 @@ import { t as say, tf, timeNow, timeSet } from "./bot-copy";
 import type { Locale } from "./vocab";
 import { persistCountry } from "@/lib/profile-country";
 import { timezoneFor } from "./geo";
-import { isKnownZone, timezoneFromCity, zoneForHour } from "./tz";
+import { isKnownZone, timezoneFromCity, zoneForHour, zoneName } from "./tz";
+import { formatWhen, nextDelivery } from "./digest-time";
 import { callTelegram, sendText } from "./telegram-send";
 
 /** Команди бота. Кабінет у чаті — мінімальний, повний лишається на сайті. */
@@ -134,20 +135,6 @@ async function loadDraft(userId: string): Promise<Draft | null> {
     seniority: p.seniority, remoteMode: p.remote_mode, location: p.location,
     salaryMin: p.salary_min, salaryCurrency: p.salary_currency, wishes: p.wishes,
   };
-}
-
-/**
- * Перша добірка поза розкладом.
- *
- * Та сама умова, що й на сайті (actions.ts): замовляємо лише першу. Без
- * NOT EXISTS кожне повторне проходження онбордингу замовляло б ще одну.
- */
-async function requestFirstDigest(userId: string): Promise<void> {
-  await run(
-    `INSERT INTO delivery_requests (id,user_id)
-     SELECT ?,? WHERE NOT EXISTS (SELECT 1 FROM sent WHERE user_id=?)
-                  AND NOT EXISTS (SELECT 1 FROM delivery_requests WHERE user_id=?)`,
-    uuid(), userId, userId, userId);
 }
 
 /** Один дотик по кнопці. Повертає true, якщо це справді був онбординг. */
@@ -416,11 +403,42 @@ async function finishOnboarding(
   await persistCountry(userId, draft.location ?? null);
 
   await run("DELETE FROM bot_state WHERE chat_id=?", String(chatId));
-  await requestFirstDigest(userId);
 
-  const done = `${summary(draft, locale)}\n\n${readyText(locale)}`;
-  if (messageId) await editKeyboard(env, chatId, messageId, done, []);
-  else await send(env, chatId, done);
+  // Дата найближчої планової добірки — і кнопка, щоб побачити формат уже
+  // зараз. Автоматично першу добірку більше не замовляємо: людина сама
+  // вирішує, чекати понеділка чи отримати п'ять одразу.
+  const when = nextDelivery(timezone, 9, new Date());
+  const done = `${summary(draft, locale)}\n\n${readyText(locale, {
+    h: "09:00", tz: zoneName(timezone, locale), when: formatWhen(when, timezone, locale) })}`;
+  const keys = [[
+    { text: say("firstNow", locale),  callback_data: "first:now" },
+    { text: say("firstWait", locale), callback_data: "first:wait" },
+  ]];
+  if (messageId) await editKeyboard(env, chatId, messageId, done, keys);
+  else await sendKeyboard(env, chatId, done, keys);
+}
+
+/** Кнопки під «Готово»: п'ять вакансій зараз або чекати планової. */
+export async function handleFirstButton(
+  env: Env, chatId: number, data: string, callbackId: string | undefined, locale: Locale
+): Promise<boolean> {
+  if (!data.startsWith("first:")) return false;
+  if (callbackId) await ackButton(env, callbackId);
+  const u = await one<{ id: string; timezone: string; delivery_hour: number }>(
+    "SELECT id, timezone, delivery_hour FROM users WHERE telegram_chat_id=?", String(chatId));
+  if (!u) return true;
+  const when = formatWhen(nextDelivery(u.timezone, u.delivery_hour, new Date()), u.timezone, locale);
+  if (data === "first:now") {
+    await run(
+      `INSERT INTO delivery_requests (id,user_id)
+       SELECT ?,? WHERE NOT EXISTS (SELECT 1 FROM delivery_requests WHERE user_id=? AND handled_at IS NULL)`,
+      uuid(), u.id, u.id);
+    await send(env, chatId, tf("firstQueued", locale, { when }));
+  } else {
+    await send(env, chatId, tf("firstAgreed", locale, { when }));
+  }
+  await run("UPDATE users SET last_interaction_at=datetime('now') WHERE id=?", u.id);
+  return true;
 }
 
 // ── Правка по пунктах (/profile) ─────────────────────────────
@@ -739,8 +757,7 @@ export async function handleDocument(
     await persistCountry(userId, parsed.location);
 
     await run("DELETE FROM bot_state WHERE chat_id=?", String(chatId));
-    await requestFirstDigest(userId);
-    await send(env, chatId, `${say("cvDone", locale)}\n\n${summary({
+      await send(env, chatId, `${say("cvDone", locale)}\n\n${summary({
       spheres: parsed.spheres, industries: parsed.industries, customRole: null,
       seniority: parsed.seniority, remoteMode: parsed.remoteMode,
       salaryMin: parsed.salaryMin, salaryCurrency: parsed.salaryCurrency,
