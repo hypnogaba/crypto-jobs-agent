@@ -41,3 +41,19 @@ describe("успадковані теги компанії", () => {
     expect(deriveTags(j({ title: "Backend Engineer" }))).toContain("engineering");
   });
 });
+
+describe("сфера design", () => {
+  it("дизайнер отримує тег design, product лишається як був", () => {
+    const j = { title: "Senior Product Designer (Figma)", company: "Acme", source: "greenhouse:acme", remote: false } as unknown as Parameters<typeof deriveTags>[0];
+    const tags = deriveTags(j);
+    expect(tags).toContain("design");
+    expect(tags).toContain("product");
+  });
+  it("UX, motion і brand design — теж design", () => {
+    const of = (title: string) => deriveTags({ title, company: "X", source: "lever:x", remote: false } as unknown as Parameters<typeof deriveTags>[0]);
+    expect(of("UX Researcher")).toContain("design");
+    expect(of("Motion Graphics Lead")).toContain("design");
+    expect(of("Brand Design Manager")).toContain("design");
+    expect(of("Backend Engineer")).not.toContain("design");
+  });
+});

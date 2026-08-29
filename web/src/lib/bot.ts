@@ -1,16 +1,18 @@
 import { one, run, uuid } from "./db";
 import {
-  emptyDraft, keyboard, nextStep, questionText, askOtherAmount, askCustomFor, readyText,
-  STEPS,
+  emptyDraft, keyboard, nextStep, questionText, askOtherAmount, askCustomFor, askTime, askWishes,
+  readyText, draftTimezone, profileMenu, profileUpdateFor,
+  STEPS, EDITABLE,
   summary, toggle, type Draft, type Step,
 } from "./bot-onboarding";
-import { isLocale } from "./i18n";
+import { isLocale, LOCALES } from "./i18n";
 import { CvError, extractCvText } from "./cv";
 import { parseProfile } from "./parse";
-import { t as say, timeNow, timeSet } from "./bot-copy";
+import { t as say, tf, timeNow, timeSet } from "./bot-copy";
 import type { Locale } from "./vocab";
 import { persistCountry } from "@/lib/profile-country";
 import { timezoneFor } from "./geo";
+import { isKnownZone, timezoneFromCity, zoneForHour } from "./tz";
 import { callTelegram, sendText } from "./telegram-send";
 
 /** Команди бота. Кабінет у чаті — мінімальний, повний лишається на сайті. */
@@ -66,23 +68,72 @@ async function saveState(chatId: number, step: Step, draft: Draft, messageId: nu
     String(chatId), step, JSON.stringify(draft), messageId);
 }
 
-export async function startBotOnboarding(env: Env, chatId: number, locale: Locale = "en"): Promise<void> {
-  const existing = await one<{ id: string }>("SELECT id FROM users WHERE telegram_chat_id=?", String(chatId));
-  if (existing) {
-    await send(env, chatId, say("alreadyIn", locale));
+/**
+ * /start. Тому, хто вже має профіль, анкету не перезапускаємо мовчки —
+ * це стерло б усе. Пропонуємо два виходи кнопками; `force` — це вже
+ * підтверджений «почати заново».
+ */
+export async function startBotOnboarding(
+  env: Env, chatId: number, locale: Locale = "en", force = false
+): Promise<void> {
+  const existing = await one<{ id: string; timezone: string }>(
+    "SELECT id,timezone FROM users WHERE telegram_chat_id=?", String(chatId));
+  const hasProfile = existing
+    && await one<{ user_id: string }>("SELECT user_id FROM profiles WHERE user_id=?", existing.id);
+
+  if (hasProfile && !force) {
+    await sendKeyboard(env, chatId, say("startExisting", locale), [
+      [{ text: say("startAgain", locale), callback_data: "st:restart" },
+       { text: say("startEdit", locale),  callback_data: "st:edit" }],
+    ]);
     return;
   }
 
-  await send(env, chatId, say("greeting", locale));
+  if (!existing) await send(env, chatId, say("greeting", locale));
 
   // Порожній чернетці передує пропозиція написати одним реченням: тоді
   // галочки на першому екрані вже стоять, і людині лишається їх підтвердити,
   // а не збирати профіль із нуля. На сайті так і працює — тепер і тут.
   const draft = emptyDraft();
+  // Відому зону не перепитуємо: вона вже стоїть у users.
+  if (existing && existing.timezone !== "UTC") draft.timezone = existing.timezone;
   const id = await sendKeyboard(env, chatId,
-    `${questionText("spheres", locale)}\n\n${say("orWrite", locale)}`,
+    `${say("orWrite", locale)}\n\n${questionText("spheres", locale)}`,
     keyboard("spheres", draft, locale));
   await saveState(chatId, "spheres", draft, id);
+}
+
+/** Кнопки під /start для того, хто вже має профіль. */
+export async function handleStartButton(
+  env: Env, chatId: number, data: string, callbackId: string | undefined, locale: Locale
+): Promise<boolean> {
+  if (!data.startsWith("st:")) return false;
+  if (callbackId) await ackButton(env, callbackId);
+  if (data === "st:restart") await startBotOnboarding(env, chatId, locale, true);
+  else if (data === "st:edit") await handleCommand(env, chatId, "/profile", locale);
+  return true;
+}
+
+/** Профіль із бази у вигляді чернетки — для /profile і правки по пунктах. */
+async function loadDraft(userId: string): Promise<Draft | null> {
+  const p = await one<{ spheres: string; industries: string; seniority: string | null;
+    remote_mode: string; location: string | null; salary_min: number | null; salary_currency: string | null;
+    custom_role: string | null; custom_industry: string | null; custom_seniority: string | null;
+    wishes: string | null }>(
+    `SELECT spheres,industries,seniority,remote_mode,location,salary_min,salary_currency,
+            custom_role,custom_industry,custom_seniority,wishes
+       FROM profiles WHERE user_id=?`, userId);
+  if (!p) return null;
+  const list = (raw: string | null): string[] => {
+    try { const v = JSON.parse(raw ?? "[]"); return Array.isArray(v) ? v : []; } catch { return []; }
+  };
+  return {
+    ...emptyDraft(),
+    spheres: list(p.spheres), industries: list(p.industries), customRole: p.custom_role,
+    customIndustry: p.custom_industry, customSeniority: p.custom_seniority,
+    seniority: p.seniority, remoteMode: p.remote_mode, location: p.location,
+    salaryMin: p.salary_min, salaryCurrency: p.salary_currency, wishes: p.wishes,
+  };
 }
 
 /**
@@ -135,6 +186,16 @@ export async function handleOnboardingButton(
     return true;
   }
 
+  // Котра година: кнопка несе зону; «Інша» — просимо написати час.
+  if (step === "tz") {
+    if (value === "__other") {
+      await run("UPDATE bot_state SET step='tzhour', updated_at=datetime('now') WHERE chat_id=?", String(chatId));
+      await send(env, chatId, askTime(locale));
+      return true;
+    }
+    if (isKnownZone(value)) draft.timezone = value;
+  }
+
   // Одна відповідь — або «Готово» в списку з кількома
   if (step === "seniority") draft.seniority = value;
   if (step === "where") draft.remoteMode = value;
@@ -182,6 +243,28 @@ export async function handleOnboardingText(
     return true;
   }
 
+  // Побажання: усе написане й є відповіддю, далі — наступне питання.
+  if (row.step === "wishes") {
+    const draft = readDraft(row.draft);
+    draft.wishes = text.slice(0, 1000).trim() || null;
+    await advance(env, chatId, "wishes", draft, locale, row.message_id);
+    return true;
+  }
+
+  // Котра година, написана словами («14:30»): підбираємо зону за годиною.
+  if (row.step === "tz" || row.step === "tzhour") {
+    const zone = zoneForHour(text, new Date());
+    if (!zone) { await send(env, chatId, say("timeBadHour", locale)); return true; }
+    const draft = readDraft(row.draft);
+    draft.timezone = zone;
+    await advance(env, chatId, "tz", draft, locale, row.message_id);
+    return true;
+  }
+
+  if (row.step.startsWith("edit:") || row.step.startsWith("editown:")) {
+    return handleEditText(env, chatId, row, text, locale);
+  }
+
   // Вільний текст просто посеред питань: людина написала, ким хоче бути.
   // Розбираємо тим самим парсером, що й сайт, і ставимо галочки — далі вона
   // лише підтверджує. Це і є «підтягнути з того, що можна написати текстом».
@@ -192,6 +275,7 @@ export async function handleOnboardingText(
     if (parsed.industries.length) draft.industries = parsed.industries;
     if (parsed.seniority) draft.seniority = parsed.seniority;
     if (parsed.remoteMode) draft.remoteMode = parsed.remoteMode;
+    if (parsed.location) draft.location = parsed.location;
     if (parsed.salaryMin) { draft.salaryMin = parsed.salaryMin; draft.salaryCurrency = parsed.salaryCurrency; }
 
     const step = row.step as Step;
@@ -280,32 +364,54 @@ export async function handleOnboardingText(
   return true;
 }
 
+/** Перехід до наступного питання, або завершення, якщо воно було останнім. */
+async function advance(
+  env: Env, chatId: number, from: Step, draft: Draft, locale: Locale, messageId: number | null
+): Promise<void> {
+  const goto = nextStep(from, draft);
+  if (!goto) { await finishOnboarding(env, chatId, draft, locale, messageId); return; }
+  await saveState(chatId, goto, draft, null);
+  if (messageId) {
+    await editKeyboard(env, chatId, messageId, questionText(goto, locale), keyboard(goto, draft, locale));
+  }
+}
+
 async function finishOnboarding(
   env: Env, chatId: number, draft: Draft, locale: Locale, messageId: number | null
 ): Promise<void> {
   const existing = await one<{ id: string }>("SELECT id FROM users WHERE telegram_chat_id=?", String(chatId));
   const userId = existing?.id ?? uuid();
+  // Зона: кнопка «котра година» → місто → країна → мова. UTC лише коли
+  // жоден сигнал нічого не сказав.
+  const timezone = draftTimezone(draft, locale) ?? timezoneFor(locale, draft.location);
   if (!existing) {
     await run(
       `INSERT INTO users (id,telegram_chat_id,locale,timezone,delivery_hour,last_interaction_at)
        VALUES (?,?,?,?,9,datetime('now'))`,
-      userId, String(chatId), locale, timezoneFor(locale, draft.location));
+      userId, String(chatId), locale, timezone);
+  } else if (timezone !== "UTC") {
+    await run("UPDATE users SET timezone=?, updated_at=datetime('now') WHERE id=?", timezone, userId);
   }
 
   await run(
-    `INSERT INTO profiles (user_id,mode,raw_input,spheres,custom_role,industries,seniority,remote_mode,location,salary_min,salary_currency,updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+    `INSERT INTO profiles (user_id,mode,raw_input,spheres,custom_role,industries,custom_industry,seniority,custom_seniority,
+                           remote_mode,location,salary_min,salary_currency,wishes,updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
      ON CONFLICT(user_id) DO UPDATE SET
        mode=excluded.mode, raw_input=excluded.raw_input, spheres=excluded.spheres,
        custom_role=excluded.custom_role, industries=excluded.industries,
-       seniority=excluded.seniority, remote_mode=excluded.remote_mode,
-       location=excluded.location,
+       custom_industry=excluded.custom_industry,
+       seniority=excluded.seniority, custom_seniority=excluded.custom_seniority,
+       remote_mode=excluded.remote_mode, location=excluded.location,
        salary_min=excluded.salary_min, salary_currency=excluded.salary_currency,
+       wishes=excluded.wishes,
        updated_at=datetime('now')`,
     userId, "bot", null,
-    JSON.stringify(draft.spheres), draft.customRole ?? null, JSON.stringify(draft.industries),
-    draft.seniority, draft.remoteMode ?? "remote_only", draft.location ?? null,
-    draft.salaryMin, draft.salaryCurrency);
+    JSON.stringify(draft.spheres), draft.customRole ?? null,
+    JSON.stringify(draft.industries), draft.customIndustry ?? null,
+    draft.seniority, draft.customSeniority ?? null,
+    draft.remoteMode ?? "remote_only", draft.location ?? null,
+    draft.salaryMin, draft.salaryCurrency, draft.wishes?.trim() || null);
 
   await persistCountry(userId, draft.location ?? null);
 
@@ -315,6 +421,190 @@ async function finishOnboarding(
   const done = `${summary(draft, locale)}\n\n${readyText(locale)}`;
   if (messageId) await editKeyboard(env, chatId, messageId, done, []);
   else await send(env, chatId, done);
+}
+
+// ── Правка по пунктах (/profile) ─────────────────────────────
+// Та сама клавіатура, що й в онбордингу, але з префіксом ed: і записом
+// лише одного поля. Переходити всю анкету заради зарплати — надто дорого.
+
+/** Стан «правлю поле» — чернетка з бази, крок edit:<поле>. */
+async function openEditor(
+  env: Env, chatId: number, userId: string, step: Step, locale: Locale
+): Promise<void> {
+  const draft = (await loadDraft(userId)) ?? emptyDraft();
+  if (step === "wishes") {
+    await saveState(chatId, `edit:wishes` as Step, draft, null);
+    const cur = draft.wishes?.trim() ? `«${draft.wishes.trim()}»\n\n` : "";
+    await send(env, chatId, `${cur}${askWishes(locale)}`);
+    return;
+  }
+  const id = await sendKeyboard(env, chatId, questionText(step, locale),
+    keyboard(step, draft, locale, { prefix: "ed" }));
+  await saveState(chatId, `edit:${step}` as Step, draft, id);
+}
+
+/** Запис одного поля й підтвердження. Назва стовпця — з profileUpdateFor, не з кнопки. */
+async function commitField(
+  env: Env, chatId: number, userId: string, step: Step, draft: Draft, locale: Locale, messageId: number | null
+): Promise<void> {
+  const upd = profileUpdateFor(step, draft);
+  if (upd) {
+    await run(`UPDATE profiles SET ${upd.set}, updated_at=datetime('now') WHERE user_id=?`, ...upd.params, userId);
+    if (step === "where" || step === "city") await persistCountry(userId, draft.location ?? null);
+  }
+  await run("DELETE FROM bot_state WHERE chat_id=?", String(chatId));
+  const done = `${summary(draft, locale)}\n\n${say("fieldSaved", locale)}`;
+  if (messageId) await editKeyboard(env, chatId, messageId, done, []);
+  else await send(env, chatId, done);
+}
+
+export async function handleEditButton(
+  env: Env, chatId: number, data: string, callbackId: string | undefined, locale: Locale
+): Promise<boolean> {
+  if (!data.startsWith("ed:")) return false;
+  if (callbackId) await ackButton(env, callbackId);
+
+  const user = await one<{ id: string }>("SELECT id FROM users WHERE telegram_chat_id=?", String(chatId));
+  if (!user) return true;
+
+  const [, field, value] = data.split(":");
+  if (!field || field === "noop") return true;
+
+  // Пункт меню: відкриваємо клавіатуру одного питання
+  if (value === undefined) {
+    if (field === "lang") { await sendLangKeyboard(env, chatId, locale); return true; }
+    if (EDITABLE.includes(field as Step)) await openEditor(env, chatId, user.id, field as Step, locale);
+    return true;
+  }
+
+  const row = await one<StateRow>("SELECT step,draft,message_id FROM bot_state WHERE chat_id=?", String(chatId));
+  if (!row || row.step !== `edit:${field}`) return true;   // стан загубився — /profile почне заново
+  const step = field as Step;
+  const draft = readDraft(row.draft);
+
+  if (value === "__mine") {
+    await run("UPDATE bot_state SET step=?, updated_at=datetime('now') WHERE chat_id=?",
+      `editown:${step}`, String(chatId));
+    await send(env, chatId, askCustomFor(step, locale));
+    return true;
+  }
+
+  if ((step === "spheres" || step === "industries") && value !== "__next") {
+    if (step === "spheres") draft.spheres = toggle(draft.spheres, value);
+    else draft.industries = toggle(draft.industries, value);
+    await saveState(chatId, row.step as Step, draft, null);
+    if (row.message_id) {
+      await editKeyboard(env, chatId, row.message_id, questionText(step, locale),
+        keyboard(step, draft, locale, { prefix: "ed" }));
+    }
+    return true;
+  }
+
+  if (step === "seniority") { draft.seniority = value; draft.customSeniority = null; }
+  if (step === "where") { draft.remoteMode = value; draft.customWhere = null; }
+  if (step === "salary") {
+    if (value === "__other") { await send(env, chatId, askOtherAmount(locale)); return true; }
+    const n = Number.parseInt(value, 10);
+    draft.salaryMin = Number.isFinite(n) && n > 0 ? n : null;
+    draft.salaryCurrency = draft.salaryMin ? "EUR" : null;
+  }
+  if (step === "tz") {
+    if (value === "__other") { await send(env, chatId, askTime(locale)); return true; }
+    if (!isKnownZone(value)) return true;
+    await setZone(env, chatId, user.id, value, locale);
+    return true;
+  }
+
+  await commitField(env, chatId, user.id, step, draft, locale, row.message_id);
+  return true;
+}
+
+/** Зона в users — окремо від profiles, бо це про доставку, а не про підбір. */
+async function setZone(env: Env, chatId: number, userId: string, zone: string, locale: Locale): Promise<void> {
+  await run("UPDATE users SET timezone=?, updated_at=datetime('now') WHERE id=?", zone, userId);
+  await run("DELETE FROM bot_state WHERE chat_id=?", String(chatId));
+  const row = await one<{ delivery_hour: number }>("SELECT delivery_hour FROM users WHERE id=?", userId);
+  await send(env, chatId, `${tf("zoneSet", locale, { zone })}\n${timeNow(locale, row?.delivery_hour ?? 9, zone)}`);
+}
+
+/** Вільний текст під час правки: побажання, інша сума, «немає в списку», година. */
+async function handleEditText(
+  env: Env, chatId: number, row: StateRow, text: string, locale: Locale
+): Promise<boolean> {
+  const user = await one<{ id: string }>("SELECT id FROM users WHERE telegram_chat_id=?", String(chatId));
+  if (!user) return false;
+  const draft = readDraft(row.draft);
+
+  if (row.step === "edit:wishes") {
+    draft.wishes = text.slice(0, 1000);
+    await commitField(env, chatId, user.id, "wishes", draft, locale, null);
+    return true;
+  }
+
+  if (row.step === "edit:tz") {
+    const zone = zoneForHour(text, new Date());
+    if (!zone) { await send(env, chatId, say("timeBadHour", locale)); return true; }
+    await setZone(env, chatId, user.id, zone, locale);
+    return true;
+  }
+
+  if (row.step === "edit:salary") {
+    const m = /(\d[\d\s.,]*)\s*([a-zA-Z€$£]{1,4})?/.exec(text);
+    const amount = m ? Number.parseInt(m[1]!.replace(/[^\d]/g, ""), 10) : NaN;
+    if (!Number.isFinite(amount) || amount <= 0) { await send(env, chatId, askOtherAmount(locale)); return true; }
+    draft.salaryMin = amount;
+    const cur = (m?.[2] ?? "EUR").toUpperCase().replace("€", "EUR").replace("$", "USD").replace("£", "GBP");
+    draft.salaryCurrency = cur.slice(0, 3);
+    await commitField(env, chatId, user.id, "salary", draft, locale, row.message_id);
+    return true;
+  }
+
+  if (row.step.startsWith("editown:")) {
+    const step = row.step.slice(8) as Step;
+    const own = text.slice(0, 120);
+    if (step === "spheres") draft.customRole = own;
+    else if (step === "industries") draft.customIndustry = own;
+    else if (step === "seniority") { draft.customSeniority = own; draft.seniority = null; }
+    else if (step === "where") { draft.customWhere = own; draft.location = own; }
+    // Списки повертаються до клавіатури — можна дообрати; одиночні пишуться одразу.
+    if (step === "spheres" || step === "industries") {
+      await saveState(chatId, `edit:${step}` as Step, draft, null);
+      if (row.message_id) {
+        await editKeyboard(env, chatId, row.message_id, questionText(step, locale),
+          keyboard(step, draft, locale, { prefix: "ed" }));
+      }
+      return true;
+    }
+    await commitField(env, chatId, user.id, step, draft, locale, row.message_id);
+    return true;
+  }
+
+  // Інший edit:-крок (наприклад, спискова клавіатура) — текст ні до чого.
+  await send(env, chatId, say("useButtons", locale));
+  return true;
+}
+
+// ── Мова ─────────────────────────────────────────────────────
+
+async function sendLangKeyboard(env: Env, chatId: number, locale: Locale): Promise<void> {
+  const items = LOCALES.map((l) => ({ text: l.name, callback_data: `lg:${l.id}` }));
+  await sendKeyboard(env, chatId, say("langAsk", locale), [items.slice(0, 2), items.slice(2)]);
+}
+
+async function setLocale(env: Env, chatId: number, userId: string, next: Locale): Promise<void> {
+  await run("UPDATE users SET locale=?, updated_at=datetime('now') WHERE id=?", next, userId);
+  await send(env, chatId, say("langSet", next));
+}
+
+export async function handleLangButton(
+  env: Env, chatId: number, data: string, callbackId: string | undefined
+): Promise<boolean> {
+  if (!data.startsWith("lg:")) return false;
+  if (callbackId) await ackButton(env, callbackId);
+  const next = data.slice(3);
+  const user = await one<{ id: string }>("SELECT id FROM users WHERE telegram_chat_id=?", String(chatId));
+  if (user && isLocale(next)) await setLocale(env, chatId, user.id, next);
+  return true;
 }
 
 /**
@@ -485,8 +775,11 @@ export const botLocale = (code: string | undefined): Locale => {
 };
 
 export async function continueBotOnboarding(
-  env: Env, chatId: number, data: string, locale: Locale = "en"
+  env: Env, chatId: number, data: string, locale: Locale = "en", callbackId?: string
 ): Promise<void> {
+  // Без відповіді кнопка під добіркою крутилась, доки Telegram не здасться.
+  if (callbackId) await ackButton(env, callbackId);
+
   const user = await one<{ id: string }>("SELECT id FROM users WHERE telegram_chat_id=?", String(chatId));
   if (!user) return;
 
@@ -570,27 +863,36 @@ export async function handleCommand(
         break;
       }
 
-      await run("UPDATE users SET delivery_hour=?, updated_at=datetime('now') WHERE id=?", hour, user!.id);
-      await send(env, chatId, timeSet(locale, hour, zone));
+      // Другий аргумент — зона: /time 9 Europe/Paris, або містом: /time 9 Київ.
+      const zoneArg = text.split(/\s+/).slice(2).join(" ").trim();
+      let nextZone = zone;
+      if (zoneArg) {
+        const picked = isKnownZone(zoneArg) ? zoneArg : timezoneFromCity(zoneArg);
+        if (!picked) { await send(env, chatId, say("zoneBad", locale)); break; }
+        nextZone = picked;
+      }
+
+      await run("UPDATE users SET delivery_hour=?, timezone=?, updated_at=datetime('now') WHERE id=?",
+        hour, nextZone, user!.id);
+      await send(env, chatId, timeSet(locale, hour, nextZone));
       break;
     }
 
+    // Мова: /lang uk, або без аргументу — кнопки.
+    case "/lang": {
+      const arg = (text.split(/\s+/)[1] ?? "").toLowerCase();
+      if (!arg) { await sendLangKeyboard(env, chatId, locale); break; }
+      if (!isLocale(arg)) { await send(env, chatId, say("langBad", locale)); break; }
+      await setLocale(env, chatId, user!.id, arg);
+      break;
+    }
+
+    // Підсумок і рядок кнопок: кожна відкриває клавіатуру одного питання.
     case "/profile": {
-      const p = await one<{ spheres: string; industries: string; seniority: string | null;
-        remote_mode: string; salary_min: number | null; salary_currency: string | null;
-        custom_role: string | null }>(
-        `SELECT spheres,industries,seniority,remote_mode,salary_min,salary_currency,custom_role
-           FROM profiles WHERE user_id=?`, user!.id);
-      const list = (raw: string | null): string[] => {
-        try { const v = JSON.parse(raw ?? "[]"); return Array.isArray(v) ? v : []; } catch { return []; }
-      };
-      await send(env, chatId, p
-        ? `${summary({
-            spheres: list(p.spheres), industries: list(p.industries), customRole: p.custom_role,
-            seniority: p.seniority, remoteMode: p.remote_mode,
-            salaryMin: p.salary_min, salaryCurrency: p.salary_currency,
-          }, locale)}\n\n${say("profileHow", locale)}`
-        : say("noProfile", locale));
+      const draft = await loadDraft(user!.id);
+      if (!draft) { await send(env, chatId, say("noProfile", locale)); break; }
+      await sendKeyboard(env, chatId,
+        `${summary(draft, locale)}\n\n${say("profileHow", locale)}`, profileMenu(locale));
       break;
     }
 

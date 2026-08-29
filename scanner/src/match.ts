@@ -6,7 +6,7 @@
  * функціональний з першого дня, а Anthropic — покращення, не залежність.
  */
 
-import { whyLine, type Locale, type WhyBit } from "./digest-copy.js";
+import { labelOf, languageName, whyLine, type Locale, type WhyBit } from "./digest-copy.js";
 
 export interface Profile {
   userId: string;
@@ -14,6 +14,8 @@ export interface Profile {
   industries: string[];
   /** Своя назва ролі, якщо жодна сфера зі словника не підійшла. */
   customRole?: string | null;
+  /** Вільні побажання людини: «тільки стартапи, без банків, 4-денний тиждень». */
+  wishes?: string | null;
   seniority: string | null;
   remoteMode: string;
   location: string | null;
@@ -87,6 +89,31 @@ export function matchesCustomRole(title: string, role: string | null | undefined
   return words.every((w) => t.includes(w));
 }
 
+/** Скільки додає одне слово з побажань і де стеля. */
+const WISH_WORD_BONUS = 2;
+const WISH_MAX_BONUS = 6;
+
+/** Слова з побажань, які варто шукати: довші за три символи, без повторів. */
+export function wishWords(wishes: string | null | undefined): string[] {
+  if (!wishes) return [];
+  const words = wishes.toLowerCase().split(/[^\p{L}\p{N}+#-]+/u).filter((w) => w.length >= 4);
+  return [...new Set(words)];
+}
+
+/**
+ * Легкий бонус за побажання: +2 за кожне окреме слово, знайдене в назві або
+ * описі, не більше +6. Це підказка, а не фільтр: «стартап» у описі тягне
+ * вакансію вгору, але відсутність слова нічого не карає — у тому ж дусі, що
+ * matchesCustomRole.
+ */
+export function wishBonus(job: Pick<CandidateJob, "title" | "summary">, wishes: string | null | undefined): number {
+  const words = wishWords(wishes);
+  if (words.length === 0) return 0;
+  const hay = `${job.title} ${job.summary ?? ""}`.toLowerCase();
+  const hits = words.filter((w) => hay.includes(w)).length;
+  return Math.min(WISH_MAX_BONUS, hits * WISH_WORD_BONUS);
+}
+
 export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): ScoredJob {
   let score = 0;
   const facts: MatchFact[] = [];
@@ -107,6 +134,8 @@ export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): Score
 
   // Штраф лише тоді, коли людина щось назвала й нічого не збіглося.
   if (!sphereHits.length && !roleHit && (p.spheres.length > 0 || p.customRole)) score -= 8;
+
+  score += wishBonus(job, p.wishes);
 
   const industryHits = p.industries.filter((i) => tags.has(i));
   score += industryHits.length * 2;
@@ -256,10 +285,11 @@ export function explainLocally(job: ScoredJob, p: Profile, locale: Locale = "en"
   return whyLine(locale, bits);
 }
 
-const EXPLAIN_SYSTEM =
+/** Системний промпт із назвою мови: «uk» модель інколи ігнорує, «Ukrainian» — ні. */
+export const explainSystem = (locale: Locale): string =>
   `Ти пишеш один рядок про те, чому вакансія підходить конкретній людині.
-Пиши ПРО ЛЮДИНУ, не переказуй вакансію. Одне-два речення, без вступів,
-мовою, вказаною в МОВА ВІДПОВІДІ (код локалі). Відповідай ЛИШЕ JSON: {"why":["...","..."]} —
+Пиши ПРО ЛЮДИНУ, не переказуй вакансію. Одне-два речення, без вступів.
+Answer in ${languageName(locale)}. Відповідай ЛИШЕ JSON: {"why":["...","..."]} —
 по одному рядку на вакансію, у тому ж порядку.`;
 
 /** Скільки токенів коштував виклик. Гроші не рахуємо тут: ставка за токен
@@ -283,10 +313,13 @@ export async function explainWithClaude(
   const local = jobs.map((j) => explainLocally(j, p, locale));
   if (!apiKey || jobs.length === 0) return local;
 
+  const names = (ids: string[]) => ids.map((id) => labelOf(id, locale)).join(", ") || "—";
   const profileText =
-    `Сфери: ${p.spheres.join(", ") || "—"}. Індустрії: ${p.industries.join(", ") || "—"}. ` +
+    `Сфери: ${names(p.spheres)}. Індустрії: ${names(p.industries)}. ` +
+    (p.customRole ? `Своя роль: ${p.customRole}. ` : "") +
     `Рівень: ${p.seniority ?? "—"}. Робота: ${p.remoteMode}. ` +
-    `Зарплата від: ${p.salaryMin ?? "—"}.`;
+    `Зарплата від: ${p.salaryMin ?? "—"}.` +
+    (p.wishes?.trim() ? ` Побажання: ${p.wishes.trim()}.` : "");
   const jobsText = jobs.map((j, i) =>
     `${i + 1}. ${j.company} — ${j.title} — ${j.location ?? "локація не вказана"} — теги: ${j.tags.join(",")}`
   ).join("\n");
@@ -296,8 +329,8 @@ export async function explainWithClaude(
       method: "POST",
       headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
       body: JSON.stringify({
-        model, max_tokens: 1024, system: EXPLAIN_SYSTEM,
-        messages: [{ role: "user", content: `МОВА ВІДПОВІДІ: ${locale}\n\nПРОФІЛЬ:\n${profileText}\n\nВАКАНСІЇ:\n${jobsText}` }],
+        model, max_tokens: 1024, system: explainSystem(locale),
+        messages: [{ role: "user", content: `МОВА ВІДПОВІДІ: ${languageName(locale)}\n\nПРОФІЛЬ:\n${profileText}\n\nВАКАНСІЇ:\n${jobsText}` }],
       }),
     });
     if (!res.ok) {

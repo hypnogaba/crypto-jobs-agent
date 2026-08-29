@@ -274,7 +274,8 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
                         <p className="tgmock-why">
                           {t(locale, "dash.why")}: <i>{t(locale, `tg.why${(i % 5) + 1}`)}</i>
                         </p>
-                        <p className="tgmock-url">{j.url}</p>
+                        {/* У справжній добірці це посилання /go/<id>: без сирої адреси. */}
+                        <p className="tgmock-url">{t(locale, "dash.apply")}</p>
                       </div>
                     )) : (
                       <>
@@ -285,13 +286,6 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
 
                     <hr className="tgmock-rule" />
                     <p className="tgmock-more">{t(locale, "tg.more")}</p>
-                    {stats && (
-                      <p className="tgmock-scanned">
-                        {t(locale, "tg.scanned")
-                          .replace("{jobs}", num(stats.jobs))
-                          .replace("{companies}", num(stats.companies))}
-                      </p>
-                    )}
                     <p className="tgmock-stamp">
                       {t(locale, "tg.stamp")}
                       <svg width="14" height="9" viewBox="0 0 16 10" fill="none" stroke="currentColor"
@@ -303,7 +297,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
 
                   {/* Це справжня inline-клавіатура під кожною добіркою */}
                   <div className="tgmock-keys">
-                    <span>{t(locale, "dash.notRelevant")}</span>
+                    <span>{t(locale, "tg.refine")}</span>
                     <span>{t(locale, "dash.more")}</span>
                   </div>
                 </div>

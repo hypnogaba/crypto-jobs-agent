@@ -3,7 +3,10 @@
 export const SPHERES = [
   { id: "engineering",   en: "Engineering",           uk: "Інженерія",              fr: "Ingénierie",          ru: "Инженерия" },
   { id: "data-ai",       en: "Data & AI",             uk: "Дані та AI",             fr: "Données et IA",       ru: "Данные и AI" },
-  { id: "product",       en: "Product & Design",      uk: "Продукт і дизайн",       fr: "Produit et design",   ru: "Продукт и дизайн" },
+  { id: "product",       en: "Product",               uk: "Продукт",                fr: "Produit",             ru: "Продукт" },
+  // Окремо від продукту: дизайнер і продакт — різні вакансії, а спільна
+  // кнопка змушувала дизайнера отримувати добірки з PM-ролями.
+  { id: "design",        en: "Design",                uk: "Дизайн",                 fr: "Design",              ru: "Дизайн" },
   { id: "devrel",        en: "DevRel & Community",    uk: "DevRel і спільнота",     fr: "DevRel et communauté",ru: "DevRel и сообщество" },
   { id: "partnerships",  en: "Partnerships & BD",     uk: "Партнерства і BD",       fr: "Partenariats et BD",  ru: "Партнёрства и BD" },
   { id: "operations",    en: "Operations & Programs", uk: "Операції та проєкти",    fr: "Opérations",          ru: "Операции и проекты" },

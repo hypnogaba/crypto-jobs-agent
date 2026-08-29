@@ -38,11 +38,71 @@ const P = {
     fr: "Ce lien a expiré. Rafraîchissez la page de connexion et réessayez.",
     ru: "Ссылка устарела. Обнови страницу подключения и попробуй ещё раз.",
   },
+  // Сканер розгрібає запити кожні дві хвилини, але має стелю на день —
+  // обіцянка мусить збігатися з тим, що він справді робить.
   moreQueued: {
-    en: "Got it. The next digest arrives within the hour.",
-    uk: "Прийняв. Наступна добірка прийде протягом години.",
-    fr: "Compris. La prochaine sélection arrive dans l'heure.",
-    ru: "Принял. Следующая подборка придёт в течение часа.",
+    en: "Searching — it arrives in a couple of minutes. At most 20 jobs a day, the rest tomorrow.",
+    uk: "Шукаю — прийде за пару хвилин. Максимум 20 вакансій на день, решта завтра.",
+    fr: "Je cherche — ça arrive dans quelques minutes. Au plus 20 offres par jour, le reste demain.",
+    ru: "Ищу — придёт через пару минут. Максимум 20 вакансий в день, остальное завтра.",
+  },
+  // Вільний текст від підключеної людини — це побажання, а не нова анкета.
+  // Раніше такий текст переписував профіль порожніми сферами.
+  wishNoted: {
+    en: "Saved as a wish: «{text}». To change the profile field by field — /profile.",
+    uk: "Записав як побажання: «{text}». Змінити профіль по пунктах — /profile.",
+    fr: "Noté comme souhait : « {text} ». Pour modifier le profil champ par champ : /profile.",
+    ru: "Записал как пожелание: «{text}». Изменить профиль по пунктам — /profile.",
+  },
+  wishSaved: {
+    en: "Saved.", uk: "Записав.", fr: "Enregistré.", ru: "Записал.",
+  },
+  fieldSaved: {
+    en: "Saved. /profile to see the whole thing.",
+    uk: "Записав. /profile — подивитись усе разом.",
+    fr: "Enregistré. /profile pour voir l'ensemble.",
+    ru: "Записал. /profile — посмотреть всё вместе.",
+  },
+  // /start у того, хто вже підключений: два чесні виходи, без мовчазного
+  // стирання того, що вже є.
+  startExisting: {
+    en: "You already have a profile. Start over from scratch, or edit it field by field?",
+    uk: "У тебе вже є профіль. Почати заново з нуля чи редагувати по пунктах?",
+    fr: "Vous avez déjà un profil. Tout recommencer, ou le modifier champ par champ ?",
+    ru: "У тебя уже есть профиль. Начать заново с нуля или редактировать по пунктам?",
+  },
+  startAgain: { en: "Start over", uk: "Почати заново", fr: "Recommencer", ru: "Начать заново" },
+  startEdit:  { en: "Edit field by field", uk: "Редагувати по пунктах", fr: "Modifier champ par champ", ru: "Редактировать по пунктам" },
+  langAsk: {
+    en: "Which language?", uk: "Яка мова?", fr: "Quelle langue ?", ru: "Какой язык?",
+  },
+  langSet: {
+    en: "Done. I will speak English from now on.",
+    uk: "Готово. Далі говоритиму українською.",
+    fr: "C'est fait. Je parlerai français désormais.",
+    ru: "Готово. Дальше буду говорить по-русски.",
+  },
+  langBad: {
+    en: "Use /lang uk, /lang en, /lang fr or /lang ru.",
+    uk: "Напиши /lang uk, /lang en, /lang fr або /lang ru.",
+    fr: "Utilisez /lang uk, /lang en, /lang fr ou /lang ru.",
+    ru: "Напиши /lang uk, /lang en, /lang fr или /lang ru.",
+  },
+  zoneBad: {
+    en: "I do not know that zone. Write it like Europe/Paris, or a city: Kyiv, Berlin, Dubai.",
+    uk: "Не знаю такої зони. Напиши як Europe/Paris або містом: Київ, Берлін, Дубай.",
+    fr: "Je ne connais pas ce fuseau. Écrivez-le comme Europe/Paris, ou une ville : Kyiv, Berlin, Dubaï.",
+    ru: "Не знаю такой зоны. Напиши как Europe/Paris или городом: Киев, Берлин, Дубай.",
+  },
+  zoneSet: {
+    en: "Done. Your zone is {zone}.", uk: "Готово. Твоя зона — {zone}.",
+    fr: "C'est fait. Votre fuseau : {zone}.", ru: "Готово. Твоя зона — {zone}.",
+  },
+  timeBadHour: {
+    en: "I could not read that as a time. Write it like 14:30.",
+    uk: "Не зрозумів це як час. Напиши як 14:30.",
+    fr: "Je n'ai pas compris l'heure. Écrivez-la comme 14:30.",
+    ru: "Не понял это как время. Напиши как 14:30.",
   },
   askWhy: {
     en: "What was wrong with them?",
@@ -115,10 +175,10 @@ const P = {
     ru: "Принял. Зарплата ниже твоего порога теперь будет наказываться сильнее.",
   },
   learnedSphere: {
-    en: "Noted. Weights will not fix this one — the spheres themselves need changing. Send /start to redo them.",
-    uk: "Прийняв. Вагами це не лікується — треба міняти самі сфери. Напиши /start, щоб перезібрати профіль.",
-    fr: "Noté. Les pondérations n'y changeront rien — il faut modifier les domaines. Envoyez /start.",
-    ru: "Принял. Весами это не лечится — нужно менять сами сферы. Напиши /start, чтобы пересобрать профиль.",
+    en: "Noted. Weights will not fix this one — the spheres themselves need changing: /profile → Fields.",
+    uk: "Прийняв. Вагами це не лікується — треба міняти самі сфери: /profile → Сфери.",
+    fr: "Noté. Les pondérations n'y changeront rien — il faut modifier les domaines : /profile → Domaines.",
+    ru: "Принял. Весами это не лечится — нужно менять сами сферы: /profile → Сферы.",
   },
   noted: {
     en: "Thanks, noted. Tomorrow's digest will be closer.",
@@ -145,16 +205,16 @@ const P = {
     ru: "Возобновил. Следующая подборка придёт утром.",
   },
   timeUsage: {
-    en: "To change it, send /time and an hour, for example /time 9.",
-    uk: "Щоб змінити — напиши /time і годину, наприклад /time 9.",
-    fr: "Pour changer, envoyez /time et une heure, par exemple /time 9.",
-    ru: "Чтобы изменить — напиши /time и час, например /time 9.",
+    en: "To change it: /time 9, or with a zone: /time 9 Europe/Paris. The zone alone: /profile → Hour.",
+    uk: "Щоб змінити: /time 9, або разом із зоною: /time 9 Europe/Paris. Лише зону — /profile → Година.",
+    fr: "Pour changer : /time 9, ou avec le fuseau : /time 9 Europe/Paris. Le fuseau seul : /profile → Heure.",
+    ru: "Чтобы изменить: /time 9, или вместе с зоной: /time 9 Europe/Paris. Только зону — /profile → Час.",
   },
   timeZoneHint: {
-    en: "The zone is a guess from your language or city, not measured. If it is wrong: /site, then Settings → Save — the site reads the zone from your browser.",
-    uk: "Зону я вгадую з мови чи міста, а не міряю. Якщо вона не та: /site, далі Налаштування → Зберегти — сайт бере зону з браузера.",
-    fr: "Le fuseau est deviné d'après votre langue ou votre ville, pas mesuré. S'il est faux : /site, puis Réglages → Enregistrer — le site lit le fuseau du navigateur.",
-    ru: "Зону я угадываю по языку или городу, а не измеряю. Если она не та: /site, затем Настройки → Сохранить — сайт берёт зону из браузера.",
+    en: "The zone comes from your city or the hour you picked, not measured. If it is wrong: /profile → Hour.",
+    uk: "Зона — з твого міста або з обраної години, а не виміряна. Якщо вона не та: /profile → Година.",
+    fr: "Le fuseau vient de votre ville ou de l'heure choisie, pas mesuré. S'il est faux : /profile → Heure.",
+    ru: "Зона — из твоего города или выбранного часа, а не измерена. Если она не та: /profile → Час.",
   },
   timeBad: {
     en: "The hour must be a number from 0 to 23. For example: /time 9",
@@ -186,10 +246,10 @@ const P = {
     ru: "Удалил аккаунт и все данные. Захочешь вернуться — просто /start.",
   },
   help: {
-    en: "/profile — your profile\n/time — delivery hour\n/pause and /resume — pause\n/site — sign in on the web\n/feedback — tell us what is wrong\n/delete — erase everything",
-    uk: "/profile — твій профіль\n/time — година доставки\n/pause і /resume — пауза\n/site — вхід на сайт\n/feedback — сказати, що не так\n/delete — видалити все",
-    fr: "/profile — votre profil\n/time — heure d'envoi\n/pause et /resume — pause\n/site — accès au site\n/feedback — dire ce qui ne va pas\n/delete — tout effacer",
-    ru: "/profile — твой профиль\n/time — час доставки\n/pause и /resume — пауза\n/site — вход на сайт\n/feedback — сказать, что не так\n/delete — удалить всё",
+    en: "/profile — your profile, edit any field\n/time — delivery hour\n/lang — language\n/pause and /resume — pause\n/site — sign in on the web\n/feedback — tell us what is wrong\n/delete — erase everything\n\nAny plain text is saved as a wish.",
+    uk: "/profile — твій профіль, правка по пунктах\n/time — година доставки\n/lang — мова\n/pause і /resume — пауза\n/site — вхід на сайт\n/feedback — сказати, що не так\n/delete — видалити все\n\nБудь-який звичайний текст записується як побажання.",
+    fr: "/profile — votre profil, champ par champ\n/time — heure d'envoi\n/lang — langue\n/pause et /resume — pause\n/site — accès au site\n/feedback — dire ce qui ne va pas\n/delete — tout effacer\n\nTout texte libre est enregistré comme souhait.",
+    ru: "/profile — твой профиль, правка по пунктам\n/time — час доставки\n/lang — язык\n/pause и /resume — пауза\n/site — вход на сайт\n/feedback — сказать, что не так\n/delete — удалить всё\n\nЛюбой обычный текст записывается как пожелание.",
   },
   feedbackAsk: {
     en: "What is wrong, or what is missing? Anything — a bug, an idea, a feature you want. One message, straight to the person who builds this.",
@@ -209,17 +269,19 @@ const P = {
     fr: "Lien de connexion à usage unique, valable 15 minutes :",
     ru: "Разовая ссылка для входа, действует 15 минут:",
   },
+  // /start у підключеного не перезапускає анкету, тож радити його тут —
+  // обман. Правка йде кнопками нижче; резюме файлом лишається.
   profileHow: {
-    en: "To change it: /start for the four questions again, or just send your CV as a file.",
-    uk: "Щоб змінити: /start — чотири питання заново, або просто надішли резюме файлом.",
-    fr: "Pour modifier : /start pour refaire les quatre questions, ou envoyez votre CV en fichier.",
-    ru: "Чтобы изменить: /start — четыре вопроса заново, или просто пришли резюме файлом.",
+    en: "Pick a field below to change it. A CV file also works — it refills the profile.",
+    uk: "Обери пункт нижче, щоб змінити. Резюме файлом теж підійде — воно перезаповнить профіль.",
+    fr: "Choisissez un champ ci-dessous pour le modifier. Un CV en fichier fonctionne aussi — il remplit le profil à nouveau.",
+    ru: "Выбери пункт ниже, чтобы изменить. Резюме файлом тоже подойдёт — оно перезаполнит профиль.",
   },
   orWrite: {
-    en: "Or just write it in one sentence — I will tick the boxes for you. A CV file works too.",
-    uk: "Або просто напиши одним реченням — я сам проставлю галочки. Резюме файлом теж підійде.",
-    fr: "Ou écrivez-le en une phrase — je cocherai pour vous. Un CV en fichier fonctionne aussi.",
-    ru: "Или просто напиши одним предложением — я сам проставлю галочки. Резюме файлом тоже подойдёт.",
+    en: "Describe yourself in one sentence (role, level, where, salary from) — or send your CV as a file. Or just tap the buttons.",
+    uk: "Опиши себе одним реченням (роль, рівень, де, від скільки) — або надішли CV файлом. Або тисни кнопки.",
+    fr: "Décrivez-vous en une phrase (poste, niveau, où, salaire minimum) — ou envoyez votre CV en fichier. Ou appuyez sur les boutons.",
+    ru: "Опиши себя одним предложением (роль, уровень, где, от скольких) — или пришли CV файлом. Или жми кнопки.",
   },
   prefilled: {
     en: "I ticked what I understood. Fix anything that is wrong.",
@@ -262,10 +324,10 @@ const P = {
   // Текст не команда від того, хто вже підключений. Раніше будь-які три
   // літери від такої людини переписували їй профіль порожніми сферами.
   freeTextHint: {
-    en: "I only take commands here. /profile shows your profile, /start redoes the four questions, or send your CV as a file. /help lists the rest.",
-    uk: "Тут я розумію лише команди. /profile — твій профіль, /start — чотири питання заново, або надішли резюме файлом. /help — решта.",
-    fr: "Ici je ne comprends que les commandes. /profile montre votre profil, /start refait les quatre questions, ou envoyez votre CV en fichier. /help pour le reste.",
-    ru: "Здесь я понимаю только команды. /profile — твой профиль, /start — четыре вопроса заново, или пришли резюме файлом. /help — остальное.",
+    en: "You have no profile yet — /start asks the questions. /help lists the rest.",
+    uk: "Профілю ще немає — /start поставить питання. /help — решта.",
+    fr: "Pas encore de profil — /start pose les questions. /help pour le reste.",
+    ru: "Профиля ещё нет — /start задаст вопросы. /help — остальное.",
   },
   // Коротке слово посеред питань: кнопки чекають, а слово ні до чого не веде.
   useButtons: {
@@ -293,6 +355,10 @@ const P = {
 export type CopyKey = keyof typeof P;
 
 export const t = (key: CopyKey, locale: Locale): string => P[key][locale] ?? P[key].en;
+
+/** Те саме з підстановкою `{name}` — для реплік, у яких є текст людини чи зона. */
+export const tf = (key: CopyKey, locale: Locale, vars: Record<string, string>): string =>
+  Object.entries(vars).reduce((acc, [k, v]) => acc.split(`{${k}}`).join(v), t(key, locale));
 
 /** Поточна година доставки — окремо, бо всередині число й пояс. */
 export const timeNow = (locale: Locale, hour: number, zone: string): string => {
@@ -328,6 +394,7 @@ export const COMMANDS: Array<{ command: string; label: Phrase }> = [
   { command: "start",    label: { en: "Start over", uk: "Почати спочатку", fr: "Recommencer", ru: "Начать заново" } },
   { command: "profile",  label: { en: "Your profile", uk: "Твій профіль", fr: "Votre profil", ru: "Твой профиль" } },
   { command: "time",     label: { en: "Delivery hour", uk: "Година доставки", fr: "Heure d'envoi", ru: "Час доставки" } },
+  { command: "lang",     label: { en: "Language", uk: "Мова", fr: "Langue", ru: "Язык" } },
   { command: "pause",    label: { en: "Pause digests", uk: "Призупинити добірки", fr: "Mettre en pause", ru: "Приостановить" } },
   { command: "resume",   label: { en: "Resume digests", uk: "Відновити добірки", fr: "Reprendre", ru: "Возобновить" } },
   { command: "site",     label: { en: "Sign in on the web", uk: "Вхід на сайт", fr: "Accès au site", ru: "Вход на сайт" } },

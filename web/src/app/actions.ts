@@ -77,7 +77,11 @@ export async function saveProfile(formData: FormData): Promise<void> {
     location: String(formData.get("location") ?? "").trim() || null,
     salaryMin: Number.parseInt(String(formData.get("salaryMin") ?? ""), 10) || null,
     salaryCurrency: String(formData.get("salaryCurrency") ?? "").trim() || null,
+    wishes: String(formData.get("wishes") ?? "").trim().slice(0, 2000) || null,
   };
+  // Звідки прийшла форма: /profile повертає на себе, перший прохід — далі
+  // до Telegram. Значення з форми обмежене двома варіантами, не адресою.
+  const back = String(formData.get("back") ?? "") === "profile" ? "/profile?saved=1" : "/telegram";
 
   if (!user) {
     // Ще немає акаунта — створюємо мовчки, без пошти й пароля.
@@ -105,13 +109,14 @@ export async function saveProfile(formData: FormData): Promise<void> {
   // Текст резюме, з якого їх колись розібрано, має пережити це редагування.
   await persistProfile(user.id, draft?.text ?? null, profile);
   (await cookies()).delete(DRAFT_COOKIE);
-  redirect("/telegram");
+  redirect(back);
 }
 
 async function persistProfile(
   userId: string, rawInput: string | null,
   p: { spheres: string[]; industries: string[]; seniority: string | null; remoteMode: string;
-       location: string | null; salaryMin: number | null; salaryCurrency: string | null }
+       location: string | null; salaryMin: number | null; salaryCurrency: string | null;
+       wishes: string | null }
 ): Promise<void> {
   // Без нового тексту (null) три текстові стовпці лишаються як були: раніше
   // редагування без чернетки ставило cv_text=NULL, raw_input='' і
@@ -122,19 +127,20 @@ async function persistProfile(
     ? "mode=profiles.mode, raw_input=profiles.raw_input, cv_text=profiles.cv_text"
     : "mode=excluded.mode, raw_input=excluded.raw_input, cv_text=excluded.cv_text";
   await run(
-    `INSERT INTO profiles (user_id,mode,raw_input,cv_text,spheres,industries,seniority,remote_mode,location,salary_min,salary_currency,updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+    `INSERT INTO profiles (user_id,mode,raw_input,cv_text,spheres,industries,seniority,remote_mode,location,salary_min,salary_currency,wishes,updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
      ON CONFLICT(user_id) DO UPDATE SET
        ${textCols},
        spheres=excluded.spheres, industries=excluded.industries, seniority=excluded.seniority,
        remote_mode=excluded.remote_mode, location=excluded.location,
        salary_min=excluded.salary_min, salary_currency=excluded.salary_currency,
+       wishes=excluded.wishes,
        updated_at=datetime('now')`,
     userId, isCv ? "cv" : "freetext",
     isCv || keepText ? null : rawInput,   // файл резюме не зберігаємо, лише розібраний текст
     isCv ? rawInput!.slice(0, 20_000) : null,
     JSON.stringify(p.spheres), JSON.stringify(p.industries),
-    p.seniority, p.remoteMode, p.location, p.salaryMin, p.salaryCurrency);
+    p.seniority, p.remoteMode, p.location, p.salaryMin, p.salaryCurrency, p.wishes);
   await persistCountry(userId, p.location);
 
   // Перша добірка поза розкладом. Умова NOT EXISTS принципова: без неї

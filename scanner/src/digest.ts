@@ -3,15 +3,26 @@
  * Запускається щогодини — обслуговує тих, у кого настала обрана година,
  * і надолужує тих, кого попередній прогін того ж дня пропустив.
  *
- *   node dist/digest.js [--force] [--user <id>]
+ *   node dist/digest.js [--force] [--user <id>] [--requests-only]
+ *
+ * --requests-only — швидкий шлях для кнопки «Ще п'ять»: лише відкриті
+ * delivery_requests, без прив'язки до години й дня тижня. Таймер ганяє його
+ * кожні дві хвилини, тому перший запит — один дешевий SELECT, і без запитів
+ * процес одразу виходить.
  */
 import { loadConfig } from "./config.js";
 import { D1Client } from "./d1.js";
 import { explainWithClaude, pickTop, type CandidateJob, type Profile } from "./match.js";
-import { asLocale, intlOf, say, scanned as scannedLine, thin, type Locale } from "./digest-copy.js";
+import { asLocale, intlOf, say, thin, type Locale } from "./digest-copy.js";
 import { summarize } from "./summary.js";
 
 const DIGEST_SIZE = 5;
+
+/** Стеля вакансій на одну людину за її локальну добу: планова + «ще п'ять». */
+export const DAILY_CAP = 20;
+
+/** Куди веде «Податися»: маршрут сайту без входу, який лишає слід і редіректить. */
+const APPLY_BASE = "https://nextrole.info/go/";
 
 interface UserRow {
   id: string; telegram_chat_id: string | null; locale: string;
@@ -20,6 +31,7 @@ interface UserRow {
   remote_mode: string; location: string | null; salary_min: number | null;
   country: string | null;
   custom_role: string | null;
+  wishes: string | null;
   seniority_weight: number | null;
   location_weight: number | null;
   salary_weight: number | null;
@@ -37,6 +49,23 @@ export function hourIn(timezone: string, now: Date): number {
   } catch {
     return now.getUTCHours();
   }
+}
+
+/**
+ * Чи робочий день зараз у поясі людини.
+ *
+ * Планова добірка йде лише пн–пт: у суботу вранці ніхто не хоче вакансій, а
+ * дошки за вихідні майже не оновлюються. День тижня беремо в її поясі — у
+ * Сіднеї субота настає, коли в Парижі ще п'ятниця.
+ */
+export function isWeekdayIn(timezone: string, now: Date): boolean {
+  let day: string;
+  try {
+    day = new Intl.DateTimeFormat("en-US", { timeZone: timezone, weekday: "short" }).format(now);
+  } catch {
+    day = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "short" }).format(now);
+  }
+  return day !== "Sat" && day !== "Sun";
 }
 
 /** Сьогоднішня дата в поясі людини, YYYY-MM-DD. */
@@ -73,6 +102,49 @@ export function isDue(
   const h = hourIn(u.timezone, now);
   if (h === u.delivery_hour) return true;
   return h > u.delivery_hour && !alreadyToday;
+}
+
+/**
+ * Рядки sent зі статусом sent, доставлені локального сьогодні.
+ *
+ * Це і лічильник денної стелі, і основа правила «одна планова на день».
+ * sent_at пишеться ISO-рядком із Z (див. UPDATE нижче), created_at — форматом
+ * D1 без Z; parseDbTime розуміє обидва.
+ */
+export function sentToday(
+  timezone: string, now: Date, rows: Array<{ sent_at: string | null; status: string }>
+): Array<{ sent_at: string }> {
+  const today = localDate(timezone, now);
+  return rows
+    .filter((r): r is { sent_at: string; status: string } => r.status === "sent" && !!r.sent_at)
+    .filter((r) => localDate(timezone, parseDbTime(r.sent_at)) === today);
+}
+
+/** Скільки ще вакансій можна надіслати сьогодні. Не менше нуля. */
+export function remainingToday(deliveredToday: number, cap = DAILY_CAP): number {
+  return Math.max(0, cap - deliveredToday);
+}
+
+/**
+ * Чи планова добірка сьогодні вже була.
+ *
+ * Правило «одна планова на день»: окремої колонки в sent немає, тому
+ * виводимо з наявних даних. Доставка на запит «Ще п'ять» закриває
+ * delivery_requests тим самим викликом, що ставить sent_at, — тож рядок
+ * sent, біля якого (± дві хвилини) є handled_at запиту, вважаємо запитом.
+ * Будь-який інший сьогоднішній рядок зі статусом sent — планова добірка
+ * (або дотиснута відкладена, що для людини те саме), і другої не буде.
+ */
+export function scheduledServedToday(
+  timezone: string, now: Date,
+  rows: Array<{ sent_at: string | null; status: string }>,
+  requestHandledAts: string[],
+): boolean {
+  const handled = requestHandledAts.map((t) => parseDbTime(t).getTime());
+  return sentToday(timezone, now, rows).some((r) => {
+    const t = parseDbTime(r.sent_at).getTime();
+    return !handled.some((h) => Math.abs(h - t) <= 120_000);
+  });
 }
 
 /** Через скільки діб відкладену добірку перестаємо дотискати. */
@@ -173,6 +245,13 @@ export async function fillMissingSummaries(
 export const TELEGRAM_MAX = 4096;
 
 /**
+ * Наша власна стеля, з запасом під HTML-теги й кнопки. Довше — спершу
+ * прибираємо описи, потім хвіст. Так добірка ніколи не застрягне як
+ * «невідправна» через один довгий опис із Workable.
+ */
+export const DIGEST_MAX = 3900;
+
+/**
  * Скільки символів опису вміщається на одну вакансію.
  *
  * П'ять карток, кожна із заголовком, фактами й посиланням (≈250 символів
@@ -195,18 +274,37 @@ export function fitTelegram(text: string): string {
   return text.length <= TELEGRAM_MAX ? text : text.slice(0, TELEGRAM_MAX - 1) + "…";
 }
 
+/**
+ * Екранування для parse_mode=HTML. Telegram знає лише &lt; &gt; &amp; (і
+ * &quot; в атрибутах); будь-який неекранований «<» у назві вакансії — це
+ * 400 «can't parse entities» на всю добірку.
+ */
+export function escapeHtml(s: string | null | undefined): string {
+  return (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+/** Прибрати теги: запасний варіант, коли Telegram не прийняв HTML. */
+export function stripHtml(s: string): string {
+  return s.replace(/<[^>]+>/g, "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&amp;/g, "&");
+}
+
+export type DigestJob = CandidateJob & {
+  why: string; summary?: string | null;
+  /** id рядка sent — саме він стоїть у посиланні «Податися». */
+  sentId: string;
+};
+
 export function formatDigest(
-  jobs: Array<CandidateJob & { why: string; summary?: string | null }>,
-  scanned: { jobs: number; companies: number },
-  locale: Locale
+  jobs: DigestJob[], locale: Locale, opts: { summaries?: boolean } = {}
 ): string {
-  const lines = [say(locale, "greeting"), ""];
+  const withSummaries = opts.summaries ?? true;
+  const lines = [escapeHtml(say(locale, "greeting")), ""];
   jobs.forEach((j, i) => {
     if (i > 0) { lines.push("─────────────"); lines.push(""); }
 
     // Компанія окремим рядком: очі шукають саме її, а не назву посади.
-    lines.push(`${i + 1}. ${j.company}`);
-    lines.push(j.title);
+    lines.push(`${i + 1}. <b>${escapeHtml(j.company)}</b>`);
+    lines.push(escapeHtml(j.title));
 
     // Другий рядок збираємо лише з того, що справді відоме. «Вилку не вказано»
     // п'ять разів поспіль — це не інформація, а шум: у першій справжній
@@ -217,29 +315,47 @@ export function formatDigest(
       j.salaryMin
         ? `${say(locale, "from")} ${j.salaryMin.toLocaleString(intlOf(locale))} ${j.salaryCurrency ?? ""}`.trim()
         : null,
-    ].filter(Boolean);
-    if (facts.length) lines.push(facts.join(" · "));
+    ].filter(Boolean) as string[];
+    if (facts.length) lines.push(escapeHtml(facts.join(" · ")));
 
     lines.push("");
     // Опис самої вакансії. Рядок «чому ти» був однаковий на всі п'ять
     // позицій, бо будувався з профілю, а профіль один. Старі добірки
     // опису не мають — для них лишається попередній рядок.
-    const summary = clampSummary(j.summary);
-    if (summary) lines.push(summary);
-    else lines.push(`${say(locale, "why")}: ${j.why}`);
+    const summary = withSummaries ? clampSummary(j.summary) : null;
+    if (summary) lines.push(escapeHtml(summary));
+    else lines.push(`${escapeHtml(say(locale, "why"))}: ${escapeHtml(j.why)}`);
     lines.push("");
-    // Голе посилання окремим рядком: частина клієнтів Telegram ріже markdown-лінки
-    lines.push(j.url);
+    // Посилання веде через сайт: один клік і відкриває роботодавця, і лишає
+    // слід «подався» у кабінеті. Тому в href — id рядка sent, а не URL.
+    lines.push(`<a href="${APPLY_BASE}${encodeURIComponent(j.sentId)}">${escapeHtml(say(locale, "apply"))}</a>`);
     lines.push("");
   });
-  lines.push("─────────────");
-  lines.push("");
   if (jobs.length < DIGEST_SIZE) {
-    lines.push(thin(locale, jobs.length, DIGEST_SIZE));
+    lines.push("─────────────");
     lines.push("");
+    lines.push(escapeHtml(thin(locale, jobs.length, DIGEST_SIZE)));
   }
-  lines.push(scannedLine(locale, scanned.jobs, scanned.companies));
-  return lines.join("\n");
+  return lines.join("\n").replace(/\n+$/, "");
+}
+
+/**
+ * Добірка, що гарантовано влазить у DIGEST_MAX.
+ *
+ * Порядок поступок: спершу описи (їх нема в старих добірках, і без них
+ * картка все ще повна), потім останні картки по одній. Рвати текст посеред
+ * HTML-тегу не можна — Telegram відповість 400, і добірка застрягне.
+ */
+export function fitDigest(jobs: DigestJob[], locale: Locale, max = DIGEST_MAX): string {
+  const full = formatDigest(jobs, locale);
+  if (full.length <= max) return full;
+  let rest = jobs;
+  while (rest.length > 0) {
+    const text = formatDigest(rest, locale, { summaries: false });
+    if (text.length <= max) return text;
+    rest = rest.slice(0, -1);
+  }
+  return fitTelegram(formatDigest([], locale, { summaries: false })).slice(0, max);
 }
 
 /**
@@ -261,6 +377,7 @@ export async function sendTelegram(
       signal: AbortSignal.timeout(30_000),
       body: JSON.stringify({
         chat_id: chatId, text: fitTelegram(text), disable_web_page_preview: true,
+        parse_mode: "HTML",
         reply_markup: { inline_keyboard: [[
           { text: say(locale, "notRelevant"), callback_data: `fb:${digestId}:not_relevant` },
           { text: say(locale, "more"), callback_data: `fb:${digestId}:more` },
@@ -270,6 +387,23 @@ export async function sendTelegram(
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       console.log(`  telegram ${chatId.slice(0, 6)}…: HTTP ${res.status} ${body.slice(0, 200)}`);
+      // HTML не пройшов — шлемо той самий текст без тегів. Гірша картка
+      // краща за добірку, що застрягла назавжди.
+      if (res.status === 400 && /parse entities/i.test(body)) {
+        const plain = await fetchImpl(`https://api.telegram.org/bot${token}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: AbortSignal.timeout(30_000),
+          body: JSON.stringify({
+            chat_id: chatId, text: fitTelegram(stripHtml(text)), disable_web_page_preview: true,
+            reply_markup: { inline_keyboard: [[
+              { text: say(locale, "notRelevant"), callback_data: `fb:${digestId}:not_relevant` },
+              { text: say(locale, "more"), callback_data: `fb:${digestId}:more` },
+            ]] },
+          }),
+        });
+        return plain.ok;
+      }
     }
     return res.ok;
   } catch (e) {
@@ -295,11 +429,12 @@ export function describeError(e: unknown): string {
  * `u.id = '/usr/local/bin/node'` і не знаходив нікого. Добірки не доходили
  * взагалі, і жодної помилки при цьому не було.
  */
-export function parseArgs(argv: string[]): { force: boolean; onlyUser: string | null } {
+export function parseArgs(argv: string[]): { force: boolean; onlyUser: string | null; requestsOnly: boolean } {
   const i = argv.indexOf("--user");
   return {
     force: argv.includes("--force"),
     onlyUser: i === -1 ? null : argv[i + 1] ?? null,
+    requestsOnly: argv.includes("--requests-only"),
   };
 }
 
@@ -309,18 +444,47 @@ interface RunContext {
   now: Date;
   botToken: string | null;
   force: boolean;
-  scanned: { jobs: number; companies: number };
   requested: Set<string>;
   delivered: number;
 }
 
+/** Закрити всі відкриті запити «ще» цієї людини. */
+async function closeRequests(d1: D1Client, userId: string): Promise<void> {
+  await d1.execute(
+    "UPDATE delivery_requests SET handled_at=datetime('now') WHERE user_id=? AND handled_at IS NULL",
+    [userId]);
+}
+
 async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
-  const { d1, cfg, now, botToken, force, scanned } = ctx;
+  const { d1, cfg, now, botToken, force } = ctx;
   const onRequest = ctx.requested.has(u.id);
+  const locale = asLocale(u.locale);
+
+  // Що вже було за останні дві доби: і для розкладу, і для денної стелі.
+  const recent = await d1.query<{ created_at: string; sent_at: string | null; status: string }>(
+    "SELECT created_at, sent_at, status FROM sent WHERE user_id=? AND created_at >= datetime('now','-2 day')", [u.id]);
+  const deliveredToday = sentToday(u.timezone, now, recent).length;
+
   if (!force && !onRequest) {
-    const recent = await d1.query<{ created_at: string }>(
-      "SELECT created_at FROM sent WHERE user_id=? AND created_at >= datetime('now','-2 day')", [u.id]);
+    // Планова добірка: лише в робочий день, лише раз на день, лише в час.
+    if (!isWeekdayIn(u.timezone, now)) return;
+    const handled = await d1.query<{ handled_at: string }>(
+      "SELECT handled_at FROM delivery_requests WHERE user_id=? AND handled_at >= datetime('now','-2 day')", [u.id]);
+    if (scheduledServedToday(u.timezone, now, recent, handled.map((r) => r.handled_at))) return;
     if (!isDue(u, now, hadDigestToday(u.timezone, now, recent.map((r) => r.created_at)))) return;
+  }
+
+  // Денна стеля стосується лише «ще п'ять»: планова ранкова добірка — одна
+  // й перша, тому їй ліміт не заважає. Запит понад стелю отримує коротке
+  // повідомлення замість вакансій і закривається, щоб не висіти.
+  const allowance = onRequest ? remainingToday(deliveredToday) : DIGEST_SIZE;
+  if (onRequest && allowance === 0) {
+    await closeRequests(d1, u.id);
+    if (botToken && u.telegram_chat_id) {
+      await sendTelegram(botToken, u.telegram_chat_id, escapeHtml(say(locale, "capReached")), "cap", locale);
+    }
+    console.log(`  ${u.id.slice(0, 8)}: стеля ${DAILY_CAP} на сьогодні вичерпана, запит закрито`);
+    return;
   }
 
   // ── автопауза після 14 днів повної тиші ──
@@ -334,7 +498,7 @@ async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
     }
     if (silentDays > 14 && silentDays <= 15 && botToken && u.telegram_chat_id) {
       await sendTelegram(botToken, u.telegram_chat_id,
-        say(asLocale(u.locale), "checkin"), "checkin", asLocale(u.locale));
+        escapeHtml(say(locale, "checkin")), "checkin", locale);
     }
   }
 
@@ -354,31 +518,41 @@ async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
     console.log(`  ${u.id.slice(0, 8)}: відкладена добірка ${pending[0]!.digest_id.slice(0, 8)} не доставлена за ${PENDING_MAX_DAYS} дні, позначено failed`);
   } else if (pending.length > 0 && botToken && u.telegram_chat_id) {
     const digestId = pending[0]!.digest_id;
-    const rows2 = await d1.query<{ company: string; title: string; location: string | null; remote: number;
+    const rows2 = await d1.query<{ sent_id: string; company: string; title: string; location: string | null; remote: number;
       url: string; why_fits: string; salary_min: number | null; salary_currency: string | null;
       summary: string | null }>(
-      `SELECT j.company,j.title,j.location,j.remote,j.url,s.why_fits,j.salary_min,j.salary_currency,j.summary
+      `SELECT s.id AS sent_id,j.company,j.title,j.location,j.remote,j.url,s.why_fits,j.salary_min,j.salary_currency,j.summary
        FROM sent s JOIN jobs_cache j ON j.id=s.job_id
        WHERE s.user_id=? AND s.digest_id=?`, [u.id, digestId]);
-    const retry = rows2.map((r) => ({
-      id: "", companyKey: "", tags: [], postedAt: null,
+    const retry: DigestJob[] = rows2.map((r) => ({
+      id: "", companyKey: "", tags: [], postedAt: null, sentId: r.sent_id,
       company: r.company, title: r.title, location: r.location, remote: r.remote === 1,
       url: r.url, salaryMin: r.salary_min, salaryCurrency: r.salary_currency,
       why: r.why_fits, summary: r.summary }));
-    const loc = asLocale(u.locale);
     const ok = await sendTelegram(
-      botToken, u.telegram_chat_id, formatDigest(retry, scanned, loc), digestId, loc);
+      botToken, u.telegram_chat_id, fitDigest(retry, locale), digestId, locale);
     if (ok) {
       await d1.execute("UPDATE sent SET status='sent', sent_at=? WHERE digest_id=?", [now.toISOString(), digestId]);
       ctx.delivered++;
       console.log(`  ${u.id.slice(0, 8)}: доставлено відкладену добірку ${digestId.slice(0, 8)}`);
     }
+    // Відкладена добірка і є відповіддю на «ще»: інакше запит лишався б
+    // відкритим і на наступному прогоні породив би другу добірку.
+    if (onRequest) await closeRequests(d1, u.id);
+    return;
+  } else if (pending.length > 0) {
+    // Немає куди дотискати (без Telegram або без токена), а добірка вже
+    // лежить у кабінеті. Нову щогодини не підбираємо — інакше кабінет
+    // заповнювався б відкладеними добірками, доки не скінчаться вакансії.
+    if (onRequest) await closeRequests(d1, u.id);
+    console.log(`  ${u.id.slice(0, 8)}: відкладена добірка вже лежить у кабінеті, нової не підбираю`);
     return;
   }
 
   const profile: Profile = {
     userId: u.id, spheres: list(u.spheres), industries: list(u.industries),
     customRole: u.custom_role,
+    wishes: u.wishes,
     // Вивчене зі скарг. Немає рядка — усі ваги одиничні, поведінка як була.
     tuning: {
       seniority: u.seniority_weight ?? 1,
@@ -443,16 +617,15 @@ async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
     source: r.source, country: r.country,
   }));
 
-  const top = pickTop(candidates, profile, DIGEST_SIZE, now);
+  // На запит — не більше, ніж лишилось до денної стелі.
+  const top = pickTop(candidates, profile, Math.min(DIGEST_SIZE, allowance), now);
   if (top.length === 0) {
     // Запит закриваємо навіть без результату — інакше він висітиме вічно
     if (onRequest) {
-      await d1.execute(
-        "UPDATE delivery_requests SET handled_at=datetime('now') WHERE user_id=? AND handled_at IS NULL",
-        [u.id]);
+      await closeRequests(d1, u.id);
       if (botToken && u.telegram_chat_id) {
         await sendTelegram(botToken, u.telegram_chat_id,
-          say(asLocale(u.locale), "nothingNew"), "none", asLocale(u.locale));
+          escapeHtml(say(locale, "nothingNew")), "none", locale);
       }
     }
     console.log(`  ${u.id.slice(0, 8)}: нічого не підійшло`);
@@ -467,7 +640,7 @@ async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
          VALUES (?,'anthropic','match_reason',?,?,?,0,?)`,
         [crypto.randomUUID(), u.model, u.inputTokens, u.outputTokens, u.ok ? 1 : 0]);
     } catch { /* журнал не важливіший за доставку */ }
-  }, asLocale(u.locale));
+  }, locale);
   const digestId = crypto.randomUUID();
 
   const summaries = await fillMissingSummaries(
@@ -483,7 +656,12 @@ async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
     })));
   }
 
-  const withWhy = top.map((j, i) => ({ ...j, why: why[i]!, summary: summaries.get(j.id) ?? j.summary ?? null }));
+  // id рядка sent народжується тут, до форматування: він стоїть у посиланні
+  // «Податися», тож має бути відомий раніше, ніж текст піде в Telegram.
+  const withWhy = top.map((j, i) => ({
+    ...j, why: why[i]!, summary: summaries.get(j.id) ?? j.summary ?? null,
+    sentId: crypto.randomUUID(),
+  }));
 
   // Спершу pending, і лише після 200 OK від Telegram — sent. Раніше рядки
   // писались одразу як sent, і якщо процес падав між записом і відправкою,
@@ -492,12 +670,11 @@ async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
     sql: `INSERT INTO sent (id,user_id,job_id,digest_id,why_fits,match_facts,status,sent_at,dedupe_key)
           VALUES (?,?,?,?,?,?,'pending',NULL,?)
           ON CONFLICT(user_id,job_id) DO NOTHING`,
-    params: [crypto.randomUUID(), u.id, j.id, digestId, j.why, JSON.stringify(j.facts),
+    params: [j.sentId, u.id, j.id, digestId, j.why, JSON.stringify(j.facts),
              dedupeById.get(j.id) ?? null],
   })));
 
-  const locale = asLocale(u.locale);
-  const text = formatDigest(withWhy, scanned, locale);
+  const text = fitDigest(withWhy, locale);
   if (botToken && u.telegram_chat_id) {
     const ok = await sendTelegram(botToken, u.telegram_chat_id, text, digestId, locale);
     if (!ok) {
@@ -506,21 +683,13 @@ async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
     }
     await d1.execute("UPDATE sent SET status='sent', sent_at=? WHERE digest_id=?", [now.toISOString(), digestId]);
     ctx.delivered++;
-    if (onRequest) {
-      await d1.execute(
-        "UPDATE delivery_requests SET handled_at=datetime('now') WHERE user_id=? AND handled_at IS NULL",
-        [u.id]);
-    }
+    if (onRequest) await closeRequests(d1, u.id);
     console.log(`  ${u.id.slice(0, 8)}: надіслано ${withWhy.length}${onRequest ? " (на запит)" : ""}`);
   } else {
     // Немає куди слати — добірка вже в кабінеті як pending. Запит «ще» треба
     // закрити й тут: інакше він лишався відкритим і щогодини породжував нову
     // добірку для людини без Telegram — доти, доки не закінчились вакансії.
-    if (onRequest) {
-      await d1.execute(
-        "UPDATE delivery_requests SET handled_at=datetime('now') WHERE user_id=? AND handled_at IS NULL",
-        [u.id]);
-    }
+    if (onRequest) await closeRequests(d1, u.id);
     console.log(`  ${u.id.slice(0, 8)}: підібрано ${withWhy.length}, ${
       u.telegram_chat_id ? "доставка чекає на токен бота" : "лежить у кабінеті"}${onRequest ? " (на запит)" : ""}`);
     if (process.env.PRINT_DIGEST) console.log("\n" + text + "\n");
@@ -529,31 +698,37 @@ async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
 
 async function main(): Promise<void> {
   const cfg = loadConfig();
-  const { force, onlyUser } = parseArgs(process.argv.slice(2));
+  const { force, onlyUser, requestsOnly } = parseArgs(process.argv.slice(2));
   const now = new Date();
   const botToken = process.env.TELEGRAM_BOT_TOKEN ?? null;
 
   const d1 = new D1Client({ accountId: cfg.cfAccountId, databaseId: cfg.cfDatabaseId, token: cfg.cfApiToken });
 
-  const users = await d1.query<UserRow>(
-    `SELECT u.*, p.spheres,p.industries,p.seniority,p.remote_mode,p.location,p.salary_min,p.custom_role,p.country,
-            t.seniority_weight,t.location_weight,t.salary_weight
-     FROM users u JOIN profiles p ON p.user_id = u.id
-     LEFT JOIN user_tuning t ON t.user_id = u.id
-     WHERE u.status = 'active'` + (onlyUser ? " AND u.id = ?" : ""),
-    onlyUser ? [onlyUser] : []);
-
-  const scanned = (await d1.query<{ jobs: number; companies: number }>(
-    "SELECT COUNT(*) AS jobs, COUNT(DISTINCT company_key) AS companies FROM jobs_cache"))[0]
-    ?? { jobs: 0, companies: 0 };
-
-  // Хто натиснув «Ще п'ять»: їм добірка йде поза розкладом
+  // Хто натиснув «Ще п'ять»: їм добірка йде поза розкладом — будь-якого дня
+  // і будь-якої години. Це перший і найдешевший запит: у режимі
+  // --requests-only без відкритих запитів далі нічого не робимо.
   const requested = new Set((await d1.query<{ user_id: string }>(
     "SELECT DISTINCT user_id FROM delivery_requests WHERE handled_at IS NULL"
   )).map((r) => r.user_id));
   if (requested.size > 0) console.log(`Запитів «ще»: ${requested.size}`);
+  if (requestsOnly && requested.size === 0) return;
 
-  const ctx: RunContext = { d1, cfg, now, botToken, force, scanned, requested, delivered: 0 };
+  const where = ["u.status = 'active'"];
+  const params: unknown[] = [];
+  if (onlyUser) { where.push("u.id = ?"); params.push(onlyUser); }
+  if (requestsOnly) {
+    where.push(`u.id IN (${[...requested].map(() => "?").join(",")})`);
+    params.push(...requested);
+  }
+  const users = await d1.query<UserRow>(
+    `SELECT u.*, p.spheres,p.industries,p.seniority,p.remote_mode,p.location,p.salary_min,p.custom_role,p.country,
+            p.wishes,
+            t.seniority_weight,t.location_weight,t.salary_weight
+     FROM users u JOIN profiles p ON p.user_id = u.id
+     LEFT JOIN user_tuning t ON t.user_id = u.id
+     WHERE ${where.join(" AND ")}`, params);
+
+  const ctx: RunContext = { d1, cfg, now, botToken, force, requested, delivered: 0 };
   for (const u of users) {
     // Одна людина не має права зупинити решту: збій — у журнал і далі.
     try {

@@ -22,7 +22,10 @@ export interface ParsedProfile {
 const SPHERE_HINTS: Record<SphereId, RegExp> = {
   engineering:  /\b(engineer|developer|programmer|backend|frontend|full[- ]?stack|devops|sre|infrastructure|architect|інженер|розробник|программист|développeur)\b/i,
   "data-ai":    /\b(data|machine learning|ml|ai|analytics|scientist|дані|данные|аналітик|аналитик)\b/i,
-  product:      /\b(product|design|ux|ui|продукт|дизайн)\b/i,
+  product:      /\b(product|продукт)\b/i,
+  // Межа слова через \p{L}, а не \b: \b не бачить кирилиці, тож
+  // /\bдизайн\b/ не збігся б ніколи. Стеми (графічн-) беруть будь-який хвіст.
+  design:       /(?<!\p{L})(?:design(?:er)?|ux|ui|figma|дизайн\p{L}*|графічн\p{L}*|графическ\p{L}*)(?!\p{L})/iu,
   devrel:       /\b(devrel|developer relations|advocate|community|спільнот|сообщест)\b/i,
   partnerships: /\b(partnership|business development|\bbd\b|ecosystem|alliances|партнерств|партнёрств)\b/i,
   operations:   /\b(operations|program|project manager|chief of staff|операці|операци)\b/i,

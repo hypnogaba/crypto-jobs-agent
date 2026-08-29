@@ -3,9 +3,10 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { one, run } from "@/lib/db";
 import { handleCommand, startBotOnboarding, continueBotOnboarding,
          handleOnboardingButton, handleOnboardingText, handleWhyButton, handleDocument,
-         handleDeleteButton } from "@/lib/bot";
+         handleDeleteButton, handleEditButton, handleLangButton, handleStartButton } from "@/lib/bot";
+import { freeTextAction } from "@/lib/bot-onboarding";
 import { isLocale } from "@/lib/i18n";
-import { t as botCopy } from "@/lib/bot-copy";
+import { t as botCopy, tf as botCopyF } from "@/lib/bot-copy";
 import { sendText } from "@/lib/telegram-send";
 
 /**
@@ -66,8 +67,8 @@ async function handle(env: Env, raw: unknown): Promise<void> {
   //
   // Тепер збережена мова перемагає завжди. Telegram лишається першим здогадом
   // лише для того, у кого акаунта ще немає.
-  const known = await one<{ locale: string }>(
-    "SELECT locale FROM users WHERE telegram_chat_id=?", String(chatId));
+  const known = await one<{ id: string; locale: string }>(
+    "SELECT id,locale FROM users WHERE telegram_chat_id=?", String(chatId));
   const langCode = (update.message?.from?.language_code
     ?? update.callback_query?.from?.language_code ?? "en").slice(0, 2).toLowerCase();
   const locale = known && isLocale(known.locale)
@@ -131,9 +132,11 @@ async function handle(env: Env, raw: unknown): Promise<void> {
   }
 
   if (callback) {
-    if (await handleDeleteButton(env, chatId, callback, update.callback_query?.id, locale)) {
-      return;
-    }
+    const cbId = update.callback_query?.id;
+    if (await handleDeleteButton(env, chatId, callback, cbId, locale)) return;
+    if (await handleStartButton(env, chatId, callback, cbId, locale)) return;
+    if (await handleEditButton(env, chatId, callback, cbId, locale)) return;
+    if (await handleLangButton(env, chatId, callback, cbId)) return;
     // Кнопки онбордингу йдуть першими: реакції на добірку мають префікс fb:
     if (await handleOnboardingButton(env, chatId, callback, update.callback_query?.id, locale)) {
       return;
@@ -141,7 +144,7 @@ async function handle(env: Env, raw: unknown): Promise<void> {
     if (await handleWhyButton(env, chatId, callback, update.callback_query?.id, locale)) {
       return;
     }
-    await continueBotOnboarding(env, chatId, callback, locale);
+    await continueBotOnboarding(env, chatId, callback, locale, update.callback_query?.id);
     return;
   }
 
@@ -167,19 +170,38 @@ async function handle(env: Env, raw: unknown): Promise<void> {
   // Раніше тут жила «реєстрація одним реченням»: будь-які три літери від
   // будь-кого ставали профілем. Для того, хто вже підключений, це означало
   // профіль, переписаний порожніми сферами, — і відповідь українською всім.
-  // Тепер акаунт із вільного тексту не створюється ніде: новачка веде та
-  // сама кнопкова анкета, що й /start, а написане стає її підказкою.
+  // Тепер: у кого профіль є — текст стає ПОБАЖАННЯМ і дописується до
+  // profiles.wishes, решта профілю не торкається. Новачка веде та сама
+  // кнопкова анкета, що й /start, а написане стає її підказкою.
   if (text.length >= 3) {
     const inFlow = await one<{ chat_id: string }>("SELECT chat_id FROM bot_state WHERE chat_id=?", String(chatId));
-    if (inFlow) {
-      // Коротке слово посеред питань: анкету не перезапускаємо, бо це
-      // стерло б уже обране.
-      await send(env, chatId, botCopy("useButtons", locale));
-    } else if (known) {
-      await send(env, chatId, botCopy("freeTextHint", locale));
-    } else {
-      await startBotOnboarding(env, chatId, locale);
-      if (text.length >= 8) await handleOnboardingText(env, chatId, text, locale);
+    const hasProfile = known
+      ? await one<{ user_id: string }>("SELECT user_id FROM profiles WHERE user_id=?", known.id) : null;
+
+    switch (freeTextAction(Boolean(known), Boolean(hasProfile), Boolean(inFlow))) {
+      case "useButtons":
+        // Коротке слово посеред питань: анкету не перезапускаємо, бо це
+        // стерло б уже обране.
+        await send(env, chatId, botCopy("useButtons", locale));
+        return;
+      case "wish": {
+        const wish = text.slice(0, 1000);
+        // Дописуємо, а не замінюємо: людина може надіслати кілька побажань
+        // у різні дні, і кожне має пережити наступне.
+        await run(
+          `UPDATE profiles SET wishes=TRIM(COALESCE(wishes,'') || char(10) || ?, char(10) || ' '), updated_at=datetime('now')
+            WHERE user_id=?`, wish, known!.id);
+        await run("UPDATE users SET last_interaction_at=datetime('now') WHERE id=?", known!.id);
+        await send(env, chatId, botCopyF("wishNoted", locale, { text: wish.slice(0, 200) }));
+        return;
+      }
+      case "hint":
+        await send(env, chatId, botCopy("freeTextHint", locale));
+        return;
+      case "register":
+        await startBotOnboarding(env, chatId, locale);
+        if (text.length >= 8) await handleOnboardingText(env, chatId, text, locale);
+        return;
     }
   }
 }

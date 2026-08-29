@@ -9,6 +9,9 @@ import type { RawJob } from "./types.js";
 const SPHERE_RULES: Array<[string, RegExp]> = [
   ["engineering",  /\b(engineers?|developers?|programmers?|swe|backend|frontend|full[- ]?stack|mobile|ios|android|platform|infrastructure|devops|sre|architects?)\b/i],
   ["data-ai",      /\b(data scientists?|data engineers?|machine learning|ml engineers?|ai engineers?|analytics engineers?|research scientists?|mlops|nlp)\b/i],
+  // Дизайн — окрема сфера: «product» лишається як був, але дизайнер тепер
+  // отримує і власний тег, під який людина може підписатися.
+  ["design",       /\b(designers?|ux|ui|product design|graphic|figma|brand design|motion)\b/i],
   ["product",      /\b(product managers?|product owners?|product leads?|product design|ux|ui designers?|designers?)\b/i],
   ["devrel",       /\b(developers? relations|devrel|developers? advocates?|community managers?|community leads?|evangelists?)\b/i],
   ["partnerships", /\b(partnerships?|business development|bd managers?|alliances|ecosystems?)\b/i],
