@@ -66,8 +66,13 @@ function OwnWords({ name, locale, placeholder, value }: {
  * як зрозуміти, що пішло не так. Тепер під кожною групою стоять її ж слова
  * поруч із тим, у що ми їх перетворили, — помилку видно одразу.
  */
-function Reasons({ items }: { items: Array<{ name: string; quote: string }> }) {
-  if (items.length === 0) return null;
+function Reasons({ items, guessed, guessLabel }: {
+  items: Array<{ name: string; quote: string }>;
+  /** Поставлено без цитати — здогад із загального змісту, а не з рядка тексту. */
+  guessed?: string[];
+  guessLabel?: string;
+}) {
+  if (items.length === 0 && !guessed?.length) return null;
   return (
     <ul className="mt-3 space-y-1">
       {items.map((i) => (
@@ -75,6 +80,16 @@ function Reasons({ items }: { items: Array<{ name: string; quote: string }> }) {
           «{i.quote}» → {i.name}
         </li>
       ))}
+      {/* Галочка без цитати — не мовчазна. Модель інколи ставить сферу з
+          загального змісту, а її «цитата» не збігається з текстом дослівно й
+          відсіюється (verifyEvidence). Раніше така галочка стояла зовсім без
+          пояснення — тобто рівно те, на що людина й скаржилась. Вигадувати
+          цитату не можна, а от чесно назвати це здогадом — можна. */}
+      {guessed?.length ? (
+        <li className="mono text-xs leading-relaxed" style={{ color: "var(--faint)" }}>
+          {guessLabel}: {guessed.join(", ")}
+        </li>
+      ) : null}
     </ul>
   );
 }
@@ -101,6 +116,9 @@ export default function ProfileForm({ locale, pre, back, error, quote, evidence 
   };
   const kept = (items: Array<{ name: string; quote: string } | null>) =>
     items.filter((i): i is { name: string; quote: string } => i !== null);
+  /** Назви того, що поставлено, але чим саме — сказати нема чим. */
+  const guesses = (items: Array<{ key: string; name: string }>) =>
+    quote ? items.filter((i) => !evidence?.[i.key]).map((i) => i.name) : [];
 
   // Порожній розбір — це теж відповідь, і краще сказати про це прямо, ніж
   // показати порожню форму так, ніби ми щось зрозуміли.
@@ -159,10 +177,16 @@ export default function ProfileForm({ locale, pre, back, error, quote, evidence 
             <OwnWords name="customIndustry" locale={locale} value={pre.customIndustry}
               placeholder={t(locale, "onboarding.industryPlaceholder")} />
           </div>
-          <Reasons items={kept([
-            ...SPHERES.filter((x) => spheres.has(x.id)).map((x) => why(`sphere:${x.id}`, label(x, locale))),
-            ...INDUSTRIES.filter((x) => industries.has(x.id)).map((x) => why(`industry:${x.id}`, label(x, locale))),
-          ])} />
+          <Reasons
+            items={kept([
+              ...SPHERES.filter((x) => spheres.has(x.id)).map((x) => why(`sphere:${x.id}`, label(x, locale))),
+              ...INDUSTRIES.filter((x) => industries.has(x.id)).map((x) => why(`industry:${x.id}`, label(x, locale))),
+            ])}
+            guessed={guesses([
+              ...SPHERES.filter((x) => spheres.has(x.id)).map((x) => ({ key: `sphere:${x.id}`, name: label(x, locale) })),
+              ...INDUSTRIES.filter((x) => industries.has(x.id)).map((x) => ({ key: `industry:${x.id}`, name: label(x, locale) })),
+            ])}
+            guessLabel={t(locale, "onboarding.guessed")} />
         </Question>
 
         <Question n={2} title={t(locale, "onboarding.seniority")}>
