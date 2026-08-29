@@ -7,6 +7,7 @@ import { handleCommand, startBotOnboarding, continueBotOnboarding,
 import { isLocale } from "@/lib/i18n";
 import { t as botCopy } from "@/lib/bot-copy";
 import { persistCountry } from "@/lib/profile-country";
+import { sendText } from "@/lib/telegram-send";
 
 /**
  * Вебхук Telegram.
@@ -166,11 +167,5 @@ export async function POST(request: Request): Promise<Response> {
 }
 
 async function send(env: Record<string, string | undefined>, chatId: number, text: string): Promise<void> {
-  const token = env.TELEGRAM_BOT_TOKEN;
-  if (!token) return;
-  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true }),
-  });
+  await sendText(env.TELEGRAM_BOT_TOKEN, chatId, text);
 }

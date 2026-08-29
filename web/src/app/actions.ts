@@ -12,6 +12,7 @@ import { safeTimezone } from "@/lib/digest-time";
 import { checkRate, recordFailure } from "@/lib/ratelimit";
 import type { Locale } from "@/lib/vocab";
 import { persistCountry } from "@/lib/profile-country";
+import { sendText } from "@/lib/telegram-send";
 
 const DRAFT_COOKIE = "nr_draft";
 
@@ -276,13 +277,8 @@ export async function sendFeedback(formData: FormData): Promise<void> {
       (page ? `\nСторінка: ${page}` : "") +
       (contact ? `\nЗв'язок: ${contact}` : "") +
       `\n\n${message.slice(0, 3000)}`;
-    try {
-      await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat_id: ADMIN_CHAT_ID, text, disable_web_page_preview: true }),
-      });
-    } catch { /* база вже має запис — мовчки далі */ }
+    // База вже має запис: невдача лише потрапляє в лог, не до людини.
+    await sendText(TELEGRAM_BOT_TOKEN, ADMIN_CHAT_ID, text);
   }
 
   redirect("/feedback?sent=1");

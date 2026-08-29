@@ -10,18 +10,14 @@ import { parseProfile } from "./parse";
 import { t as say, timeNow, timeSet } from "./bot-copy";
 import type { Locale } from "./vocab";
 import { persistCountry } from "@/lib/profile-country";
+import { callTelegram, sendText } from "./telegram-send";
 
 /** Команди бота. Кабінет у чаті — мінімальний, повний лишається на сайті. */
 
 type Env = Record<string, string | undefined>;
 
 async function send(env: Env, chatId: number, text: string): Promise<void> {
-  const token = env.TELEGRAM_BOT_TOKEN;
-  if (!token) return;
-  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true }),
-  });
+  await sendText(env.TELEGRAM_BOT_TOKEN, chatId, text);
 }
 
 // ── Покроковий онбординг ──────────────────────────────────────
@@ -33,13 +29,8 @@ interface Keyed { text: string; callback_data: string }
 async function sendKeyboard(
   env: Env, chatId: number, text: string, rows: Keyed[][]
 ): Promise<number | null> {
-  const token = env.TELEGRAM_BOT_TOKEN;
-  if (!token) return null;
-  const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text, reply_markup: { inline_keyboard: rows } }),
-  });
-  const body = (await res.json()) as { result?: { message_id?: number } };
+  const body = await callTelegram<{ message_id?: number }>(env.TELEGRAM_BOT_TOKEN, "sendMessage",
+    { chat_id: chatId, text, reply_markup: { inline_keyboard: rows } });
   return body.result?.message_id ?? null;
 }
 
@@ -47,23 +38,13 @@ async function sendKeyboard(
 async function editKeyboard(
   env: Env, chatId: number, messageId: number, text: string, rows: Keyed[][]
 ): Promise<void> {
-  const token = env.TELEGRAM_BOT_TOKEN;
-  if (!token) return;
-  await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, message_id: messageId, text,
-                           reply_markup: { inline_keyboard: rows } }),
-  });
+  await callTelegram(env.TELEGRAM_BOT_TOKEN, "editMessageText",
+    { chat_id: chatId, message_id: messageId, text, reply_markup: { inline_keyboard: rows } });
 }
 
 /** Без цього кнопка крутиться, доки Telegram не здасться. */
 async function ackButton(env: Env, callbackId: string): Promise<void> {
-  const token = env.TELEGRAM_BOT_TOKEN;
-  if (!token) return;
-  await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ callback_query_id: callbackId }),
-  });
+  await callTelegram(env.TELEGRAM_BOT_TOKEN, "answerCallbackQuery", { callback_query_id: callbackId });
 }
 
 interface StateRow { step: string; draft: string; message_id: number | null }
