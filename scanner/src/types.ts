@@ -52,6 +52,8 @@ export interface SourceResult {
   error?: string;
   /** Джерело недоступне (блок, пейволл, 404). Це НЕ те саме, що «нічого не знайшли». */
   broken?: boolean;
+  /** 429: живе, але просить прийти пізніше. Не рахується днем падіння. */
+  rateLimited?: boolean;
 }
 
 export type AtsProvider =

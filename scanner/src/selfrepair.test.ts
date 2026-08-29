@@ -68,3 +68,31 @@ describe("джерело, яке не працювало ніколи", () => {
     expect(out.deprecated).toEqual([]);
   });
 });
+
+describe("429 — це не день падіння", () => {
+  it("джерело з rateLimited не записується в здоров'я і не вмирає", async () => {
+    // Живе джерело, яке ми просто зачастили. Раніше два таких дні поспіль
+    // ховали його назавжди.
+    const p = repo();
+    const out = await applySourceOutcomes(
+      [r({ ok: false, rateLimited: true, error: "429 після 3 спроб" })], p,
+      [{ source: "aggregator:x", status: "degraded", consecutiveFailDays: 2, everOk: true }]);
+    expect(p.recordSourceOutcome).not.toHaveBeenCalled();
+    expect(p.deprecateSource).not.toHaveBeenCalled();
+    expect(out.deprecated).toEqual([]);
+  });
+});
+
+import { skipCompanies } from "./selfrepair.js";
+
+describe("skipCompanies", () => {
+  it("мертві ATS-дошки на R1 не йдуть, компанії без ATS лишаються", () => {
+    const skip = new Set(["greenhouse:dead"]);
+    const cs = [
+      { slug: "dead", atsProvider: "greenhouse" as const, atsSlug: "dead" },
+      { slug: "alive", atsProvider: "lever" as const, atsSlug: "alive" },
+      { slug: "unknown", atsProvider: null, atsSlug: null },
+    ];
+    expect(skipCompanies(cs, skip).map((c) => c.slug)).toEqual(["alive", "unknown"]);
+  });
+});
