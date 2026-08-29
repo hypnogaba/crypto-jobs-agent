@@ -7,6 +7,7 @@ import { createConnectToken, detectLocale } from "../actions";
 import { currentUser } from "@/lib/auth";
 import { one, run } from "@/lib/db";
 import { t } from "@/lib/i18n";
+import { formatWhen, nextDelivery } from "@/lib/digest-time";
 
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -20,8 +21,12 @@ export default async function Telegram() {
   if (!user) redirect("/login");
 
   if (user.telegramChatId) {
+    const me = await one<{ timezone: string; delivery_hour: number }>(
+      "SELECT timezone,delivery_hour FROM users WHERE id=?", user.id);
+    const tz = me?.timezone ?? "UTC";
+    const when = formatWhen(nextDelivery(tz, me?.delivery_hour ?? 9, new Date()), tz, locale);
     return (
-      <Shell locale={locale} title={t(locale, "telegram.done")} lede={t(locale, "telegram.doneLede")}>
+      <Shell locale={locale} title={t(locale, "telegram.done")} lede={t(locale, "telegram.doneLede").replace("{when}", when)}>
         <Link href="/dashboard" className="btn">{t(locale, "dash.title")}</Link>
       </Shell>
     );

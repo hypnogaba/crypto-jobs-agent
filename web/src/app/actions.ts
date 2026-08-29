@@ -194,15 +194,17 @@ async function persistProfile(
     p.seniority, p.remoteMode, p.location, p.salaryMin, p.salaryCurrency, p.wishes);
   await persistCountry(userId, p.location);
 
-  // Перша добірка поза розкладом. Умова NOT EXISTS принципова: без неї
-  // кожне редагування профілю замовляло б позачергову доставку. Таблиця
-  // й погодинний розгрібач уже існують (scanner/src/digest.ts).
-  // Країну ставимо ДО запиту: інакше перша ж добірка підбиралася б без неї.
+}
+
+/** «Прислати 5 зараз» після анкети: один відкритий запит на людину. */
+export async function requestFirstFive(): Promise<void> {
+  const user = await requireUser();
   await run(
     `INSERT INTO delivery_requests (id,user_id)
-     SELECT ?,? WHERE NOT EXISTS (SELECT 1 FROM sent WHERE user_id=?)
-                  AND NOT EXISTS (SELECT 1 FROM delivery_requests WHERE user_id=?)`,
-    uuid(), userId, userId, userId);
+     SELECT ?,? WHERE NOT EXISTS (SELECT 1 FROM delivery_requests WHERE user_id=? AND handled_at IS NULL)`,
+    uuid(), user.id, user.id);
+  await run("UPDATE users SET last_interaction_at=datetime('now') WHERE id=?", user.id);
+  redirect("/dashboard?queued=1");
 }
 
 // ── акаунт ───────────────────────────────────────────────────

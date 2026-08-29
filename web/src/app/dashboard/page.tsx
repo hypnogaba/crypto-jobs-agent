@@ -2,12 +2,13 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import Shell from "../shell";
 import ApplyButton from "./apply-button";
-import { detectLocale, hideMatch, listMatches, recordFeedback, undoApplied, unhideMatch } from "../actions";
+import { detectLocale, hideMatch, listMatches, recordFeedback, requestFirstFive, undoApplied, unhideMatch } from "../actions";
 import { currentUser } from "@/lib/auth";
 import { one } from "@/lib/db";
 import { t } from "@/lib/i18n";
 import { factLabels, parseFacts } from "@/lib/facts";
-import { dayLabel } from "@/lib/digest-time";
+import { dayLabel, formatWhen, nextDelivery } from "@/lib/digest-time";
+import { zoneName } from "@/lib/tz";
 import type { Locale } from "@/lib/vocab";
 
 type Match = Awaited<ReturnType<typeof listMatches>>[number];
@@ -54,16 +55,8 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       {queued && <p className="tag tag-ok mb-6 inline-block">{t(locale, "dash.queued")}</p>}
 
       {matches.length === 0 ? (
-        firstOnTheWay ? (
-          <FirstRun locale={locale} hour={me?.delivery_hour ?? 9} connected={Boolean(user.telegramChatId)} />
-        ) : (
-          <div className="card px-8 py-14 text-center">
-            <p className="display text-2xl" style={{ color: "var(--ink-2)" }}>{t(locale, "dash.empty")}</p>
-            {!user.telegramChatId && (
-              <a href="/telegram" className="btn mt-7">{t(locale, "telegram.button")}</a>
-            )}
-          </div>
-        )
+        <FirstRun locale={locale} hour={me?.delivery_hour ?? 9} tz={me?.timezone ?? "UTC"}
+                  connected={Boolean(user.telegramChatId)} queued={firstOnTheWay} />
       ) : (
         <div className="flex flex-col gap-12">
           {[...digests.entries()].map(([digestId, group]) => {
@@ -178,11 +171,13 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
 }
 
 /** Що відбувається після онбордингу. Раніше тут був глухий кут. */
-function FirstRun({ locale, hour, connected }: { locale: Locale; hour: number; connected: boolean }) {
+function FirstRun({ locale, hour, tz, connected, queued }:
+  { locale: Locale; hour: number; tz: string; connected: boolean; queued: boolean }) {
+  const when = formatWhen(nextDelivery(tz, hour, new Date()), tz, locale);
   const rows = [
     { mark: "✓", text: t(locale, "first.profile"), done: true },
-    { mark: "●", text: t(locale, "first.soon"), done: false },
-    { mark: "○", text: t(locale, "first.daily").replace("{h}", `${String(hour).padStart(2, "0")}:00`), done: false },
+    { mark: "○", text: t(locale, "first.soon").replace("{h}", `${String(hour).padStart(2, "0")}:00`).replace("{tz}", zoneName(tz, locale)), done: false },
+    { mark: "●", text: t(locale, "first.next").replace("{when}", when), done: false },
   ];
   return (
     <div className="card px-8 py-12">
@@ -195,9 +190,15 @@ function FirstRun({ locale, hour, connected }: { locale: Locale; hour: number; c
         ))}
       </ul>
       <div className="mt-9 flex flex-wrap items-center gap-4">
+        {!queued && (
+          <form action={requestFirstFive}><button className="btn" type="submit">{t(locale, "first.now")}</button></form>
+        )}
         {!connected && <a href="/telegram" className="btn">{t(locale, "telegram.button")}</a>}
         <a href="/profile" className="link text-sm">{t(locale, "first.edit")}</a>
       </div>
+      <p className="mt-4 text-xs" style={{ color: "var(--muted)" }}>
+        {queued ? t(locale, "dash.queued") : t(locale, "first.testNote")}
+      </p>
     </div>
   );
 }
