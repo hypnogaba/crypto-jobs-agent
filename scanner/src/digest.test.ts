@@ -189,9 +189,9 @@ describe("hadDigestToday", () => {
     expect(parseDbTime("2026-08-29 06:00:00").toISOString()).toBe("2026-08-29T06:00:00.000Z");
   });
   it("дата рахується в поясі людини, а не в UTC", () => {
-    // 2026-08-28 23:30Z — це вже 29-те в Києві, але ще 28-ме в Лондоні
+    // 2026-08-28 23:30Z — це вже 29-те в Києві, але ще 28-ме за UTC
     expect(hadDigestToday("Europe/Kyiv", now, ["2026-08-28 23:30:00"])).toBe(true);
-    expect(hadDigestToday("Europe/London", now, ["2026-08-28 23:30:00"])).toBe(false);
+    expect(hadDigestToday("UTC", now, ["2026-08-28 23:30:00"])).toBe(false);
     expect(hadDigestToday("Europe/Kyiv", now, [])).toBe(false);
   });
   it("localDate переживає невідомий пояс", () => {
