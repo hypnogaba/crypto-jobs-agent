@@ -1,12 +1,10 @@
 import { NextResponse } from "next/server";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { one, run, uuid } from "@/lib/db";
-import { parseProfile } from "@/lib/parse";
+import { one, run } from "@/lib/db";
 import { handleCommand, startBotOnboarding, continueBotOnboarding,
          handleOnboardingButton, handleOnboardingText, handleWhyButton, handleDocument } from "@/lib/bot";
 import { isLocale } from "@/lib/i18n";
 import { t as botCopy } from "@/lib/bot-copy";
-import { persistCountry } from "@/lib/profile-country";
 import { sendText } from "@/lib/telegram-send";
 
 /**
@@ -17,8 +15,10 @@ import { sendText } from "@/lib/telegram-send";
  * перехопити чужий connect_token і привласнити акаунт до того, як людина
  * завершить онбординг.
  */
+type Env = Record<string, string | undefined>;
+
 export async function POST(request: Request): Promise<Response> {
-  const env = getCloudflareContext().env as unknown as Record<string, string | undefined>;
+  const env = getCloudflareContext().env as unknown as Env;
   const expected = env.TELEGRAM_WEBHOOK_SECRET;
 
   // Закриваємось за замовчуванням: поки секрет не заданий, вебхук не приймає
@@ -29,7 +29,20 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ ok: false }, { status: 401 });
   }
 
-  const update = (await request.json()) as {
+  // Telegram повторює оновлення, на яке не отримав 200, доки не отримає.
+  // Один виняток усередині (наприклад, UNIQUE на telegram_chat_id) означав
+  // би 500 і той самий апдейт по колу — назавжди. Тому будь-яка помилка
+  // лишається в лозі, а Telegram чує «прийнято».
+  try {
+    await handle(env, await request.json());
+  } catch (e) {
+    console.error(`telegram webhook failed: ${e instanceof Error ? e.stack ?? e.message : String(e)}`);
+  }
+  return NextResponse.json({ ok: true });
+}
+
+async function handle(env: Env, raw: unknown): Promise<void> {
+  const update = raw as {
     message?: { text?: string; chat?: { id?: number };
                 document?: { file_id?: string; file_name?: string; file_size?: number };
                 from?: { language_code?: string } };
@@ -38,7 +51,7 @@ export async function POST(request: Request): Promise<Response> {
   };
 
   const chatId = update.message?.chat?.id ?? update.callback_query?.message?.chat?.id;
-  if (!chatId) return NextResponse.json({ ok: true });
+  if (!chatId) return;
 
   const text = update.message?.text?.trim() ?? "";
   const callback = update.callback_query?.data;
@@ -67,7 +80,7 @@ export async function POST(request: Request): Promise<Response> {
   // дотику по Start досить. Без цього людині доводилось знати команду /site.
   if (startToken === "site") {
     await handleCommand(env, chatId, "/site", locale);
-    return NextResponse.json({ ok: true });
+    return;
   }
 
   if (startToken) {
@@ -75,39 +88,57 @@ export async function POST(request: Request): Promise<Response> {
       "SELECT id,connect_expires_at FROM users WHERE connect_token=?", startToken);
 
     const fresh = user?.connect_expires_at && new Date(user.connect_expires_at).getTime() > Date.now();
-    if (user && fresh) {
-      await run(
-        `UPDATE users SET telegram_chat_id=?, connect_token=NULL, connect_expires_at=NULL,
-           last_interaction_at=datetime('now') WHERE id=?`,
-        String(chatId), user.id);
-      await send(env, chatId, botCopy("linked", locale));
-    } else {
+    if (!user || !fresh) {
       await send(env, chatId, botCopy("linkExpired", locale));
+      return;
     }
-    return NextResponse.json({ ok: true });
+
+    // Цей chat_id може вже належати іншому акаунту — тому, що людина колись
+    // пройшла /start у боті, а тепер зареєструвалась на сайті. UNIQUE не дав
+    // би прив'язати. Правило: акаунт із сайту головний (у нього свіжий
+    // профіль); ботовий, який ще нічого не отримував, просто зникає. А якщо
+    // він уже має історію добірок — нічого не стираємо, людина сама обирає.
+    const other = await one<{ id: string }>(
+      "SELECT id FROM users WHERE telegram_chat_id=? AND id<>?", String(chatId), user.id);
+    if (other) {
+      const hasHistory = await one<{ n: number }>("SELECT 1 n FROM sent WHERE user_id=? LIMIT 1", other.id);
+      if (hasHistory) {
+        await send(env, chatId, botCopy("alreadyLinked", locale));
+        return;
+      }
+      await run("DELETE FROM users WHERE id=?", other.id);       // каскад стирає профіль і запити
+      await run("DELETE FROM bot_state WHERE chat_id=?", String(chatId));
+    }
+
+    await run(
+      `UPDATE users SET telegram_chat_id=?, connect_token=NULL, connect_expires_at=NULL,
+         last_interaction_at=datetime('now') WHERE id=?`,
+      String(chatId), user.id);
+    await send(env, chatId, botCopy("linked", locale));
+    return;
   }
 
   // ── /start без токена: повна реєстрація прямо в чаті ──
   if (/^\/start\b/.test(text)) {
     await startBotOnboarding(env, chatId, locale);
-    return NextResponse.json({ ok: true });
+    return;
   }
 
   if (text.startsWith("/")) {
     await handleCommand(env, chatId, text, locale);
-    return NextResponse.json({ ok: true });
+    return;
   }
 
   if (callback) {
     // Кнопки онбордингу йдуть першими: реакції на добірку мають префікс fb:
     if (await handleOnboardingButton(env, chatId, callback, update.callback_query?.id, locale)) {
-      return NextResponse.json({ ok: true });
+      return;
     }
     if (await handleWhyButton(env, chatId, callback, update.callback_query?.id, locale)) {
-      return NextResponse.json({ ok: true });
+      return;
     }
     await continueBotOnboarding(env, chatId, callback, locale);
-    return NextResponse.json({ ok: true });
+    return;
   }
 
   // Резюме файлом. До вільного тексту, бо документ приходить без тексту.
@@ -116,54 +147,37 @@ export async function POST(request: Request): Promise<Response> {
     // Три мегабайти — стеля: більше майже напевно скан, який ми не прочитаємо.
     if ((doc.file_size ?? 0) > 3_000_000) {
       await handleCommand(env, chatId, "/help", locale);
-      return NextResponse.json({ ok: true });
+      return;
     }
     await handleDocument(env, chatId, doc.file_id, doc.file_name ?? "cv.pdf", locale);
-    return NextResponse.json({ ok: true });
+    return;
   }
 
   // Єдине місце, де в онбордингу лишився вільний текст, — «інша сума»
   if (text.length >= 1 && await handleOnboardingText(env, chatId, text, locale)) {
-    return NextResponse.json({ ok: true });
+    return;
   }
 
-  // Вільний текст від людини, що реєструється в боті
+  // Вільний текст поза командами.
+  //
+  // Раніше тут жила «реєстрація одним реченням»: будь-які три літери від
+  // будь-кого ставали профілем. Для того, хто вже підключений, це означало
+  // профіль, переписаний порожніми сферами, — і відповідь українською всім.
+  // Тепер акаунт із вільного тексту не створюється ніде: новачка веде та
+  // сама кнопкова анкета, що й /start, а написане стає її підказкою.
   if (text.length >= 3) {
-    const existing = await one<{ id: string }>("SELECT id FROM users WHERE telegram_chat_id=?", String(chatId));
-    const parsed = await parseProfile(text, env.ANTHROPIC_API_KEY ?? null);
-    const userId = existing?.id ?? uuid();
-
-    if (!existing) {
-      await run(
-        `INSERT INTO users (id,telegram_chat_id,locale,timezone,delivery_hour,last_interaction_at)
-         VALUES (?,?,?,?,9,datetime('now'))`,
-        userId, String(chatId), locale, "UTC");
+    const inFlow = await one<{ chat_id: string }>("SELECT chat_id FROM bot_state WHERE chat_id=?", String(chatId));
+    if (inFlow) {
+      // Коротке слово посеред питань: анкету не перезапускаємо, бо це
+      // стерло б уже обране.
+      await send(env, chatId, botCopy("useButtons", locale));
+    } else if (known) {
+      await send(env, chatId, botCopy("freeTextHint", locale));
+    } else {
+      await startBotOnboarding(env, chatId, locale);
+      if (text.length >= 8) await handleOnboardingText(env, chatId, text, locale);
     }
-
-    await run(
-      `INSERT INTO profiles (user_id,mode,raw_input,spheres,industries,seniority,remote_mode,location,salary_min,salary_currency,updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,datetime('now'))
-       ON CONFLICT(user_id) DO UPDATE SET
-         raw_input=excluded.raw_input, spheres=excluded.spheres, industries=excluded.industries,
-         seniority=excluded.seniority, remote_mode=excluded.remote_mode, location=excluded.location,
-         salary_min=excluded.salary_min, salary_currency=excluded.salary_currency, updated_at=datetime('now')`,
-      userId, text.length > 800 ? "cv" : "freetext", text.slice(0, 20_000),
-      JSON.stringify(parsed.spheres), JSON.stringify(parsed.industries),
-      parsed.seniority, parsed.remoteMode, parsed.location, parsed.salaryMin, parsed.salaryCurrency);
-
-    await persistCountry(userId, parsed.location);
-
-    await send(env, chatId,
-      `Зрозумів так:\n\n` +
-      `Сфери: ${parsed.spheres.join(", ") || "не визначено"}\n` +
-      `Рівень: ${parsed.seniority ?? "не визначено"}\n` +
-      `Робота: ${parsed.remoteMode}\n` +
-      `Зарплата від: ${parsed.salaryMin ? `${parsed.salaryMin} ${parsed.salaryCurrency ?? ""}` : "не вказано"}\n\n` +
-      `Якщо все вірно — нічого не роби, перша добірка прийде завтра вранці. ` +
-      `Якщо ні — просто напиши уточнення ще раз.`);
   }
-
-  return NextResponse.json({ ok: true });
 }
 
 async function send(env: Record<string, string | undefined>, chatId: number, text: string): Promise<void> {

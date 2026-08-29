@@ -239,6 +239,29 @@ const P = {
     fr: "Un problème est survenu. Réessayez, ou écrivez simplement une phrase.",
     ru: "Что-то пошло не так при чтении. Попробуй ещё раз или просто напиши предложение.",
   },
+  // Текст не команда від того, хто вже підключений. Раніше будь-які три
+  // літери від такої людини переписували їй профіль порожніми сферами.
+  freeTextHint: {
+    en: "I only take commands here. /profile shows your profile, /start redoes the four questions, or send your CV as a file. /help lists the rest.",
+    uk: "Тут я розумію лише команди. /profile — твій профіль, /start — чотири питання заново, або надішли резюме файлом. /help — решта.",
+    fr: "Ici je ne comprends que les commandes. /profile montre votre profil, /start refait les quatre questions, ou envoyez votre CV en fichier. /help pour le reste.",
+    ru: "Здесь я понимаю только команды. /profile — твой профиль, /start — четыре вопроса заново, или пришли резюме файлом. /help — остальное.",
+  },
+  // Коротке слово посеред питань: кнопки чекають, а слово ні до чого не веде.
+  useButtons: {
+    en: "Use the buttons above, or write a full sentence about the work you want and I will tick the boxes.",
+    uk: "Скористайся кнопками вище або напиши цілим реченням, яку роботу шукаєш, — я проставлю галочки.",
+    fr: "Utilisez les boutons ci-dessus, ou écrivez une phrase complète sur le travail voulu et je cocherai pour vous.",
+    ru: "Воспользуйся кнопками выше или напиши целым предложением, какую работу ищешь, — я проставлю галочки.",
+  },
+  // Цей Telegram уже тримає акаунт із історією добірок: мовчки перекинути
+  // його на інший — втратити її. Людина сама обирає, куди заходити.
+  alreadyLinked: {
+    en: "This Telegram is already connected to an account that has received digests. Send /site to sign in to that one on the web.",
+    uk: "Цей Telegram уже прив'язаний до акаунта, який отримував добірки. Напиши /site, щоб увійти в нього на сайті.",
+    fr: "Ce Telegram est déjà relié à un compte qui a reçu des sélections. Envoyez /site pour y accéder sur le site.",
+    ru: "Этот Telegram уже привязан к аккаунту, который получал подборки. Напиши /site, чтобы войти в него на сайте.",
+  },
   unknown: {
     en: "I do not know that command. /help shows what I can do.",
     uk: "Не знаю такої команди. /help покаже, що я вмію.",
