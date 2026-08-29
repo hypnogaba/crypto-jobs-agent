@@ -150,7 +150,18 @@ export const twitterCard = (title: string, description: string) => ({
   images: [OG_IMAGE],
 });
 
-/** Назва сайту мовою людини. Використовується як title.default у root layout. */
+/**
+ * Назва сайту мовою людини. Використовується як title.default у root layout
+ * і як назва картки на головній.
+ *
+ * Головна не оголошує власний `title`: шаблон "%s — NextRole" із кореня
+ * приклеївся б удруге. Але og-картці назва потрібна, тож сторінка бере її
+ * звідси явно. Раніше вона передавала порожній рядок, і виходило так: Next
+ * мовчки вважав порожнє за «не задано» й підставляв назву з кореня, а от
+ * og:image:alt лишався порожнім і зникав із розмітки. Працювало випадково.
+ */
+export const siteTitleFor = (locale: Locale): string => SITE_TITLE[locale] ?? SITE_TITLE.en;
+
 const SITE_TITLE: Record<Locale, string> = {
   en: "NextRole — five jobs every morning",
   uk: "NextRole — п'ять вакансій щоранку",

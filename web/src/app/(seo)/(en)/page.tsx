@@ -1,13 +1,16 @@
 import type { Metadata } from "next";
 import HomeBody from "../_pages/home";
-import { pageMeta } from "@/lib/seo";
+import { pageMeta, siteTitleFor } from "@/lib/seo";
 
 /**
- * Назви сторінці не даємо: title.default із root layout — це вже назва
- * головної, і другий рядок з тим самим текстом розійшовся б із першим.
+ * Назву сторінці не віддаємо, а картці — віддаємо.
+ *
+ * `title` викидаємо, бо шаблон "%s — NextRole" із кореня приклеївся б удруге.
+ * Але в og і twitter назва мусить бути справжня: доки сюди йшов порожній
+ * рядок, og:image:alt лишався порожнім і зникав із розмітки.
  */
 export const generateMetadata = async (): Promise<Metadata> => {
-  const { title: _title, ...rest } = pageMeta("en", "/", "");
+  const { title: _title, ...rest } = pageMeta("en", "/", siteTitleFor("en"));
   return rest;
 };
 

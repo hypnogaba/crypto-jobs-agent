@@ -19,7 +19,7 @@ npx wrangler secret put TELEGRAM_WEBHOOK_SECRET   # вигадати довги�
 
 ```bash
 curl "https://api.telegram.org/bot<ТОКЕН>/setWebhook" \
-  -d "url=https://nextrole.hypnogaba.workers.dev/api/telegram/webhook" \
+  -d "url=https://nextrole.info/api/telegram/webhook" \
   -d "secret_token=<ТОЙ САМИЙ СЕКРЕТ>"
 ```
 
@@ -110,7 +110,7 @@ cd web && npx wrangler secret put ADMIN_CHAT_ID   # твій chat_id у Telegram
 
 | Частина | Стан |
 |---|---|
-| Сайт | https://nextrole.info (workers.dev лишається робочим) |
+| Сайт | https://nextrole.info (workers.dev вимкнено — він ішов повз WAF зони) |
 | База | 10 таблиць у D1, наповнена |
 | Скан | щодня 05:00, таймер увімкнено |
 | Watchdog | щодня 08:00, таймер увімкнено |

@@ -11,6 +11,46 @@ export const RELEASES: Release[] = [
     "date": "2026-08-29",
     "changes": [
       {
+        "hash": "66ef932",
+        "subject": "og-картка повернулась на всі сторінки"
+      },
+      {
+        "hash": "23b56b2",
+        "subject": "Після ревізії: цитати, звірка підстав, прибиральник, leftover у боті"
+      },
+      {
+        "hash": "72d3442",
+        "subject": "Merge branch 'main' into seo-foundation"
+      },
+      {
+        "hash": "d504b8d",
+        "subject": "Підказка бота вчить /lang ua — той самий підпис, що в перемикачі"
+      },
+      {
+        "hash": "06d3621",
+        "subject": "Merge branch 'main' into seo-foundation"
+      },
+      {
+        "hash": "ba756a7",
+        "subject": "«Ми нічого не витягли» рахується по заповненому, а не по підставах"
+      },
+      {
+        "hash": "17be679",
+        "subject": "web: мова в адресі — /uk/faq, /fr/privacy, hreflang"
+      },
+      {
+        "hash": "7526e5f",
+        "subject": "Галочка без цитати більше не мовчить"
+      },
+      {
+        "hash": "7d662d0",
+        "subject": "Українська в перемикачі — UA, а не UK"
+      },
+      {
+        "hash": "eaeccca",
+        "subject": "Історія версій"
+      },
+      {
         "hash": "584b46b",
         "subject": "Мердж onboarding-echo: крок 02/02 показує слова людини й підстави"
       },
@@ -622,4 +662,4 @@ export const RELEASES: Release[] = [
   }
 ];
 
-export const GENERATED_AT = "2026-08-29 19:17";
+export const GENERATED_AT = "2026-08-29 19:39";

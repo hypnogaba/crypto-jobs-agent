@@ -21,8 +21,9 @@
       "service": "nextrole"
     }
   ],
-  // Власний домен. workers.dev лишається робочим — зручно для перевірок,
-  // але канонічною адресою в robots і sitemap є nextrole.info.
+  // Власні домени, і лише вони: workers.dev вимкнено нижче, тож єдиний шлях
+  // до Worker іде через зону nextrole.info — а отже, через її правила WAF.
+  // Вебхук Telegram теж зареєстрований саме тут, а не на workers.dev.
   "routes": [
     { "pattern": "nextrole.info", "custom_domain": true },
     { "pattern": "www.nextrole.info", "custom_domain": true }

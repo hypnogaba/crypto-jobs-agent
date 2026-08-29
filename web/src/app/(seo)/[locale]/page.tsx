@@ -1,14 +1,15 @@
 import type { Metadata } from "next";
 import HomeBody from "../_pages/home";
 import { localeParam } from "../_pages/param";
-import { pageMeta } from "@/lib/seo";
+import { pageMeta, siteTitleFor } from "@/lib/seo";
 
 type Params = { params: Promise<{ locale: string }> };
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const locale = await localeParam(params);
-  // Назви не даємо: title.default із root layout — це вже назва головної.
-  const { title: _title, ...rest } = pageMeta(locale, "/", "");
+  // Назву сторінці не віддаємо (шаблон із кореня приклеївся б удруге),
+  // а картці віддаємо: з порожнім рядком og:image:alt зникав.
+  const { title: _title, ...rest } = pageMeta(locale, "/", siteTitleFor(locale));
   return rest;
 }
 
