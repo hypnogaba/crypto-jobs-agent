@@ -34,6 +34,7 @@ const STATE = {
 
 const DAYS = 14;
 const num = (n: number) => n.toLocaleString("uk-UA");
+const usd = (n: number): string => `$${n < 0.01 && n > 0 ? n.toFixed(4) : n.toFixed(2)}`;
 const day = (iso: string) => iso.slice(5).replace("-", ".");
 
 /** Блок. Одна відповідь на одне питання, з підписом, навіщо він тут. */
@@ -186,14 +187,14 @@ export default async function Admin() {
     locale: string; page: string | null; message: string; created_at: string }>(
     "SELECT * FROM site_feedback WHERE handled_at IS NULL ORDER BY created_at DESC LIMIT 30");
 
-  // Витрати. Зараз Anthropic коштує нуль: ключа в проді немає, і обидва
-  // місця виклику мовчки переходять на розбір за ключовими словами.
-  const spend = await one<{ calls: number; callsWeek: number; inTok: number; outTok: number;
-    failed: number; boards: number; countries: number; boardJobs: number; localJobs: number }>(`
+  // Витрати в доларах: cost_usd пишеться при кожному виклику за таблицею pricing.ts.
+  const spend = await one<{ calls: number; callsWeek: number; usdToday: number; usdWeek: number;
+    usdMonth: number; failed: number; boards: number; countries: number; boardJobs: number; localJobs: number }>(`
     SELECT (SELECT COUNT(*) FROM api_usage WHERE date(at)=date('now')) calls,
            (SELECT COUNT(*) FROM api_usage WHERE at >= datetime('now','-7 day')) callsWeek,
-           (SELECT COALESCE(SUM(input_tokens),0) FROM api_usage WHERE at >= datetime('now','-7 day')) inTok,
-           (SELECT COALESCE(SUM(output_tokens),0) FROM api_usage WHERE at >= datetime('now','-7 day')) outTok,
+           (SELECT COALESCE(SUM(cost_usd),0) FROM api_usage WHERE date(at)=date('now')) usdToday,
+           (SELECT COALESCE(SUM(cost_usd),0) FROM api_usage WHERE at >= datetime('now','-7 day')) usdWeek,
+           (SELECT COALESCE(SUM(cost_usd),0) FROM api_usage WHERE at >= datetime('now','-30 day')) usdMonth,
            (SELECT COUNT(*) FROM api_usage WHERE ok=0 AND at >= datetime('now','-7 day')) failed,
            (SELECT COUNT(*) FROM country_boards WHERE enabled=1) boards,
            (SELECT COUNT(DISTINCT country) FROM country_boards WHERE enabled=1) countries,
@@ -648,20 +649,18 @@ export default async function Admin() {
           </Block>
 
           <Block id="spend" title="Витрати"
-                 lede="Рахуємо токени, а не гроші: ставка за токен залежить від моделі й змінюється.">
+                 lede="Долари за таблицею цін Anthropic; прогноз — середнє за тиждень × 30.">
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-              <Tile n={spend?.calls ?? 0} label="звернень сьогодні" />
-              <Tile n={spend?.callsWeek ?? 0} label="за тиждень" />
-              <Tile n={spend?.inTok ?? 0} label="токенів на вхід, тиждень" />
-              <Tile n={spend?.outTok ?? 0} label="токенів на вихід, тиждень" />
+              <Tile n={usd(spend?.usdToday ?? 0)} label="сьогодні" />
+              <Tile n={usd(spend?.usdWeek ?? 0)} label="за 7 днів" />
+              <Tile n={usd(spend?.usdMonth ?? 0)} label="за 30 днів" />
+              <Tile n={usd(((spend?.usdWeek ?? 0) / 7) * 30)} label="прогноз на місяць" />
               <Tile n={spend?.failed ?? 0} label="невдалих звернень" accent={(spend?.failed ?? 0) > 0} />
             </div>
             <p className="mt-3 text-sm" style={{ color: "var(--muted)" }}>
               {(spend?.callsWeek ?? 0) === 0
-                ? "Модель зараз не викликається взагалі: ключа ANTHROPIC_API_KEY у проді немає, і розбір профілю та пояснення «чому підходить» працюють на ключових словах."
-                : "Долари дивись у консолі Anthropic."}
-              {" "}Запити до Workers і D1 живуть у панелі Cloudflare — щоб показати їх тут, довелося б
-              покласти в воркер токен, який уміє значно більше, ніж читати лічильник.
+                ? "За тиждень модель не викликалась."
+                : `${num(spend?.calls ?? 0)} звернень сьогодні, ${num(spend?.callsWeek ?? 0)} за тиждень.`}
             </p>
           </Block>
 
