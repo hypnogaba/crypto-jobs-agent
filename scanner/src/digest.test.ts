@@ -220,6 +220,37 @@ describe("стеля 4096", () => {
     expect(formatDigest([j], "en")).toContain(">Apply</a>");
   });
 
+  it("вилка у фактах: від–до, лише підлога, лише стеля, нічого", () => {
+    const j = (o: object) => ({ ...job(1, "Own it."), ...o });
+    // Intl ставить між тисячами нерозривний пробіл — тому \s у зразках.
+    expect(formatDigest([j({ salaryMin: 120_000, salaryMax: 150_000, salaryCurrency: "USD" })], "uk"))
+      .toMatch(/від 120\s000 до 150\s000 USD/);
+    expect(formatDigest([j({ salaryMin: 120_000, salaryMax: 150_000, salaryCurrency: "USD" })], "en"))
+      .toContain("120,000–150,000 USD");
+    expect(formatDigest([j({ salaryMin: 120_000, salaryMax: 150_000, salaryCurrency: "EUR" })], "fr"))
+      .toMatch(/à partir de 120\s000 jusqu'à 150\s000 EUR/);
+    expect(formatDigest([j({ salaryMin: 90_000, salaryMax: null, salaryCurrency: "EUR" })], "ru"))
+      .toMatch(/от 90\s000 EUR/);
+    expect(formatDigest([j({ salaryMin: null, salaryMax: 150_000, salaryCurrency: "GBP" })], "uk"))
+      .toMatch(/до 150\s000 GBP/);
+    expect(formatDigest([j({ salaryMin: null, salaryMax: null, salaryCurrency: "GBP" })], "uk"))
+      .not.toMatch(/від \d|до \d|GBP/);
+    // Старі виклики без salaryMax поводяться як досі.
+    expect(formatDigest([j({ salaryMin: 90_000, salaryCurrency: "USD" })], "uk")).toMatch(/від 90\s000 USD/);
+  });
+
+  it("стеля дня: замість «менше ніж зазвичай» — «це останні на сьогодні»", () => {
+    const two = [job(1, "a"), job(2, "b")];
+    expect(formatDigest(two, "uk")).toContain("Сьогодні менше ніж зазвичай — 2 замість 5");
+    const capped = formatDigest(two, "uk", { capped: true });
+    expect(capped).toContain("Це останні на сьогодні — стеля 20 вакансій на день. Решта завтра.");
+    expect(capped).not.toContain("менше ніж зазвичай");
+    expect(formatDigest(two, "en", { capped: true })).toContain("cap is 20 jobs a day");
+    expect(fitDigest(two, "fr", DIGEST_MAX, { capped: true })).toContain("le plafond est de 20 offres par jour");
+    // П'ять із п'яти — жодного хвоста навіть зі стелею.
+    expect(formatDigest(Array.from({ length: 5 }, (_, i) => job(i, "x")), "uk", { capped: true })).not.toContain("останні на сьогодні");
+  });
+
   it("fitTelegram — останній запобіжник", () => {
     expect(fitTelegram("a".repeat(5000)).length).toBe(TELEGRAM_MAX);
   });

@@ -40,6 +40,17 @@ const P = {
   from: {
     en: "from", uk: "від", fr: "à partir de", ru: "от",
   },
+  to: {
+    en: "up to", uk: "до", fr: "jusqu'à", ru: "до",
+  },
+  // Запит «ще п'ять» уперся в денну стелю: людина отримала менше за п'ять
+  // не тому, що вакансій мало, а тому, що добова квота закінчилась.
+  capLast: {
+    en: "These are the last for today — the cap is 20 jobs a day. The rest comes tomorrow.",
+    uk: "Це останні на сьогодні — стеля 20 вакансій на день. Решта завтра.",
+    fr: "Ce sont les dernières pour aujourd'hui — le plafond est de 20 offres par jour. La suite demain.",
+    ru: "Это последние на сегодня — потолок 20 вакансий в день. Остальное завтра.",
+  },
   // Кнопка лишає callback_data `not_relevant`, щоб вебхук не ламався;
   // змінився лише напис: «уточнити» кличе до діалогу, а не до скарги.
   notRelevant: {
@@ -76,6 +87,29 @@ export const say = (locale: Locale, key: keyof typeof P): string =>
 
 /** Локаль керує і словами, і форматом чисел: «15 200» проти «15,200». */
 export const intlOf = (locale: Locale): string => (locale === "en" ? "en-GB" : locale);
+
+/**
+ * Вилка одним рядком: «від 120 000 до 150 000 USD» / «120,000–150,000 USD».
+ *
+ * Українська, французька й російська кажуть словами («від … до»), англійська
+ * — тире. Лише підлога → «від X», лише стеля → «до X». Нічого не відомо —
+ * порожньо: картка рядок пропускає, а не пише «вилку не вказано».
+ */
+export function salaryLine(
+  locale: Locale, min: number | null | undefined, max: number | null | undefined,
+  currency: string | null | undefined,
+): string | null {
+  if (!min && !max) return null;
+  const fmt = (n: number) => n.toLocaleString(intlOf(locale));
+  const cur = currency ? ` ${currency}` : "";
+  if (min && max && min !== max) {
+    return locale === "en"
+      ? `${fmt(min)}–${fmt(max)}${cur}`
+      : `${say(locale, "from")} ${fmt(min)} ${say(locale, "to")} ${fmt(max)}${cur}`;
+  }
+  if (min) return `${say(locale, "from")} ${fmt(min)}${cur}`;
+  return `${say(locale, "to")} ${fmt(max!)}${cur}`;
+}
 
 export const thin = (locale: Locale, got: number, want: number): string => {
   const map: Phrase = {

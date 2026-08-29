@@ -40,6 +40,8 @@ export interface CandidateJob {
   tags: string[];
   postedAt: string | null;
   salaryMin: number | null;
+  /** Стеля вилки, коли відома. Старі виклики її не передають — тому необов'язкова. */
+  salaryMax?: number | null;
   salaryCurrency: string | null;
   /** Готовий витяг опису зі спільного кешу. Однаковий для всіх людей. */
   summary?: string | null;

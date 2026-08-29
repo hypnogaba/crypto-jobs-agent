@@ -60,6 +60,22 @@ export async function readDraft(): Promise<{ text: string; parsed: ParsedProfile
   try { return JSON.parse(raw) as { text: string; parsed: ParsedProfile }; } catch { return null; }
 }
 
+/**
+ * Зона з форми, а коли скрипт її не зняв (вимкнений JS, блокувальник) —
+ * зона, яку Cloudflare визначає за адресою запиту. UTC лишається лише
+ * останнім притулком: інакше людина в Парижі отримувала б добірку об 11:00.
+ */
+function timezoneFrom(formData: FormData): string {
+  const fromForm = String(formData.get("timezone") ?? "").trim();
+  if (fromForm && fromForm !== "UTC") return safeTimezone(fromForm);
+  let fromEdge = "";
+  try {
+    const cf = (getCloudflareContext().cf as { timezone?: string } | undefined);
+    fromEdge = cf?.timezone ?? "";
+  } catch { /* поза Workers (тести, dev) контексту немає */ }
+  return safeTimezone(fromEdge || fromForm);
+}
+
 /** Крок 2: людина підтвердила чотири поля. Профіль зберігається у її акаунт. */
 export async function saveProfile(formData: FormData): Promise<void> {
   const user = await currentUser();
@@ -67,7 +83,7 @@ export async function saveProfile(formData: FormData): Promise<void> {
 
   // Зону знімає скрипт на самій формі. Перевіряємо її через сам Intl —
   // підроблене значення мовчки стало б розкладом доставки.
-  const timezone = safeTimezone(String(formData.get("timezone") ?? ""));
+  const timezone = timezoneFrom(formData);
 
   const profile = {
     spheres: formData.getAll("spheres").map(String),
@@ -175,7 +191,7 @@ export async function saveSettings(formData: FormData): Promise<void> {
   const hour = Math.min(23, Math.max(0, Number.parseInt(String(formData.get("deliveryHour") ?? "9"), 10) || 9));
   const raw = String(formData.get("locale") ?? user.locale);
   const locale = isLocale(raw) ? raw : "en";
-  const timezone = safeTimezone(String(formData.get("timezone") ?? ""));
+  const timezone = timezoneFrom(formData);
   await run("UPDATE users SET delivery_hour=?, locale=?, timezone=?, updated_at=datetime('now') WHERE id=?",
     hour, locale, timezone, user.id);
   // У куку йде вже перевірене значення — те саме, що й у базу.

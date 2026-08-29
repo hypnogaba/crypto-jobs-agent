@@ -13,8 +13,10 @@
 import { loadConfig } from "./config.js";
 import { D1Client } from "./d1.js";
 import { explainWithClaude, pickTop, type CandidateJob, type Profile } from "./match.js";
-import { asLocale, intlOf, say, thin, type Locale } from "./digest-copy.js";
+import { asLocale, salaryLine, say, thin, type Locale } from "./digest-copy.js";
 import { summarize } from "./summary.js";
+import { extractSalary, type Salary } from "./salary.js";
+import { applyTranslations, d1Store, translateJobs } from "./translate.js";
 
 const DIGEST_SIZE = 5;
 
@@ -218,25 +220,40 @@ const LAZY: Array<{
  * Джерело впало або невідоме — лишаємо порожньо. Картка просто буде без
  * опису: заголовок, локація й чіпи на місці.
  */
+/** Чи вміємо ми взяти текст цього оголошення поштучно. */
+export const hasLazyDescription = (url: string): boolean => LAZY.some((src) => src.re.test(url));
+
+/**
+ * Повний текст оголошення поштучно. null — джерело невідоме, впало або
+ * тексту не має. Ніколи не кидає.
+ */
+export async function fetchDescription(url: string): Promise<string | null> {
+  for (const src of LAZY) {
+    const m = src.re.exec(url);
+    if (!m) continue;
+    try {
+      const res = await fetch(src.api(m), { signal: AbortSignal.timeout(15_000) });
+      if (!res.ok) return null;
+      return src.pick(await res.json());
+    } catch { return null; }
+  }
+  return null;
+}
+
 export async function fillMissingSummaries(
-  jobs: Array<{ id: string; url: string; company: string; summary: string | null }>
+  jobs: Array<{ id: string; url: string; company: string; summary: string | null }>,
+  /** Сюди складається вилка, знайдена в повному тексті: другого шансу її побачити не буде. */
+  salaries?: Map<string, Salary>,
 ): Promise<Map<string, string>> {
   const out = new Map<string, string>();
   for (const j of jobs) {
     if (j.summary) { out.set(j.id, j.summary); continue; }
-
-    for (const src of LAZY) {
-      const m = src.re.exec(j.url);
-      if (!m) continue;
-      try {
-        const res = await fetch(src.api(m), { signal: AbortSignal.timeout(15_000) });
-        if (!res.ok) break;
-        const text = src.pick(await res.json());
-        const s = summarize(text, j.company);
-        if (s) out.set(j.id, s);
-      } catch { /* мовчки далі: опис не критичний */ }
-      break;
-    }
+    if (!hasLazyDescription(j.url)) continue;
+    const text = await fetchDescription(j.url);
+    const s = summarize(text, j.company);
+    if (s) out.set(j.id, s);
+    const sal = extractSalary(text);
+    if (sal && salaries) salaries.set(j.id, sal);
   }
   return out;
 }
@@ -294,8 +311,17 @@ export type DigestJob = CandidateJob & {
   sentId: string;
 };
 
+export interface FormatOptions {
+  summaries?: boolean;
+  /**
+   * Добірка коротша за п'ять через денну стелю, а не через брак вакансій.
+   * Тоді замість «менше ніж зазвичай» іде чесне «це останні на сьогодні».
+   */
+  capped?: boolean;
+}
+
 export function formatDigest(
-  jobs: DigestJob[], locale: Locale, opts: { summaries?: boolean } = {}
+  jobs: DigestJob[], locale: Locale, opts: FormatOptions = {}
 ): string {
   const withSummaries = opts.summaries ?? true;
   const lines = [escapeHtml(say(locale, "greeting")), ""];
@@ -312,9 +338,7 @@ export function formatDigest(
     const facts = [
       j.location ?? (j.remote ? say(locale, "remote") : null),
       j.remote && j.location ? say(locale, "remote") : null,
-      j.salaryMin
-        ? `${say(locale, "from")} ${j.salaryMin.toLocaleString(intlOf(locale))} ${j.salaryCurrency ?? ""}`.trim()
-        : null,
+      salaryLine(locale, j.salaryMin, j.salaryMax, j.salaryCurrency),
     ].filter(Boolean) as string[];
     if (facts.length) lines.push(escapeHtml(facts.join(" · ")));
 
@@ -334,7 +358,7 @@ export function formatDigest(
   if (jobs.length < DIGEST_SIZE) {
     lines.push("─────────────");
     lines.push("");
-    lines.push(escapeHtml(thin(locale, jobs.length, DIGEST_SIZE)));
+    lines.push(escapeHtml(opts.capped ? say(locale, "capLast") : thin(locale, jobs.length, DIGEST_SIZE)));
   }
   return lines.join("\n").replace(/\n+$/, "");
 }
@@ -346,16 +370,45 @@ export function formatDigest(
  * картка все ще повна), потім останні картки по одній. Рвати текст посеред
  * HTML-тегу не можна — Telegram відповість 400, і добірка застрягне.
  */
-export function fitDigest(jobs: DigestJob[], locale: Locale, max = DIGEST_MAX): string {
-  const full = formatDigest(jobs, locale);
+export function fitDigest(
+  jobs: DigestJob[], locale: Locale, max = DIGEST_MAX, opts: Omit<FormatOptions, "summaries"> = {}
+): string {
+  const full = formatDigest(jobs, locale, opts);
   if (full.length <= max) return full;
   let rest = jobs;
   while (rest.length > 0) {
-    const text = formatDigest(rest, locale, { summaries: false });
+    const text = formatDigest(rest, locale, { ...opts, summaries: false });
     if (text.length <= max) return text;
     rest = rest.slice(0, -1);
   }
-  return fitTelegram(formatDigest([], locale, { summaries: false })).slice(0, max);
+  return fitTelegram(formatDigest([], locale, { ...opts, summaries: false })).slice(0, max);
+}
+
+/**
+ * Картки мовою людини: назва й опис — перекладені, компанія — ні.
+ *
+ * Без ANTHROPIC_API_KEY або для англійської повертає ті самі об'єкти:
+ * поведінка байт у байт як до появи перекладу. Збій — оригінал.
+ */
+export async function localizeJobs(jobs: DigestJob[], locale: Locale, ctx: RunContext): Promise<DigestJob[]> {
+  if (locale === "en" || !ctx.cfg.anthropicApiKey) return jobs;
+  const tr = await translateJobs(
+    jobs.map((j) => ({ id: j.id, title: j.title, summary: j.summary ?? null })),
+    locale, ctx.cfg.anthropicApiKey, d1Store(ctx.d1),
+    { onUsage: (u) => logUsage(ctx.d1, "translate", u) });
+  return applyTranslations(jobs, tr);
+}
+
+/** Облік викликів моделі. Не має права зламати доставку: впав запис — добірка все одно йде. */
+async function logUsage(
+  d1: D1Client, operation: string, u: { model: string; inputTokens: number; outputTokens: number; ok: boolean },
+): Promise<void> {
+  try {
+    await d1.execute(
+      `INSERT OR IGNORE INTO api_usage (id,service,operation,model,input_tokens,output_tokens,cost_usd,ok)
+       VALUES (?,'anthropic',?,?,?,?,0,?)`,
+      [crypto.randomUUID(), operation, u.model, u.inputTokens, u.outputTokens, u.ok ? 1 : 0]);
+  } catch { /* журнал не важливіший за доставку */ }
 }
 
 /**
@@ -495,19 +548,19 @@ export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
 
   if (pending.length > 0 && canSend && !stale) {
     const digestId = pending[0]!.digest_id;
-    const rows2 = await d1.query<{ sent_id: string; company: string; title: string; location: string | null; remote: number;
-      url: string; why_fits: string; salary_min: number | null; salary_currency: string | null;
+    const rows2 = await d1.query<{ sent_id: string; job_id: string; company: string; title: string; location: string | null; remote: number;
+      url: string; why_fits: string; salary_min: number | null; salary_max: number | null; salary_currency: string | null;
       summary: string | null }>(
-      `SELECT s.id AS sent_id,j.company,j.title,j.location,j.remote,j.url,s.why_fits,j.salary_min,j.salary_currency,j.summary
+      `SELECT s.id AS sent_id,j.id AS job_id,j.company,j.title,j.location,j.remote,j.url,s.why_fits,j.salary_min,j.salary_max,j.salary_currency,j.summary
        FROM sent s JOIN jobs_cache j ON j.id=s.job_id
        WHERE s.user_id=? AND s.digest_id=?`, [u.id, digestId]);
     const retry: DigestJob[] = rows2.map((r) => ({
-      id: "", companyKey: "", tags: [], postedAt: null, sentId: r.sent_id,
+      id: r.job_id ?? "", companyKey: "", tags: [], postedAt: null, sentId: r.sent_id,
       company: r.company, title: r.title, location: r.location, remote: r.remote === 1,
-      url: r.url, salaryMin: r.salary_min, salaryCurrency: r.salary_currency,
+      url: r.url, salaryMin: r.salary_min, salaryMax: r.salary_max, salaryCurrency: r.salary_currency,
       why: r.why_fits, summary: r.summary }));
     const sent = await sendTelegram(
-      botToken!, u.telegram_chat_id!, fitDigest(retry, locale), digestId, locale);
+      botToken!, u.telegram_chat_id!, fitDigest(await localizeJobs(retry, locale, ctx), locale), digestId, locale);
     if (sent.ok) {
       await d1.execute("UPDATE sent SET status='sent', sent_at=? WHERE digest_id=?", [now.toISOString(), digestId]);
       ctx.delivered++;
@@ -590,7 +643,7 @@ export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
   const rows = await d1.query<{
     id: string; company: string; company_key: string; title: string; location: string | null;
     remote: number; url: string; tags: string; posted_at: string | null;
-    salary_min: number | null; salary_currency: string | null; dedupe_key: string | null;
+    salary_min: number | null; salary_max: number | null; salary_currency: string | null; dedupe_key: string | null;
     summary: string | null;
     source: string; country: string | null;
   }>(
@@ -635,7 +688,7 @@ export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
   const candidates: CandidateJob[] = rows.map((r) => ({
     id: r.id, company: r.company, companyKey: r.company_key, title: r.title,
     location: r.location, remote: r.remote === 1, url: r.url, tags: list(r.tags),
-    postedAt: r.posted_at, salaryMin: r.salary_min, salaryCurrency: r.salary_currency,
+    postedAt: r.posted_at, salaryMin: r.salary_min, salaryMax: r.salary_max, salaryCurrency: r.salary_currency,
     summary: r.summary,
     source: r.source, country: r.country,
   }));
@@ -655,19 +708,25 @@ export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
     return;
   }
 
-  const why = await explainWithClaude(top, profile, cfg.anthropicApiKey, undefined, async (u) => {
-    // Облік не має права зламати доставку: впав запис — добірка все одно йде.
-    try {
-      await d1.execute(
-        `INSERT OR IGNORE INTO api_usage (id,service,operation,model,input_tokens,output_tokens,cost_usd,ok)
-         VALUES (?,'anthropic','match_reason',?,?,?,0,?)`,
-        [crypto.randomUUID(), u.model, u.inputTokens, u.outputTokens, u.ok ? 1 : 0]);
-    } catch { /* журнал не важливіший за доставку */ }
-  }, locale);
+  const why = await explainWithClaude(top, profile, cfg.anthropicApiKey, undefined,
+    (u) => logUsage(d1, "match_reason", u), locale);
   const digestId = crypto.randomUUID();
 
+  // Вилка з повного тексту — лише для тих, у кого її ще немає: повний текст
+  // ми бачимо тільки тут, поштучно, і в базу він не потрапляє.
+  const salaries = new Map<string, Salary>();
   const summaries = await fillMissingSummaries(
-    top.map((j) => ({ id: j.id, url: j.url, company: j.company, summary: j.summary ?? null })));
+    top.map((j) => ({ id: j.id, url: j.url, company: j.company, summary: j.summary ?? null })), salaries);
+  const foundSalary = [...salaries.entries()].filter(([id]) => {
+    const j = top.find((x) => x.id === id);
+    return j && j.salaryMin == null && j.salaryMax == null;
+  });
+  if (foundSalary.length > 0) {
+    await d1.batch(foundSalary.map(([id, s]) => ({
+      sql: "UPDATE jobs_cache SET salary_min=?, salary_max=?, salary_currency=? WHERE id=? AND salary_min IS NULL AND salary_max IS NULL",
+      params: [s.min, s.max, s.currency, id],
+    })));
+  }
 
   // Знайдений опис повертаємо у спільний кеш: наступній людині ця сама
   // вакансія дістанеться вже з описом і без зайвого запиту.
@@ -681,10 +740,15 @@ export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
 
   // id рядка sent народжується тут, до форматування: він стоїть у посиланні
   // «Податися», тож має бути відомий раніше, ніж текст піде в Telegram.
-  const withWhy = top.map((j, i) => ({
-    ...j, why: why[i]!, summary: summaries.get(j.id) ?? j.summary ?? null,
-    sentId: crypto.randomUUID(),
-  }));
+  const withWhy = top.map((j, i) => {
+    const sal = j.salaryMin == null && j.salaryMax == null ? salaries.get(j.id) : undefined;
+    return {
+      ...j, why: why[i]!, summary: summaries.get(j.id) ?? j.summary ?? null,
+      salaryMin: sal?.min ?? j.salaryMin, salaryMax: sal?.max ?? j.salaryMax,
+      salaryCurrency: sal?.currency ?? j.salaryCurrency,
+      sentId: crypto.randomUUID(),
+    };
+  });
 
   // Спершу pending, і лише після 200 OK від Telegram — sent. Раніше рядки
   // писались одразу як sent, і якщо процес падав між записом і відправкою,
@@ -699,7 +763,9 @@ export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
              dedupeById.get(j.id) ?? null],
   })));
 
-  const text = fitDigest(withWhy, locale);
+  // Менше за п'ять через стелю — не «тонкий день», а «решта завтра».
+  const capped = onRequest && allowance < DIGEST_SIZE;
+  const text = fitDigest(await localizeJobs(withWhy, locale, ctx), locale, DIGEST_MAX, { capped });
   if (botToken && u.telegram_chat_id) {
     const sent = await sendTelegram(botToken, u.telegram_chat_id, text, digestId, locale);
     if (!sent.ok) {

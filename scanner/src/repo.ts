@@ -1,4 +1,5 @@
 import { summarize } from "./summary.js";
+import { extractSalary } from "./salary.js";
 import type { D1Client, D1Statement } from "./d1.js";
 import type { AtsProvider, Company, NormalizedJob, SourceStatus } from "./types.js";
 import type { Board } from "./sources/boards.js";
@@ -38,6 +39,12 @@ export class Repo {
     const statements: D1Statement[] = jobs.map((j) => {
       // Сирий текст оголошення в базу не пишемо ніколи — лише витяг.
       const summary = summarize(j.description, j.company);
+      // Вилка з тексту — лише коли джерело не дало її окремим полем. Повний
+      // текст є тільки тут, на скані: далі лишається витяг на 240 символів.
+      const parsed = j.salaryMin == null && j.salaryMax == null ? extractSalary(j.description) : null;
+      const salaryMin = j.salaryMin ?? parsed?.min ?? null;
+      const salaryMax = j.salaryMax ?? parsed?.max ?? null;
+      const salaryCurrency = j.salaryCurrency ?? parsed?.currency ?? null;
       return {
         sql: `INSERT INTO jobs_cache
                 (id,url,company,company_key,title,location,remote,salary_min,salary_max,salary_currency,source,tags,dedupe_key,posted_at,fetched_at,country,summary,summary_at)
@@ -47,13 +54,18 @@ export class Repo {
                 remote=excluded.remote, source=excluded.source, tags=excluded.tags,
                 posted_at=excluded.posted_at, fetched_at=excluded.fetched_at,
                 country=excluded.country,
+                -- Вилку оновлюємо лише відомою: порожня з нового скану не
+                -- має стерти витягнуту з тексту раніше.
+                salary_min=COALESCE(excluded.salary_min, jobs_cache.salary_min),
+                salary_max=COALESCE(excluded.salary_max, jobs_cache.salary_max),
+                salary_currency=COALESCE(excluded.salary_currency, jobs_cache.salary_currency),
                 -- Наявний опис не затираємо порожнім: джерело могло цього
                 -- разу не віддати текст.
                 summary=COALESCE(excluded.summary, jobs_cache.summary),
                 summary_at=COALESCE(excluded.summary_at, jobs_cache.summary_at)`,
         params: [
           crypto.randomUUID(), j.url, j.company, j.companyKey, j.title, j.location,
-          j.remote ? 1 : 0, j.salaryMin ?? null, j.salaryMax ?? null, j.salaryCurrency ?? null,
+          j.remote ? 1 : 0, salaryMin, salaryMax, salaryCurrency,
           j.source, JSON.stringify(j.tags), j.dedupeKey, j.postedAt, j.fetchedAt,
           j.country ?? null, summary, summary ? j.fetchedAt : null,
         ],
