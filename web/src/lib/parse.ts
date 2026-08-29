@@ -59,21 +59,24 @@ const stem = (s: string): string => `${s}\\p{L}*`;
  * французькою, а зі словника її не було зовсім, крім одного `développeur`.
  * «Chef de produit» не давав product — тобто французький продакт отримував
  * порожню анкету так само надійно, як український.
+ *
+ * Акценти в них необов'язкові (`d[ée]m[ée]nag`): «demenager» з телефона —
+ * той самий намір, що й «déménager», і карати за розкладку нема за що.
  */
 const SPHERE_HINTS: Record<SphereId, RegExp> = {
-  engineering:  w(`engineer(?:ing)?|developer|programmer|backend|frontend|full[- ]?stack|devops|sre|infrastructure|architect|${stem("інженер")}|${stem("розробник")}|${stem("программист")}|${stem("разработчик")}|${stem("développeur")}|${stem("ingénieur")}`),
+  engineering:  w(`engineer(?:ing)?|developer|programmer|backend|frontend|full[- ]?stack|devops|sre|infrastructure|architect|${stem("інженер")}|${stem("розробник")}|${stem("программист")}|${stem("разработчик")}|${stem("d[ée]veloppeur")}|${stem("ing[ée]nieur")}`),
   // Голе «ai» звідси прибрано: у французькому тексті `j'ai` робив із продакта
   // дата-сайєнтиста. Абревіатура лишається, але лише у верхньому регістрі —
   // див. AI_TOKEN нижче.
-  "data-ai":    w(`data|machine learning|\\bml\\b|analytics|data scientist|${stem("дані")}|${stem("данные")}|${stem("аналітик")}|${stem("аналитик")}|${stem("données")}`),
+  "data-ai":    w(`data|machine learning|\\bml\\b|analytics|data scientist|${stem("дані")}|${stem("данные")}|${stem("аналітик")}|${stem("аналитик")}|${stem("donn[ée]es")}`),
   product:      w(`product|${stem("продукт")}|${stem("продакт")}|${stem("produit")}`),
   design:       w(`design(?:er)?|ux|ui|figma|${stem("дизайн")}|${stem("графічн")}|${stem("графическ")}|${stem("graphiste")}`),
-  devrel:       w(`devrel|developer relations|advocate|community|${stem("спільнот")}|${stem("сообщест")}|${stem("communauté")}`),
+  devrel:       w(`devrel|developer relations|advocate|community|${stem("спільнот")}|${stem("сообщест")}|${stem("communaut[ée]")}`),
   partnerships: w(`partnership|business development|bd|ecosystem|alliances|${stem("партнерств")}|${stem("партнёрств")}|${stem("partenariat")}`),
-  operations:   w(`operations|program|project manager|chief of staff|${stem("операці")}|${stem("операци")}|${stem("opération")}|chef de projet`),
+  operations:   w(`operations|program|project manager|chief of staff|${stem("операці")}|${stem("операци")}|${stem("op[ée]ration")}|chef de projet`),
   marketing:    w(`marketing|growth|content|seo|brand|${stem("маркетинг")}|${stem("маркетолог")}`),
   sales:        w(`sales|account executive|customer success|${stem("продаж")}|${stem("commercial")}|${stem("vente")}`),
-  security:     w(`security|infosec|appsec|${stem("безпек")}|${stem("безопасн")}|${stem("sécurité")}`),
+  security:     w(`security|infosec|appsec|${stem("безпек")}|${stem("безопасн")}|${stem("s[ée]curit[ée]")}`),
   qa:           w(`qa|quality assurance|test engineer|${stem("тестув")}|${stem("тестиров")}|${stem("testeur")}`),
 };
 
@@ -90,8 +93,8 @@ const INDUSTRY_HINTS: Record<IndustryId, RegExp> = {
   web3:      w(`web3|crypto|blockchain|defi|nft|solana|ethereum|dao|${stem("крипт")}`),
   ai:        w(`artificial intelligence|llm|deep tech|machine learning|${stem("штучн")}`),
   fintech:   w(`fintech|payments|banking|trading|${stem("фінтех")}|${stem("финтех")}`),
-  health:    w(`health|medtech|biotech|pharma|clinical|${stem("здоров")}`),
-  games:     w(`game|gaming|gamedev|${stem("ігр")}|${stem("игр")}|jeux vidéo`),
+  health:    w(`health|medtech|biotech|pharma|clinical|${stem("здоров")}|${stem("sant[ée]")}`),
+  games:     w(`game|gaming|gamedev|${stem("ігр")}|${stem("игр")}|jeux vid[ée]o`),
   ecommerce: w(`e-?commerce|retail|marketplace`),
   defence:   w(`defen[cs]e|military|aerospace|${stem("оборон")}`),
   // «foundation» звідси прибрано: Ethereum Foundation — не благодійність,
@@ -131,8 +134,8 @@ function parseSalary(text: string): { min: number | null; currency: string | nul
   return { min: value, currency, hit: m[0] };
 }
 
-const WANTS_REMOTE = w(`remote|anywhere|${stem("віддален")}|${stem("удалён")}|${stem("удален")}|${stem("télétravail")}`);
-const WILL_RELOCATE = w(`relocat\\p{L}*|${stem("переїзд")}|${stem("переезд")}|${stem("déménag")}`);
+const WANTS_REMOTE = w(`remote|anywhere|${stem("віддален")}|${stem("удалён")}|${stem("удален")}|${stem("t[ée]l[ée]travail")}`);
+const WILL_RELOCATE = w(`relocat\\p{L}*|${stem("переїзд")}|${stem("переезд")}|${stem("d[ée]m[ée]nag")}`);
 
 /** Скільки символів навколо збігу лишаємо в підставі. */
 const EVIDENCE_PAD = 22;

@@ -66,6 +66,14 @@ describe("більше не вигадує", () => {
     expect(p.spheres).toContain("product");
   });
 
+  it("французька без акцентів усе одно впізнається", () => {
+    // «demenager» з телефона — той самий намір, що й «déménager».
+    expect(parseLocally("Je suis pret a demenager").remoteMode).toBe("relocate");
+    expect(parseLocally("Je suis pret a déménager").remoteMode).toBe("relocate");
+    expect(parseLocally("ingenieur logiciel").spheres).toContain("engineering");
+    expect(parseLocally("responsable securite").spheres).toContain("security");
+  });
+
   it("справжнє AI великими літерами лишається", () => {
     expect(parseLocally("I build AI products").industries).toContain("ai");
     expect(parseLocally("работаю с LLM").industries).toContain("ai");
