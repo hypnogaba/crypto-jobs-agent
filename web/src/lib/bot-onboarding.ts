@@ -166,6 +166,7 @@ const ASK: Record<Step, Phrase> = {
 
 const WORD = {
   done:     { en: "Done", uk: "Готово", fr: "Terminé", ru: "Готово" },
+  back:     { en: "\u2190 Back", uk: "\u2190 Назад", fr: "\u2190 Retour", ru: "\u2190 Назад" },
   skip:     { en: "Skip", uk: "Пропустити", fr: "Passer", ru: "Пропустить" },
   pickOne:  { en: "Pick at least one", uk: "Обери хоча б одне", fr: "Choisissez au moins un", ru: "Выбери хотя бы одно" },
   noMatter: { en: "Does not matter", uk: "Не важливо", fr: "Peu importe", ru: "Не важно" },
@@ -354,6 +355,14 @@ export function keyboard(step: Step, draft: Draft, locale: Locale, opts: Keyboar
   return rows;
 }
 
+/**
+ * «Назад» під питанням правки. Одна кнопка на всі поля: повертає те саме
+ * повідомлення в меню, не питаючи нічого й нічого не записуючи.
+ */
+export const backButton = (locale: Locale): Button => ({
+  text: say(WORD.back, locale), callback_data: "ed:back",
+});
+
 /** Рядки-пункти під /profile: кожен відкриває клавіатуру одного питання. */
 export function profileMenu(locale: Locale): Button[][] {
   const b = (p: Phrase, step: string): Button => ({ text: say(p, locale), callback_data: `ed:${step}` });
@@ -391,7 +400,14 @@ export function profileUpdateFor(step: Step, draft: Draft): { set: string; param
   }
 }
 
-export const questionText = (step: Step, locale: Locale): string => say(ASK[step], locale);
+/**
+ * Текст питання. `bare` знімає лічильник «1 з 4»: в анкеті він показує шлях,
+ * а в правці одного поля просто бреше — кроків там рівно один.
+ */
+export const questionText = (step: Step, locale: Locale, opts: { bare?: boolean } = {}): string => {
+  const text = say(ASK[step], locale);
+  return opts.bare ? text.replace(/^[^\n\u00b7]{1,24}\u00b7\s*/, "") : text;
+};
 export const askOtherAmount = (locale: Locale): string => say(WORD.askOther, locale);
 export const askTime = (locale: Locale): string => say(WORD.askTime, locale);
 export const askWishes = (locale: Locale): string => say(WORD.askWishes, locale);

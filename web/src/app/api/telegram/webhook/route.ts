@@ -188,11 +188,14 @@ async function handle(env: Env, raw: unknown): Promise<void> {
   // profiles.wishes, решта профілю не торкається. Новачка веде та сама
   // кнопкова анкета, що й /start, а написане стає її підказкою.
   if (text.length >= 3) {
-    const inFlow = await one<{ chat_id: string }>("SELECT chat_id FROM bot_state WHERE chat_id=?", String(chatId));
+    // Відкрите меню правки — не питання: людина нічого не набирає для нього,
+    // тож текст лишається побажанням, як і поза правкою.
+    const state = await one<{ step: string }>("SELECT step FROM bot_state WHERE chat_id=?", String(chatId));
+    const inFlow = Boolean(state) && state!.step !== "edit:menu";
     const hasProfile = known
       ? await one<{ user_id: string }>("SELECT user_id FROM profiles WHERE user_id=?", known.id) : null;
 
-    switch (freeTextAction(Boolean(known), Boolean(hasProfile), Boolean(inFlow))) {
+    switch (freeTextAction(Boolean(known), Boolean(hasProfile), inFlow)) {
       case "useButtons":
         // Коротке слово посеред питань: анкету не перезапускаємо, бо це
         // стерло б уже обране.

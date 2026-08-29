@@ -1,7 +1,7 @@
 import { one, run, uuid } from "./db";
 import {
   emptyDraft, keyboard, nextStep, questionText, askOtherAmount, askCustomFor, askTime, askWishes,
-  readyText, draftTimezone, profileMenu, profileUpdateFor,
+  readyText, draftTimezone, profileMenu, profileUpdateFor, backButton,
   STEPS, EDITABLE,
   summary, toggle, type Draft, type Step,
 } from "./bot-onboarding";
@@ -41,10 +41,34 @@ async function sendKeyboard(
 /** Редагуємо те саме повідомлення, щоб чат не заріс десятком однакових. */
 async function editKeyboard(
   env: Env, chatId: number, messageId: number, text: string, rows: Keyed[][]
-): Promise<void> {
-  await callTelegram(env.TELEGRAM_BOT_TOKEN, "editMessageText",
+): Promise<boolean> {
+  const r = await callTelegram(env.TELEGRAM_BOT_TOKEN, "editMessageText",
     { chat_id: chatId, message_id: messageId, text, reply_markup: { inline_keyboard: rows } });
+  // «Не змінилось» — це вже потрібний стан, а не поразка: два дотики поспіль
+  // по тій самій кнопці не мають народжувати другого повідомлення.
+  return r.ok || (r.description ?? "").includes("not modified");
 }
+
+/**
+ * Повідомлення-якір: уся правка профілю живе в ОДНОМУ повідомленні.
+ *
+ * Раніше кожен дотик слав нове: /profile — меню, пункт — питання, відповідь —
+ * підтвердження. Щоб повернутись до меню, треба було знову набрати /profile,
+ * і чат заростав однаковими списками. Тепер те саме повідомлення
+ * переписується на місці.
+ *
+ * Якщо переписати не вийшло (людина його видалила, або Telegram уже не дає —
+ * повідомлення старше за 48 годин), шлемо нове й запам'ятовуємо як новий якір.
+ */
+async function anchor(
+  env: Env, chatId: number, messageId: number | null, text: string, rows: Keyed[][]
+): Promise<number | null> {
+  if (messageId !== null && await editKeyboard(env, chatId, messageId, text, rows)) return messageId;
+  return sendKeyboard(env, chatId, text, rows);
+}
+
+/** Крок «меню правки відкрите»: якір є, поле ще не обране. */
+const MENU = "edit:menu" as Step;
 
 /** Без цього кнопка крутиться, доки Telegram не здасться. */
 async function ackButton(env: Env, callbackId: string): Promise<void> {
@@ -83,10 +107,13 @@ export async function startBotOnboarding(
     && await one<{ user_id: string }>("SELECT user_id FROM profiles WHERE user_id=?", existing.id);
 
   if (hasProfile && !force) {
-    await sendKeyboard(env, chatId, say("startExisting", locale), [
+    const id = await sendKeyboard(env, chatId, say("startExisting", locale), [
       [{ text: say("startAgain", locale), callback_data: "st:restart" },
        { text: say("startEdit", locale),  callback_data: "st:edit" }],
     ]);
+    // Це повідомлення і стає якорем: «Редагувати по пунктах» перепише його
+    // на меню, а не додасть ще одне.
+    await saveState(chatId, MENU, (await loadDraft(existing!.id)) ?? emptyDraft(), id);
     return;
   }
 
@@ -110,8 +137,12 @@ export async function handleStartButton(
 ): Promise<boolean> {
   if (!data.startsWith("st:")) return false;
   if (callbackId) await ackButton(env, callbackId);
-  if (data === "st:restart") await startBotOnboarding(env, chatId, locale, true);
-  else if (data === "st:edit") await handleCommand(env, chatId, "/profile", locale);
+  if (data === "st:restart") { await startBotOnboarding(env, chatId, locale, true); return true; }
+  if (data === "st:edit") {
+    const user = await one<{ id: string }>("SELECT id FROM users WHERE telegram_chat_id=?", String(chatId));
+    const row = await one<StateRow>("SELECT step,draft,message_id FROM bot_state WHERE chat_id=?", String(chatId));
+    if (user) await showProfileMenu(env, chatId, user.id, locale, row?.message_id ?? null);
+  }
   return true;
 }
 
@@ -151,7 +182,14 @@ export async function handleOnboardingButton(
   if (!row) return true;                       // стан загубився — мовчимо, /start почне заново
 
   const draft = readDraft(row.draft);
-  const step = row.step as Step;
+  // Крок «own:<поле>» — це те саме питання, тільки ми чекаємо на текст. Дотик
+  // по кнопці означає, що людина передумала писати й обрала зі списку, тож
+  // повертаємось до звичайного кроку.
+  const step = (row.step.startsWith("own:") ? row.step.slice(4) : row.step) as Step;
+  // Клавіатура зі старого повідомлення, коли анкети вже немає (відкрите меню
+  // правки, наприклад). Мовчимо: інакше «наступного питання немає»
+  // прочиталось би як «анкету завершено» — і переписало б профіль.
+  if (!STEPS.includes(step)) return true;
 
   // «Немає в списку» — єдина кнопка, що веде до вільного тексту. Крок
   // запам'ятовуємо, щоб знати, куди покласти написане й куди повернутись.
@@ -474,20 +512,41 @@ export async function handleFirstButton(
 // Та сама клавіатура, що й в онбордингу, але з префіксом ed: і записом
 // лише одного поля. Переходити всю анкету заради зарплати — надто дорого.
 
-/** Стан «правлю поле» — чернетка з бази, крок edit:<поле>. */
-async function openEditor(
-  env: Env, chatId: number, userId: string, step: Step, locale: Locale
+/** Меню правки: підсумок профілю й пункти — у якорі. `note` пише, що щойно сталось. */
+async function showProfileMenu(
+  env: Env, chatId: number, userId: string, locale: Locale,
+  messageId: number | null, note?: string,
 ): Promise<void> {
   const draft = (await loadDraft(userId)) ?? emptyDraft();
-  if (step === "wishes") {
-    await saveState(chatId, `edit:wishes` as Step, draft, null);
-    const cur = draft.wishes?.trim() ? `«${draft.wishes.trim()}»\n\n` : "";
-    await send(env, chatId, `${cur}${askWishes(locale)}`);
-    return;
-  }
-  const id = await sendKeyboard(env, chatId, questionText(step, locale),
-    keyboard(step, draft, locale, { prefix: "ed" }));
-  await saveState(chatId, `edit:${step}` as Step, draft, id);
+  const id = await anchor(env, chatId, messageId,
+    `${summary(draft, locale)}\n\n${note ?? say("profileHow", locale)}`, profileMenu(locale));
+  await saveState(chatId, MENU, draft, id);
+}
+
+/**
+ * Питання одного поля — у тому самому якорі, з «Назад» останнім рядком.
+ * Без «Назад» відкрите питання було глухим кутом: вийти з нього можна було
+ * лише командою, а команда слала ще одне повідомлення.
+ */
+async function showEdit(
+  env: Env, chatId: number, state: string, draft: Draft, locale: Locale,
+  messageId: number | null, text: string, rows: Keyed[][],
+): Promise<void> {
+  const id = await anchor(env, chatId, messageId, text, [...rows, [backButton(locale)]]);
+  await saveState(chatId, state as Step, draft, id);
+}
+
+/** Стан «правлю поле» — чернетка з бази, крок edit:<поле>. */
+async function openEditor(
+  env: Env, chatId: number, userId: string, step: Step, locale: Locale, messageId: number | null
+): Promise<void> {
+  const draft = (await loadDraft(userId)) ?? emptyDraft();
+  // Побажання — вільний текст: замість списку показуємо вже записане.
+  const text = step === "wishes"
+    ? `${draft.wishes?.trim() ? `«${draft.wishes.trim()}»\n\n` : ""}${askWishes(locale)}`
+    : questionText(step, locale, { bare: true });
+  const rows = step === "wishes" ? [] : keyboard(step, draft, locale, { prefix: "ed" });
+  await showEdit(env, chatId, `edit:${step}`, draft, locale, messageId, text, rows);
 }
 
 /** Запис одного поля й підтвердження. Назва стовпця — з profileUpdateFor, не з кнопки. */
@@ -499,10 +558,9 @@ async function commitField(
     await run(`UPDATE profiles SET ${upd.set}, updated_at=datetime('now') WHERE user_id=?`, ...upd.params, userId);
     if (step === "where" || step === "city") await persistCountry(userId, draft.location ?? null);
   }
-  await run("DELETE FROM bot_state WHERE chat_id=?", String(chatId));
-  const done = `${summary(draft, locale)}\n\n${say("fieldSaved", locale)}`;
-  if (messageId) await editKeyboard(env, chatId, messageId, done, []);
-  else await send(env, chatId, done);
+  // Не прощаємось: люди правлять кілька пунктів поспіль, тож той самий якір
+  // одразу повертається в меню — з підсумком, уже зі свіжим полем.
+  await showProfileMenu(env, chatId, userId, locale, messageId, say("fieldSaved", locale));
 }
 
 export async function handleEditButton(
@@ -517,22 +575,32 @@ export async function handleEditButton(
   const [, field, value] = data.split(":");
   if (!field || field === "noop") return true;
 
-  // Пункт меню: відкриваємо клавіатуру одного питання
+  // Якір читаємо завжди: у ньому живе і меню, і питання, і підтвердження.
+  const row = await one<StateRow>("SELECT step,draft,message_id FROM bot_state WHERE chat_id=?", String(chatId));
+  const at = row?.message_id ?? null;
+
+  // «Назад»: нічого не записуємо, просто повертаємо меню в те саме повідомлення.
+  if (field === "back") { await showProfileMenu(env, chatId, user.id, locale, at); return true; }
+
+  // Пункт меню: те саме повідомлення стає питанням
   if (value === undefined) {
-    if (field === "lang") { await sendLangKeyboard(env, chatId, locale); return true; }
-    if (EDITABLE.includes(field as Step)) await openEditor(env, chatId, user.id, field as Step, locale);
+    if (field === "lang") { await showLangPicker(env, chatId, user.id, locale, at); return true; }
+    if (EDITABLE.includes(field as Step)) await openEditor(env, chatId, user.id, field as Step, locale, at);
     return true;
   }
 
-  const row = await one<StateRow>("SELECT step,draft,message_id FROM bot_state WHERE chat_id=?", String(chatId));
-  if (!row || row.step !== `edit:${field}`) return true;   // стан загубився — /profile почне заново
   const step = field as Step;
+  // Стан загубився, або дотик прийшов зі старої клавіатури. Мовчати не можна:
+  // кнопка просто не спрацювала б. Показуємо це саме питання заново — з того,
+  // що зараз у базі.
+  if (!row || row.step !== `edit:${step}`) {
+    if (EDITABLE.includes(step)) await openEditor(env, chatId, user.id, step, locale, at);
+    return true;
+  }
   const draft = readDraft(row.draft);
 
   if (value === "__mine") {
-    await run("UPDATE bot_state SET step=?, updated_at=datetime('now') WHERE chat_id=?",
-      `editown:${step}`, String(chatId));
-    await send(env, chatId, askCustomFor(step, locale));
+    await showEdit(env, chatId, `editown:${step}`, draft, locale, at, askCustomFor(step, locale), []);
     return true;
   }
 
@@ -540,58 +608,67 @@ export async function handleEditButton(
     if (step === "spheres") draft.spheres = toggle(draft.spheres, value);
     else if (step === "where") { draft.remoteMode = toggleMode(draft.remoteMode, value); draft.customWhere = null; }
     else draft.industries = toggle(draft.industries, value);
-    await saveState(chatId, row.step as Step, draft, null);
-    if (row.message_id) {
-      await editKeyboard(env, chatId, row.message_id, questionText(step, locale),
-        keyboard(step, draft, locale, { prefix: "ed" }));
-    }
+    await showEdit(env, chatId, row.step, draft, locale, at,
+      questionText(step, locale, { bare: true }), keyboard(step, draft, locale, { prefix: "ed" }));
     return true;
   }
 
   if (step === "seniority") { draft.seniority = value; draft.customSeniority = null; }
   if (step === "salary") {
-    if (value === "__other") { await send(env, chatId, askOtherAmount(locale)); return true; }
+    if (value === "__other") {
+      await showEdit(env, chatId, "edit:salary", draft, locale, at, askOtherAmount(locale), []);
+      return true;
+    }
     const n = Number.parseInt(value, 10);
     draft.salaryMin = Number.isFinite(n) && n > 0 ? n : null;
     draft.salaryCurrency = draft.salaryMin ? "EUR" : null;
   }
   if (step === "tz") {
-    if (value === "__other") { await send(env, chatId, askTime(locale)); return true; }
+    if (value === "__other") {
+      await showEdit(env, chatId, "edit:tz", draft, locale, at, askTime(locale), []);
+      return true;
+    }
     if (!isKnownZone(value)) return true;
-    await setZone(env, chatId, user.id, value, locale);
+    await setZone(env, chatId, user.id, value, locale, at);
     return true;
   }
 
-  await commitField(env, chatId, user.id, step, draft, locale, row.message_id);
+  await commitField(env, chatId, user.id, step, draft, locale, at);
   return true;
 }
 
 /** Зона в users — окремо від profiles, бо це про доставку, а не про підбір. */
-async function setZone(env: Env, chatId: number, userId: string, zone: string, locale: Locale): Promise<void> {
+async function setZone(
+  env: Env, chatId: number, userId: string, zone: string, locale: Locale, messageId: number | null
+): Promise<void> {
   await run("UPDATE users SET timezone=?, updated_at=datetime('now') WHERE id=?", zone, userId);
-  await run("DELETE FROM bot_state WHERE chat_id=?", String(chatId));
   const row = await one<{ delivery_hour: number }>("SELECT delivery_hour FROM users WHERE id=?", userId);
-  await send(env, chatId, `${tf("zoneSet", locale, { zone })}\n${timeNow(locale, row?.delivery_hour ?? 9, zone)}`);
+  await showProfileMenu(env, chatId, userId, locale, messageId,
+    `${tf("zoneSet", locale, { zone })}\n${timeNow(locale, row?.delivery_hour ?? 9, zone)}`);
 }
 
 /** Вільний текст під час правки: побажання, інша сума, «немає в списку», година. */
 async function handleEditText(
   env: Env, chatId: number, row: StateRow, text: string, locale: Locale
 ): Promise<boolean> {
+  // Меню відкрите, поле ще не обране: написане — це побажання, а не відповідь
+  // на питання. Хай із ним розбирається вебхук, як із текстом поза правкою.
+  if (row.step === MENU) return false;
+
   const user = await one<{ id: string }>("SELECT id FROM users WHERE telegram_chat_id=?", String(chatId));
   if (!user) return false;
   const draft = readDraft(row.draft);
 
   if (row.step === "edit:wishes") {
     draft.wishes = text.slice(0, 1000);
-    await commitField(env, chatId, user.id, "wishes", draft, locale, null);
+    await commitField(env, chatId, user.id, "wishes", draft, locale, row.message_id);
     return true;
   }
 
   if (row.step === "edit:tz") {
     const zone = zoneForHour(text, new Date());
     if (!zone) { await send(env, chatId, say("timeBadHour", locale)); return true; }
-    await setZone(env, chatId, user.id, zone, locale);
+    await setZone(env, chatId, user.id, zone, locale, row.message_id);
     return true;
   }
 
@@ -615,11 +692,8 @@ async function handleEditText(
     else if (step === "where") { draft.customWhere = own; draft.location = own; }
     // Списки повертаються до клавіатури — можна дообрати; одиночні пишуться одразу.
     if (step === "spheres" || step === "industries") {
-      await saveState(chatId, `edit:${step}` as Step, draft, null);
-      if (row.message_id) {
-        await editKeyboard(env, chatId, row.message_id, questionText(step, locale),
-          keyboard(step, draft, locale, { prefix: "ed" }));
-      }
+      await showEdit(env, chatId, `edit:${step}`, draft, locale, row.message_id,
+        questionText(step, locale, { bare: true }), keyboard(step, draft, locale, { prefix: "ed" }));
       return true;
     }
     await commitField(env, chatId, user.id, step, draft, locale, row.message_id);
@@ -633,13 +707,28 @@ async function handleEditText(
 
 // ── Мова ─────────────────────────────────────────────────────
 
+/** Окрема команда /lang: якоря немає, тож просто нове повідомлення. */
 async function sendLangKeyboard(env: Env, chatId: number, locale: Locale): Promise<void> {
   const items = LOCALES.map((l) => ({ text: l.name, callback_data: `lg:${l.id}` }));
   await sendKeyboard(env, chatId, say("langAsk", locale), [items.slice(0, 2), items.slice(2)]);
 }
 
-async function setLocale(env: Env, chatId: number, userId: string, next: Locale): Promise<void> {
+/** Мова з меню правки: той самий якір, зі «Назад» — як і решта пунктів. */
+async function showLangPicker(
+  env: Env, chatId: number, userId: string, locale: Locale, messageId: number | null
+): Promise<void> {
+  const items = LOCALES.map((l) => ({ text: l.name, callback_data: `lg:${l.id}` }));
+  const draft = (await loadDraft(userId)) ?? emptyDraft();
+  await showEdit(env, chatId, "edit:lang", draft, locale, messageId,
+    say("langAsk", locale), [items.slice(0, 2), items.slice(2)]);
+}
+
+async function saveLocale(userId: string, next: Locale): Promise<void> {
   await run("UPDATE users SET locale=?, updated_at=datetime('now') WHERE id=?", next, userId);
+}
+
+async function setLocale(env: Env, chatId: number, userId: string, next: Locale): Promise<void> {
+  await saveLocale(userId, next);
   await send(env, chatId, say("langSet", next));
 }
 
@@ -650,7 +739,16 @@ export async function handleLangButton(
   if (callbackId) await ackButton(env, callbackId);
   const next = data.slice(3);
   const user = await one<{ id: string }>("SELECT id FROM users WHERE telegram_chat_id=?", String(chatId));
-  if (user && isLocale(next)) await setLocale(env, chatId, user.id, next);
+  if (!user || !isLocale(next)) return true;
+
+  // Мову міняли з меню правки — туди ж і повертаємось, уже новою мовою.
+  const row = await one<StateRow>("SELECT step,draft,message_id FROM bot_state WHERE chat_id=?", String(chatId));
+  if (row?.step === "edit:lang") {
+    await saveLocale(user.id, next);
+    await showProfileMenu(env, chatId, user.id, next, row.message_id, say("langSet", next));
+    return true;
+  }
+  await setLocale(env, chatId, user.id, next);
   return true;
 }
 
@@ -951,10 +1049,10 @@ export async function handleCommand(
 
     // Підсумок і рядок кнопок: кожна відкриває клавіатуру одного питання.
     case "/profile": {
-      const draft = await loadDraft(user!.id);
-      if (!draft) { await send(env, chatId, say("noProfile", locale)); break; }
-      await sendKeyboard(env, chatId,
-        `${summary(draft, locale)}\n\n${say("profileHow", locale)}`, profileMenu(locale));
+      if (!(await loadDraft(user!.id))) { await send(env, chatId, say("noProfile", locale)); break; }
+      // Команду набрали внизу чату — меню має бути там же, тож нове
+      // повідомлення. Далі воно й стає якорем на всю правку.
+      await showProfileMenu(env, chatId, user!.id, locale, null);
       break;
     }
 

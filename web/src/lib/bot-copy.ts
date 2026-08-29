@@ -97,11 +97,13 @@ const P = {
   wishSaved: {
     en: "Saved.", uk: "Записав.", fr: "Enregistré.", ru: "Записал.",
   },
+  // Підсумок тепер стоїть просто над цим рядком, а меню — під ним: радити
+  // тут /profile означало б слати людину по те, що вже в неї перед очима.
   fieldSaved: {
-    en: "Saved. /profile to see the whole thing.",
-    uk: "Записав. /profile — подивитись усе разом.",
-    fr: "Enregistré. /profile pour voir l'ensemble.",
-    ru: "Записал. /profile — посмотреть всё вместе.",
+    en: "Saved. Pick another field, or you are done.",
+    uk: "Записав. Обери ще пункт — або все.",
+    fr: "Enregistré. Choisissez un autre champ, ou c'est tout.",
+    ru: "Записал. Выбери ещё пункт — или всё.",
   },
   // /start у того, хто вже підключений: два чесні виходи, без мовчазного
   // стирання того, що вже є.
