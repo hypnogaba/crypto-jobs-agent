@@ -756,6 +756,11 @@ export async function handleDocument(
 
     const text = await extractCvText(file);
     const parsed = await parseProfile(text, env.ANTHROPIC_API_KEY ?? null);
+    // Розбір більше не вигадує режим роботи: коли людина про це не написала,
+    // він порожній. Стовпець remote_mode — NOT NULL, і порожній рядок означав
+    // би «жодного варіанта», чого людина не обирала. Найвужче з безпечних —
+    // те саме замовчування, що й на сайті.
+    const remoteMode = parsed.remoteMode || "remote_only";
 
     const existing = await one<{ id: string }>("SELECT id FROM users WHERE telegram_chat_id=?", String(chatId));
     const userId = existing?.id ?? uuid();
@@ -776,14 +781,14 @@ export async function handleDocument(
          updated_at=datetime('now')`,
       userId, "cv", text.slice(0, 20_000),
       JSON.stringify(parsed.spheres), JSON.stringify(parsed.industries),
-      parsed.seniority, parsed.remoteMode, parsed.location, parsed.salaryMin, parsed.salaryCurrency);
+      parsed.seniority, remoteMode, parsed.location, parsed.salaryMin, parsed.salaryCurrency);
 
     await persistCountry(userId, parsed.location);
 
     await run("DELETE FROM bot_state WHERE chat_id=?", String(chatId));
       await send(env, chatId, `${say("cvDone", locale)}\n\n${summary({
       spheres: parsed.spheres, industries: parsed.industries, customRole: null,
-      seniority: parsed.seniority, remoteMode: parsed.remoteMode,
+      seniority: parsed.seniority, remoteMode,
       salaryMin: parsed.salaryMin, salaryCurrency: parsed.salaryCurrency,
     }, locale)}`);
     await sendFirstOffer(env, chatId, userId, locale);

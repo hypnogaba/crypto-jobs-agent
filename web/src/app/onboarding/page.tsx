@@ -20,9 +20,12 @@ export default async function Onboarding({ searchParams }: { searchParams: Promi
   const draft = await readDraft();
 
   // Розбір тексту словника «свого варіанта» не знає — його людина пише
-  // руками на самій формі.
+  // руками на самій формі. А от «побажання» більше не стираємо: у leftover
+  // лежить те з тексту, що не влізло в жодну кнопку («тільки стартапи», «без
+  // on-call»), і саме за це підбір дає до +6 балів. Досі тут стояв жорсткий
+  // wishes: null — усе, що людина написала поза словником, зникало мовчки.
   let pre: ProfilePre | null = draft
-    ? { ...draft.parsed, wishes: null, customRole: null, customIndustry: null }
+    ? { ...draft.parsed, wishes: draft.parsed.leftover, customRole: null, customIndustry: null }
     : null;
   if (!pre && user) {
     const row = await one<{ spheres: string; industries: string; seniority: string | null;
@@ -40,7 +43,10 @@ export default async function Onboarding({ searchParams }: { searchParams: Promi
 
   return (
     <Shell locale={locale} eyebrow="02 / 02" title={t(locale, "onboarding.title")} lede={t(locale, "onboarding.lede")}>
-      <ProfileForm locale={locale} pre={pre} error={error} />
+      {/* Слова людини й підстави існують лише в першому проході: на /profile
+          чернетки немає, і форма там виглядає рівно як раніше. */}
+      <ProfileForm locale={locale} pre={pre} error={error}
+        quote={draft?.text} evidence={draft?.parsed.evidence} />
     </Shell>
   );
 }

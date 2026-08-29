@@ -17,13 +17,13 @@ import { sendText } from "@/lib/telegram-send";
 const DRAFT_COOKIE = "nr_draft";
 
 /**
- * Чернетка живе в куці, а браузери ріжуть куки після ~4 КБ — мовчки.
- * Раніше сюди клалось до 20 000 символів, і довге резюме просто губилось
- * на шляху до /onboarding. Текст різницею не страждає: чотири поля профілю
- * вже розібрано, а повний текст піде в базу лише як «резюме», яке й так
- * обрізається.
+ * Стеля тексту, який їде далі. Це вже не обмеження куки — у куці лишився сам
+ * лише ідентифікатор, — а стеля того, що має сенс класти в profiles.raw_input.
  */
 const DRAFT_TEXT_MAX = 2_500;
+
+/** Скільки живе покинута чернетка, перш ніж прибиральник її зносить. */
+const DRAFT_TTL = "-1 day";
 
 /** Довжина вільних полів профілю, яка ще схожа на місто чи код валюти. */
 const SHORT_FIELD_MAX = 120;
@@ -76,17 +76,47 @@ export async function startOnboarding(formData: FormData): Promise<void> {
   const { ANTHROPIC_API_KEY } = await env();
   const parsed = await parseProfile(text, ANTHROPIC_API_KEY ?? null);
 
+  /**
+   * Чернетка йде в базу, а в куці лишається сам лише ідентифікатор.
+   *
+   * Досі тут лежав увесь JSON. Next кодує значення куки через
+   * encodeURIComponent, українська літера в UTF-8 — це шість символів на
+   * виході, і 444 українські символи давали 2 723 байти при стелі браузера
+   * 4 096. Браузер ріже таку куку МОВЧКИ: readDraft() віддавав null, а
+   * /onboarding показував залогіненій людині старий рядок із profiles замість
+   * щойно розібраного тексту. Тези українською ламали крок 2 гарантовано.
+   */
+  const id = uuid();
+  await run(
+    "INSERT INTO onboarding_drafts (id,text,parsed) VALUES (?,?,?)",
+    id, text.slice(0, DRAFT_TEXT_MAX), JSON.stringify(parsed));
+  // Покинуті чернетки (людина не дійшла до кроку 2) — це чужий текст у нашій
+  // базі без власника. Зносимо їх тим самим проходом, без окремого розкладу.
+  await run(`DELETE FROM onboarding_drafts WHERE created_at < datetime('now', ?)`, DRAFT_TTL);
+
   const jar = await cookies();
-  jar.set(DRAFT_COOKIE, JSON.stringify({ text: text.slice(0, DRAFT_TEXT_MAX), parsed }), {
+  jar.set(DRAFT_COOKIE, id, {
     httpOnly: true, sameSite: "lax", secure: true, path: "/", maxAge: 3600,
   });
   redirect("/onboarding");
 }
 
 export async function readDraft(): Promise<{ text: string; parsed: ParsedProfile } | null> {
-  const raw = (await cookies()).get(DRAFT_COOKIE)?.value;
-  if (!raw) return null;
-  try { return JSON.parse(raw) as { text: string; parsed: ParsedProfile }; } catch { return null; }
+  const id = (await cookies()).get(DRAFT_COOKIE)?.value;
+  if (!id) return null;
+  const row = await one<{ text: string; parsed: string }>(
+    "SELECT text, parsed FROM onboarding_drafts WHERE id=?", id);
+  if (!row) return null;
+  try { return { text: row.text, parsed: JSON.parse(row.parsed) as ParsedProfile }; }
+  catch { return null; }
+}
+
+/** Чернетку прибираємо разом із кукою: текст людини не має пережити анкету. */
+async function dropDraft(): Promise<void> {
+  const jar = await cookies();
+  const id = jar.get(DRAFT_COOKIE)?.value;
+  if (id) await run("DELETE FROM onboarding_drafts WHERE id=?", id);
+  jar.delete(DRAFT_COOKIE);
 }
 
 /**
@@ -158,7 +188,7 @@ export async function saveProfile(formData: FormData): Promise<void> {
        VALUES (?,?,?,9,datetime('now'))`,
       id, await detectLocale(), timezone);
     await persistProfile(id, draft?.text ?? "", profile);
-    (await cookies()).delete(DRAFT_COOKIE);
+    await dropDraft();
     await createSession(id);
     redirect("/telegram");
   }
@@ -173,7 +203,7 @@ export async function saveProfile(formData: FormData): Promise<void> {
   // «Змінити профіль» приходить без чернетки: людина правила лише галочки.
   // Текст резюме, з якого їх колись розібрано, має пережити це редагування.
   await persistProfile(user.id, draft?.text ?? null, profile);
-  (await cookies()).delete(DRAFT_COOKIE);
+  await dropDraft();
   redirect(back);
 }
 
