@@ -13,7 +13,7 @@ import { summarize } from "./summary.js";
 
 const DIGEST_SIZE = 5;
 
-interface UserRow {
+export interface UserRow {
   id: string; telegram_chat_id: string | null; locale: string;
   timezone: string; delivery_hour: number; status: string; last_interaction_at: string | null;
   spheres: string; industries: string; seniority: string | null;
@@ -250,10 +250,15 @@ export function formatDigest(
  * Тепер збій — це просто false і рядок у журналі, разом із причиною з
  * e.cause, бо саме там undici ховає ECONNRESET чи ENOTFOUND.
  */
+export interface SendResult { ok: boolean; status: number | null }
+
+/** 403 від Telegram означає «людина заблокувала бота». Слати далі нікуди. */
+export const isBlocked = (r: SendResult): boolean => r.status === 403;
+
 export async function sendTelegram(
   token: string, chatId: string, text: string, digestId: string, locale: Locale,
   fetchImpl: typeof fetch = fetch
-): Promise<boolean> {
+): Promise<SendResult> {
   try {
     const res = await fetchImpl(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: "POST",
@@ -271,10 +276,10 @@ export async function sendTelegram(
       const body = await res.text().catch(() => "");
       console.log(`  telegram ${chatId.slice(0, 6)}…: HTTP ${res.status} ${body.slice(0, 200)}`);
     }
-    return res.ok;
+    return { ok: res.ok, status: res.status };
   } catch (e) {
     console.log(`  telegram ${chatId.slice(0, 6)}…: ${describeError(e)}`);
-    return false;
+    return { ok: false, status: null };
   }
 }
 
@@ -303,7 +308,7 @@ export function parseArgs(argv: string[]): { force: boolean; onlyUser: string | 
   };
 }
 
-interface RunContext {
+export interface RunContext {
   d1: D1Client;
   cfg: ReturnType<typeof loadConfig>;
   now: Date;
@@ -314,9 +319,64 @@ interface RunContext {
   delivered: number;
 }
 
-async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
+export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
   const { d1, cfg, now, botToken, force, scanned } = ctx;
   const onRequest = ctx.requested.has(u.id);
+  const closeRequest = () => d1.execute(
+    "UPDATE delivery_requests SET handled_at=datetime('now') WHERE user_id=? AND handled_at IS NULL", [u.id]);
+  // Людина заблокувала бота: слати нікуди, підбирати нове — марно палити вакансії.
+  const pauseBlocked = async () => {
+    await d1.execute("UPDATE users SET status='paused', paused_reason='blocked' WHERE id=?", [u.id]);
+    console.log(`  ${u.id.slice(0, 8)}: бот заблокований (403), пауза`);
+  };
+
+  // ── Спершу дотиснути непроставлене ──
+  // Запис зі статусом pending означає «підібрано, але не доставлено».
+  // Без цієї гілки такі рядки блокували б вакансію назавжди: вона вже в sent,
+  // тому в шортліст більше не потрапляє, а людина її так і не побачила.
+  //
+  // Це йде ПЕРЕД перевіркою години навмисно. Людина з сайту отримала
+  // pending-добірку об 11:00, о пів на дванадцяту прив'язала Telegram —
+  // і за розкладом «сьогодні вже було», тож без цього добірка дійшла б
+  // лише завтра.
+  //
+  // Для людини без Telegram pending — це нормальний кінцевий стан: добірка
+  // лежить у кабінеті на сайті, і дотискати її нікуди.
+  const pending = await d1.query<{ digest_id: string; created_at: string }>(
+    `SELECT digest_id, MIN(created_at) AS created_at FROM sent
+     WHERE user_id=? AND status='pending' GROUP BY digest_id ORDER BY created_at LIMIT 1`, [u.id]);
+  const canSend = Boolean(botToken && u.telegram_chat_id);
+  const stale = pending.length > 0 && pendingIsStale(pending[0]!.created_at, now);
+
+  if (pending.length > 0 && canSend && !stale) {
+    const digestId = pending[0]!.digest_id;
+    const rows2 = await d1.query<{ company: string; title: string; location: string | null; remote: number;
+      url: string; why_fits: string; salary_min: number | null; salary_currency: string | null;
+      summary: string | null }>(
+      `SELECT j.company,j.title,j.location,j.remote,j.url,s.why_fits,j.salary_min,j.salary_currency,j.summary
+       FROM sent s JOIN jobs_cache j ON j.id=s.job_id
+       WHERE s.user_id=? AND s.digest_id=?`, [u.id, digestId]);
+    const retry = rows2.map((r) => ({
+      id: "", companyKey: "", tags: [], postedAt: null,
+      company: r.company, title: r.title, location: r.location, remote: r.remote === 1,
+      url: r.url, salaryMin: r.salary_min, salaryCurrency: r.salary_currency,
+      why: r.why_fits, summary: r.summary }));
+    const loc = asLocale(u.locale);
+    const sent = await sendTelegram(
+      botToken!, u.telegram_chat_id!, formatDigest(retry, scanned, loc), digestId, loc);
+    if (sent.ok) {
+      await d1.execute("UPDATE sent SET status='sent', sent_at=? WHERE digest_id=?", [now.toISOString(), digestId]);
+      ctx.delivered++;
+      // Відкладена добірка й є відповіддю на «ще п'ять»: закриваємо запит,
+      // інакше наступної години пішла б друга, повна.
+      if (onRequest) await closeRequest();
+      console.log(`  ${u.id.slice(0, 8)}: доставлено відкладену добірку ${digestId.slice(0, 8)}`);
+    } else if (isBlocked(sent)) {
+      await pauseBlocked();
+    }
+    return;
+  }
+
   if (!force && !onRequest) {
     const recent = await d1.query<{ created_at: string }>(
       "SELECT created_at FROM sent WHERE user_id=? AND created_at >= datetime('now','-2 day')", [u.id]);
@@ -332,48 +392,16 @@ async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
       console.log(`  ${u.id.slice(0, 8)}: пауза після ${Math.round(silentDays)} днів тиші`);
       return;
     }
-    if (silentDays > 14 && silentDays <= 15 && botToken && u.telegram_chat_id) {
-      await sendTelegram(botToken, u.telegram_chat_id,
+    if (silentDays > 14 && silentDays <= 15 && canSend) {
+      await sendTelegram(botToken!, u.telegram_chat_id!,
         say(asLocale(u.locale), "checkin"), "checkin", asLocale(u.locale));
     }
   }
 
-  // ── Спершу дотиснути непроставлене ──
-  // Запис зі статусом pending означає «підібрано, але не доставлено».
-  // Без цієї гілки такі рядки блокували б вакансію назавжди: вона вже в sent,
-  // тому в шортліст більше не потрапляє, а людина її так і не побачила.
-  //
-  // Для людини без Telegram pending — це нормальний кінцевий стан: добірка
-  // лежить у кабінеті на сайті, і дотискати її нікуди.
-  const pending = await d1.query<{ digest_id: string; created_at: string }>(
-    `SELECT digest_id, MIN(created_at) AS created_at FROM sent
-     WHERE user_id=? AND status='pending' GROUP BY digest_id ORDER BY created_at LIMIT 1`, [u.id]);
-  if (pending.length > 0 && botToken && u.telegram_chat_id && pendingIsStale(pending[0]!.created_at, now)) {
+  if (pending.length > 0 && canSend && stale) {
     // Два дні щогодинних спроб — досить. Позначаємо і йдемо підбирати нове.
     await d1.execute("UPDATE sent SET status='failed' WHERE digest_id=? AND status='pending'", [pending[0]!.digest_id]);
     console.log(`  ${u.id.slice(0, 8)}: відкладена добірка ${pending[0]!.digest_id.slice(0, 8)} не доставлена за ${PENDING_MAX_DAYS} дні, позначено failed`);
-  } else if (pending.length > 0 && botToken && u.telegram_chat_id) {
-    const digestId = pending[0]!.digest_id;
-    const rows2 = await d1.query<{ company: string; title: string; location: string | null; remote: number;
-      url: string; why_fits: string; salary_min: number | null; salary_currency: string | null;
-      summary: string | null }>(
-      `SELECT j.company,j.title,j.location,j.remote,j.url,s.why_fits,j.salary_min,j.salary_currency,j.summary
-       FROM sent s JOIN jobs_cache j ON j.id=s.job_id
-       WHERE s.user_id=? AND s.digest_id=?`, [u.id, digestId]);
-    const retry = rows2.map((r) => ({
-      id: "", companyKey: "", tags: [], postedAt: null,
-      company: r.company, title: r.title, location: r.location, remote: r.remote === 1,
-      url: r.url, salaryMin: r.salary_min, salaryCurrency: r.salary_currency,
-      why: r.why_fits, summary: r.summary }));
-    const loc = asLocale(u.locale);
-    const ok = await sendTelegram(
-      botToken, u.telegram_chat_id, formatDigest(retry, scanned, loc), digestId, loc);
-    if (ok) {
-      await d1.execute("UPDATE sent SET status='sent', sent_at=? WHERE digest_id=?", [now.toISOString(), digestId]);
-      ctx.delivered++;
-      console.log(`  ${u.id.slice(0, 8)}: доставлено відкладену добірку ${digestId.slice(0, 8)}`);
-    }
-    return;
   }
 
   const profile: Profile = {
@@ -463,7 +491,7 @@ async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
     // Облік не має права зламати доставку: впав запис — добірка все одно йде.
     try {
       await d1.execute(
-        `INSERT INTO api_usage (id,service,operation,model,input_tokens,output_tokens,cost_usd,ok)
+        `INSERT OR IGNORE INTO api_usage (id,service,operation,model,input_tokens,output_tokens,cost_usd,ok)
          VALUES (?,'anthropic','match_reason',?,?,?,0,?)`,
         [crypto.randomUUID(), u.model, u.inputTokens, u.outputTokens, u.ok ? 1 : 0]);
     } catch { /* журнал не важливіший за доставку */ }
@@ -499,28 +527,21 @@ async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
   const locale = asLocale(u.locale);
   const text = formatDigest(withWhy, scanned, locale);
   if (botToken && u.telegram_chat_id) {
-    const ok = await sendTelegram(botToken, u.telegram_chat_id, text, digestId, locale);
-    if (!ok) {
-      console.log(`  ${u.id.slice(0, 8)}: доставка не вдалась, спробуємо наступного прогону`);
+    const sent = await sendTelegram(botToken, u.telegram_chat_id, text, digestId, locale);
+    if (!sent.ok) {
+      if (isBlocked(sent)) await pauseBlocked();
+      else console.log(`  ${u.id.slice(0, 8)}: доставка не вдалась, спробуємо наступного прогону`);
       return;
     }
     await d1.execute("UPDATE sent SET status='sent', sent_at=? WHERE digest_id=?", [now.toISOString(), digestId]);
     ctx.delivered++;
-    if (onRequest) {
-      await d1.execute(
-        "UPDATE delivery_requests SET handled_at=datetime('now') WHERE user_id=? AND handled_at IS NULL",
-        [u.id]);
-    }
+    if (onRequest) await closeRequest();
     console.log(`  ${u.id.slice(0, 8)}: надіслано ${withWhy.length}${onRequest ? " (на запит)" : ""}`);
   } else {
     // Немає куди слати — добірка вже в кабінеті як pending. Запит «ще» треба
     // закрити й тут: інакше він лишався відкритим і щогодини породжував нову
     // добірку для людини без Telegram — доти, доки не закінчились вакансії.
-    if (onRequest) {
-      await d1.execute(
-        "UPDATE delivery_requests SET handled_at=datetime('now') WHERE user_id=? AND handled_at IS NULL",
-        [u.id]);
-    }
+    if (onRequest) await closeRequest();
     console.log(`  ${u.id.slice(0, 8)}: підібрано ${withWhy.length}, ${
       u.telegram_chat_id ? "доставка чекає на токен бота" : "лежить у кабінеті"}${onRequest ? " (на запит)" : ""}`);
     if (process.env.PRINT_DIGEST) console.log("\n" + text + "\n");

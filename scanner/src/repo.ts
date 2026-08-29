@@ -171,7 +171,9 @@ export class Repo {
 
   // ── прогони ────────────────────────────────────────────────
   async startRun(id: string, startedAt: string): Promise<void> {
-    await this.d1.execute("INSERT INTO scan_runs (id,started_at,status) VALUES (?,?,'running')", [id, startedAt]);
+    // OR IGNORE: D1 тепер повторює запити, і таймаут ПІСЛЯ коміту дав би
+    // конфлікт ключа на другій спробі — прогін помирав би, не почавшись.
+    await this.d1.execute("INSERT OR IGNORE INTO scan_runs (id,started_at,status) VALUES (?,?,'running')", [id, startedAt]);
   }
 
   async finishRun(id: string, o: {

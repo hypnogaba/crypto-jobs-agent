@@ -32,3 +32,12 @@ describe("upsertJobs", () => {
     expect(stmt!.params.slice(-2)).toEqual([null, null]);
   });
 });
+
+describe("startRun", () => {
+  it("повтор того самого INSERT після таймауту D1 не валить прогін", async () => {
+    const execute = vi.fn().mockResolvedValue(undefined);
+    const repo = new Repo({ execute } as never);
+    await repo.startRun("run-1", "2026-08-29T00:00:00Z");
+    expect(execute.mock.calls[0]![0]).toMatch(/INSERT OR IGNORE INTO scan_runs/);
+  });
+});

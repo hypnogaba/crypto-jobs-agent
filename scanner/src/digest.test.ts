@@ -103,25 +103,30 @@ describe("fillMissingSummaries", () => {
 });
 
 // ── Доставка в Telegram ───────────────────────────────────────
-import { clampSummary, fitTelegram, formatDigest, sendTelegram, TELEGRAM_MAX, describeError } from "./digest.js";
+import { clampSummary, fitTelegram, formatDigest, isBlocked, sendTelegram, TELEGRAM_MAX, describeError } from "./digest.js";
 
 describe("sendTelegram", () => {
   it("обрив мережі — це false, а не виняток на весь прогін", async () => {
     const f = vi.fn().mockRejectedValue(Object.assign(new Error("fetch failed"), { cause: new Error("ECONNRESET") }));
     vi.spyOn(console, "log").mockImplementation(() => {});
-    await expect(sendTelegram("t", "123456789", "hi", "d1", "en", f as never)).resolves.toBe(false);
+    await expect(sendTelegram("t", "123456789", "hi", "d1", "en", f as never))
+      .resolves.toEqual({ ok: false, status: null });
   });
 
-  it("не-200 від Telegram — теж false", async () => {
+  it("403 від Telegram — false і статус, щоб розпізнати блокування", async () => {
     const f = vi.fn().mockResolvedValue(new Response("Forbidden: bot was blocked", { status: 403 }));
     vi.spyOn(console, "log").mockImplementation(() => {});
-    await expect(sendTelegram("t", "123456789", "hi", "d1", "en", f as never)).resolves.toBe(false);
+    const r = await sendTelegram("t", "123456789", "hi", "d1", "en", f as never);
+    expect(r).toEqual({ ok: false, status: 403 });
+    expect(isBlocked(r)).toBe(true);
+    expect(isBlocked({ ok: false, status: 500 })).toBe(false);
+    expect(isBlocked({ ok: false, status: null })).toBe(false);
   });
 
   it("200 OK — true, і текст не довший за 4096", async () => {
     const f = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
     const long = "x".repeat(TELEGRAM_MAX + 500);
-    await expect(sendTelegram("t", "123456789", long, "d1", "en", f as never)).resolves.toBe(true);
+    await expect(sendTelegram("t", "123456789", long, "d1", "en", f as never)).resolves.toEqual({ ok: true, status: 200 });
     const body = JSON.parse((f.mock.calls[0]![1] as { body: string }).body) as { text: string };
     expect(body.text.length).toBeLessThanOrEqual(TELEGRAM_MAX);
   });
@@ -206,5 +211,83 @@ describe("pendingIsStale", () => {
   });
   it("старший за два дні — здаємось", () => {
     expect(pendingIsStale("2026-08-26 09:00:00", now)).toBe(true);
+  });
+});
+
+// ── Порядок кроків deliverTo ─────────────────────────────────
+import { deliverTo, type RunContext, type UserRow } from "./digest.js";
+
+/** Мінімальна підробка D1: відповідає за фрагментом SQL, пам'ятає execute. */
+function fakeD1(answers: Array<[RegExp, unknown[]]>) {
+  const executed: Array<{ sql: string; params: unknown[] }> = [];
+  return {
+    executed,
+    d1: {
+      query: async (sql: string) => answers.find(([re]) => re.test(sql))?.[1] ?? [],
+      execute: async (sql: string, params: unknown[] = []) => { executed.push({ sql, params }); },
+      batch: async () => {},
+    },
+  };
+}
+
+const user = (o: Partial<UserRow> = {}): UserRow => ({
+  id: "user-1", telegram_chat_id: "123456789", locale: "en", timezone: "Europe/Paris", delivery_hour: 9,
+  status: "active", last_interaction_at: null, spheres: "[]", industries: "[]", seniority: null,
+  remote_mode: "any", location: null, salary_min: null, country: null, custom_role: null,
+  seniority_weight: null, location_weight: null, salary_weight: null, ...o });
+
+const ctxOf = (d1: unknown, o: Partial<RunContext> = {}): RunContext => ({
+  d1: d1 as RunContext["d1"], cfg: { anthropicApiKey: null } as RunContext["cfg"],
+  now: new Date("2026-08-29T10:05:00Z"), // 12:05 у Парижі — година 9 вже минула
+  botToken: "tok", force: false, scanned: { jobs: 1, companies: 1 }, requested: new Set(), delivered: 0, ...o });
+
+const pendingRows = [
+  [/status='pending'/, [{ digest_id: "dg-1", created_at: "2026-08-29 09:00:00" }]],
+  [/FROM sent s JOIN jobs_cache/, [{ company: "Acme", title: "Eng", location: null, remote: 1,
+    url: "https://x.test/1", why_fits: "why", salary_min: null, salary_currency: null, summary: null }]],
+  [/created_at >= datetime/, [{ created_at: "2026-08-29 09:00:00" }]],
+] as Array<[RegExp, unknown[]]>;
+
+describe("deliverTo", () => {
+  it("відкладену добірку дотискає навіть якщо «сьогодні вже було»", async () => {
+    // Сайт зробив pending об 11:00, людина прив'язала Telegram — о 12:00 має отримати.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const { d1, executed } = fakeD1(pendingRows);
+    const ctx = ctxOf(d1);
+    await deliverTo(user(), ctx);
+    expect(ctx.delivered).toBe(1);
+    expect(executed.some((e) => /SET status='sent'/.test(e.sql) && e.params.includes("dg-1"))).toBe(true);
+    expect(executed.some((e) => /delivery_requests/.test(e.sql))).toBe(false);
+  });
+
+  it("на запит «ще» відкладена добірка закриває запит, а не породжує другу", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const { d1, executed } = fakeD1(pendingRows);
+    await deliverTo(user(), ctxOf(d1, { requested: new Set(["user-1"]) }));
+    expect(executed.some((e) => /UPDATE delivery_requests SET handled_at/.test(e.sql))).toBe(true);
+  });
+
+  it("403 від Telegram ставить людину на паузу з причиною blocked", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("Forbidden", { status: 403 }));
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const { d1, executed } = fakeD1(pendingRows);
+    const ctx = ctxOf(d1);
+    await deliverTo(user(), ctx);
+    expect(ctx.delivered).toBe(0);
+    const pause = executed.find((e) => /UPDATE users SET status='paused'/.test(e.sql));
+    expect(pause?.sql).toMatch(/paused_reason='blocked'/);
+    expect(pause?.params).toEqual(["user-1"]);
+    expect(executed.some((e) => /INSERT/.test(e.sql))).toBe(false);
+  });
+
+  it("без Telegram pending — кінцевий стан, і «сьогодні вже було» не породжує нову", async () => {
+    const f = vi.spyOn(globalThis, "fetch");
+    const { d1, executed } = fakeD1(pendingRows);
+    const ctx = ctxOf(d1);
+    await deliverTo(user({ telegram_chat_id: null }), ctx);
+    expect(f).not.toHaveBeenCalled();
+    expect(executed).toEqual([]);
   });
 });
