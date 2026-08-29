@@ -1,4 +1,4 @@
-import { one, run } from "@/lib/db";
+import { run } from "@/lib/db";
 import { deriveCountry } from "@/lib/geo";
 
 /**
@@ -15,8 +15,9 @@ import { deriveCountry } from "@/lib/geo";
  */
 export async function persistCountry(userId: string, location: string | null): Promise<void> {
   try {
-    const u = await one<{ timezone: string | null }>("SELECT timezone FROM users WHERE id=?", userId);
-    const country = deriveCountry(location, u?.timezone ?? null);
-    await run("UPDATE profiles SET country=? WHERE user_id=?", country, userId);
+    // Часовий пояс сюди більше не входить: країна — це відповідь на «де
+    // хочеш працювати», а не здогад про місце перебування. Тому й зайвого
+    // запиту до users тут немає.
+    await run("UPDATE profiles SET country=? WHERE user_id=?", deriveCountry(location), userId);
   } catch { /* краще без країни, ніж без профілю */ }
 }

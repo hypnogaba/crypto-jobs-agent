@@ -73,13 +73,16 @@ describe("deriveCountry", () => {
     expect(deriveCountry("Київ", "Europe/Paris")).toBe("UA");
   });
 
-  it("падає на пояс, коли локації немає", () => {
-    expect(deriveCountry(null, "Europe/Kyiv")).toBe("UA");
-    expect(deriveCountry("", "Europe/Paris")).toBe("FR");
+  // Раніше пояс був запасним сигналом. Тепер ні: національні дошки — це
+  // про намір («хочу працювати в Україні»), а не про місце перебування.
+  it("пояс країни НЕ визначає", () => {
+    expect(deriveCountry(null, "Europe/Kyiv")).toBeNull();
+    expect(deriveCountry("", "Europe/Paris")).toBeNull();
   });
 
   it("виправляє розкладку дорогою", () => {
     expect(deriveCountry("зфкші", "UTC")).toBe("FR");
+    expect(deriveCountry("зфкші", null)).toBe("FR");
   });
 
   it("без жодного сигналу лишає порожнє", () => {

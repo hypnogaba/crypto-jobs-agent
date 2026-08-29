@@ -105,12 +105,22 @@ export function countryFromTimezone(tz: string | null | undefined): string | nul
 }
 
 /**
- * Підсумковий вивід. Локація б'є пояс: людина у відрядженні залишається
- * собою, а пояс у ту мить бреше.
+ * Підсумковий вивід країни.
+ *
+ * Тільки з того, що людина СКАЗАЛА у відповідь на «Де хочеш працювати?».
+ * Часовий пояс сюди більше не входить, хоч раніше й був запасним сигналом.
+ *
+ * Причина: країна тут вирішує, чи показувати національні дошки, а це
+ * питання наміру, а не місця перебування. Українець, який шукає віддалену
+ * роботу будь-де, не просив вакансій із DOU — і пояс не має вирішувати за
+ * нього. Так само розробник у відрядженні до Варшави не стає поляком.
+ *
+ * Пояс лишається у системі, але відповідає лише за одне: КОЛИ надсилати
+ * добірку. Дві різні речі, які раніше були сплутані в одну.
  */
 export function deriveCountry(
   location: string | null | undefined,
-  timezone: string | null | undefined,
+  _timezone?: string | null,
 ): string | null {
-  return countryFromLocation(location ? fixLayout(location) : null) ?? countryFromTimezone(timezone);
+  return countryFromLocation(location ? fixLayout(location) : null);
 }

@@ -295,8 +295,9 @@ export async function sendFeedback(formData: FormData): Promise<void> {
  * відому зону і ніколи не ставить UTC: порожній чи підроблений сигнал не
  * має псувати розклад доставки.
  *
- * Разом із зоною перераховується країна — без неї людині не показуються
- * національні дошки, і саме через це вони досі не діставались нікому.
+ * Зона відповідає РІВНО за одне — коли надсилати добірку. Країну вона не
+ * визначає: національні дошки прив'язані до того, де людина хоче працювати,
+ * а не до того, де вона зараз сидить.
  */
 export async function recordTimezone(raw: string): Promise<void> {
   const user = await currentUser();
@@ -306,10 +307,6 @@ export async function recordTimezone(raw: string): Promise<void> {
   if (tz === "UTC") return;
 
   await run("UPDATE users SET timezone=?, updated_at=datetime('now') WHERE id=? AND timezone='UTC'", tz, user.id);
-
-  const p = await one<{ location: string | null }>(
-    "SELECT location FROM profiles WHERE user_id=?", user.id);
-  if (p) await persistCountry(user.id, p.location);
 }
 
 export async function switchTheme(formData: FormData): Promise<void> {
