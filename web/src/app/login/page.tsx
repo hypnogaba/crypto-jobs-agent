@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import Shell from "../shell";
@@ -10,6 +11,12 @@ import { t } from "@/lib/i18n";
  * Особа людини — це її Telegram, тож пароля тут немає й ніколи не було чого
  * забувати. Бот на команду /site видає разове посилання, яке розбирає /enter.
  */
+
+export async function generateMetadata(): Promise<Metadata> {
+  const locale = await detectLocale();
+  return { title: t(locale, "auth.login") };
+}
+
 export default async function Login() {
   const locale = await detectLocale();
   const env = getCloudflareContext().env as unknown as Record<string, string | undefined>;

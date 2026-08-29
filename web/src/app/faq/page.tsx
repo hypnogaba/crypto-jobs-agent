@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import Shell from "../shell";
 import Footer from "../footer";
@@ -5,6 +6,12 @@ import { detectLocale } from "../actions";
 import { t } from "@/lib/i18n";
 
 const KEYS = ["cost", "apply", "sources", "cv", "why5", "wrong", "stop", "telegram", "languages", "dead"];
+
+
+export async function generateMetadata(): Promise<Metadata> {
+  const locale = await detectLocale();
+  return { title: t(locale, "faq.title") };
+}
 
 export default async function Faq() {
   const locale = await detectLocale();

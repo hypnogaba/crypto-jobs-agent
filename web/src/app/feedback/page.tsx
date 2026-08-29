@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import Shell from "../shell";
 import { detectLocale, sendFeedback } from "../actions";
@@ -8,6 +9,12 @@ import { t } from "@/lib/i18n";
  * Одне поле й кнопка. Ані категорій, ані оцінок у зірках: людина, яка хоче
  * щось сказати, має сказати це одразу, а не спершу класифікувати себе.
  */
+
+export async function generateMetadata(): Promise<Metadata> {
+  const locale = await detectLocale();
+  return { title: t(locale, "fb.title") };
+}
+
 export default async function Feedback({
   searchParams,
 }: { searchParams: Promise<{ sent?: string; error?: string }> }) {

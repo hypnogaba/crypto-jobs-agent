@@ -32,7 +32,9 @@ export const metadata: Metadata = {
   // Канонічна адреса — власний домен. Без цього посилання, якими діляться,
   // вели б на workers.dev, і пошук індексував би дві копії одного сайту.
   metadataBase: new URL(SITE),
-  title: TITLE,
+  // Шаблон: сторінка дає свою назву своєю мовою, а хвіст лишається брендом.
+  // Головна без власної назви бере повний рядок.
+  title: { default: TITLE, template: "%s — NextRole" },
   description: DESCRIPTION,
   alternates: { canonical: "/" },
   openGraph: {

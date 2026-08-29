@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import Shell from "../shell";
 import { deleteAccount, detectLocale, saveSettings, togglePause } from "../actions";
@@ -15,6 +16,12 @@ function Row({ title, hint, children }: { title: string; hint?: string; children
       <div>{children}</div>
     </div>
   );
+}
+
+
+export async function generateMetadata(): Promise<Metadata> {
+  const locale = await detectLocale();
+  return { title: t(locale, "settings.title") };
 }
 
 export default async function Settings({ searchParams }: { searchParams: Promise<{ saved?: string }> }) {

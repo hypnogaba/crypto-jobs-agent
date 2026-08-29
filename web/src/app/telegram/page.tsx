@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
@@ -6,6 +7,12 @@ import { createConnectToken, detectLocale } from "../actions";
 import { currentUser } from "@/lib/auth";
 import { one, run } from "@/lib/db";
 import { t } from "@/lib/i18n";
+
+
+export async function generateMetadata(): Promise<Metadata> {
+  const locale = await detectLocale();
+  return { title: t(locale, "telegram.title") };
+}
 
 export default async function Telegram() {
   const locale = await detectLocale();
