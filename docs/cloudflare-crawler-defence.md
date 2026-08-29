@@ -107,11 +107,16 @@ lower(http.user_agent) matches "(gptbot|ccbot|claudebot|anthropic-ai|bytespider|
 
 ```
 Ім'я:     no user agent
-Умова:    (http.user_agent eq "")
+Умова:    (http.user_agent eq "" and not starts_with(http.request.uri.path, "/api/telegram/"))
 Дія:      Managed Challenge
 ```
 
 Не Block: порожній UA буває в кривих, але законних клієнтів.
+
+> **Виняток для Telegram обов'язковий.** Telegram не гарантує User-Agent у
+> webhook-запитах, а Managed Challenge на POST — це тиха смерть бота: Telegram
+> отримає HTML замість 200, почне ретраїти, потім відключить webhook. Симптом
+> був би «бот замовк», і на WAF ніхто б не подумав.
 
 ### Правило 4 — API тільки для Telegram
 
@@ -121,8 +126,8 @@ lower(http.user_agent) matches "(gptbot|ccbot|claudebot|anthropic-ai|bytespider|
 Дія:      Block
 ```
 
-> ⚠️ Перевірити перед увімкненням, чи `/api/telegram/webhook` — єдиний живий
-> ендпойнт під `/api/`. Якщо ні, правило зламає сайт.
+Перевірено: під `/api/` живе рівно один маршрут — `web/src/app/api/telegram/webhook/route.ts`.
+Інших ендпойнтів немає, тож правило нічого не ламає.
 
 Правило 5 лишити порожнім: буде потрібне, коли з'являться категорійні сторінки.
 
@@ -134,14 +139,16 @@ Security → WAF → Rate limiting rules. На Free — **одне** прави�
 
 ```
 Ім'я:      page flood
-Умова:     (not cf.client.bot)
+Умова:     (not cf.client.bot and not starts_with(http.request.uri.path, "/api/telegram/"))
 Лічильник: за IP
 Поріг:     60 запитів за 10 секунд
 Дія:       Managed Challenge, на 10 хвилин
 ```
 
 Поріг навмисно високий: мета — зрізати шторм, а не заважати людині,
-яка швидко клацає. `not cf.client.bot` тримає пошукові системи поза лічильником.
+яка швидко клацає. `not cf.client.bot` тримає пошукові системи поза лічильником,
+а виняток для `/api/telegram/` — Telegram: усі його запити приходять з невеликого
+пулу IP, і ранкова розсилка легко дала б сплеск з однієї адреси.
 
 ---
 
@@ -164,6 +171,11 @@ Cloudflare дописує свої `Disallow` **перед** нашим `robots.
 власному домені, спокійно заходив там.
 
 Після деплою перевірити: `curl -sI https://nextrole.workers.dev/` має перестати відповідати.
+
+Перевірено, що це безпечно: webhook Telegram зареєстровано на
+`https://nextrole.info/api/telegram/webhook`, тобто на власному домені, а не на
+`workers.dev` (`getWebhookInfo`, 2026-08-29). Якби він висів на workers.dev,
+вимкнення вбило б бота.
 
 ---
 
