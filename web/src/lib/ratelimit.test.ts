@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decide, nextState, type AttemptRow } from "./ratelimit";
+import { FEEDBACK_LIMITS, decide, nextState, type AttemptRow } from "./ratelimit";
 
 const NOW = new Date("2026-08-27T12:00:00.000Z");
 const row = (o: Partial<AttemptRow> = {}): AttemptRow => ({
@@ -40,5 +40,18 @@ describe("nextState", () => {
     const n = nextState(old, NOW);
     expect(n.attempts).toBe(1);
     expect(n.blocked_until).toBeNull();
+  });
+});
+
+describe("ліміт відгуків", () => {
+  it("восьмий відгук за годину ще не блокує", () => {
+    expect(nextState(row({ attempts: 7 }), NOW, FEEDBACK_LIMITS).blocked_until).toBeNull();
+  });
+  it("двадцятий — блокує", () => {
+    expect(nextState(row({ attempts: 19 }), NOW, FEEDBACK_LIMITS).blocked_until).not.toBeNull();
+  });
+  it("вікно триває годину, а не чверть", () => {
+    const old = row({ attempts: 10, window_start: "2026-08-27T11:20:00.000Z" });
+    expect(nextState(old, NOW, FEEDBACK_LIMITS).attempts).toBe(11);
   });
 });

@@ -23,11 +23,14 @@ const P = {
     fr: "Bonjour. Chaque matin je vous envoie cinq offres choisies pour vous.\nQuatre questions, trente secondes.",
     ru: "Привет. Я каждое утро присылаю пять вакансий, подобранных под тебя.\nЧетыре вопроса, тридцать секунд.",
   },
+  // «Протягом години» — бо сайт уже поставив запит на першу добірку в чергу
+  // (delivery_requests); ту саму обіцянку дає кабінет. Далі — щодня о
+  // вибраній годині, її рухає /time.
   linked: {
-    en: "Done. The first five roles arrive tomorrow at 09:00. Send /time to move it.",
-    uk: "Готово. Перші п'ять вакансій прийдуть завтра о 09:00. Щоб змінити годину — /time.",
-    fr: "C'est fait. Les cinq premières offres arrivent demain à 09h00. Pour changer l'heure : /time.",
-    ru: "Готово. Первые пять вакансий придут завтра в 09:00. Чтобы изменить час — /time.",
+    en: "Done. The first five roles arrive within the hour, then every day at your hour. Send /time to move it.",
+    uk: "Готово. Перші п'ять вакансій прийдуть протягом години, далі — щодня о твоїй годині. Змінити її — /time.",
+    fr: "C'est fait. Les cinq premières offres arrivent dans l'heure, puis chaque jour à votre heure. Pour la changer : /time.",
+    ru: "Готово. Первые пять вакансий придут в течение часа, дальше — каждый день в твой час. Изменить его — /time.",
   },
   linkExpired: {
     en: "That link has expired. Refresh the connect page and try again.",
@@ -147,6 +150,12 @@ const P = {
     fr: "Pour changer, envoyez /time et une heure, par exemple /time 9.",
     ru: "Чтобы изменить — напиши /time и час, например /time 9.",
   },
+  timeZoneHint: {
+    en: "The zone is a guess from your language or city, not measured. If it is wrong: /site, then Settings → Save — the site reads the zone from your browser.",
+    uk: "Зону я вгадую з мови чи міста, а не міряю. Якщо вона не та: /site, далі Налаштування → Зберегти — сайт бере зону з браузера.",
+    fr: "Le fuseau est deviné d'après votre langue ou votre ville, pas mesuré. S'il est faux : /site, puis Réglages → Enregistrer — le site lit le fuseau du navigateur.",
+    ru: "Зону я угадываю по языку или городу, а не измеряю. Если она не та: /site, затем Настройки → Сохранить — сайт берёт зону из браузера.",
+  },
   timeBad: {
     en: "The hour must be a number from 0 to 23. For example: /time 9",
     uk: "Година має бути числом від 0 до 23. Наприклад: /time 9",
@@ -158,6 +167,17 @@ const P = {
     uk: "Профілю ще немає. Напиши /start, і я поставлю чотири питання.",
     fr: "Pas encore de profil. Envoyez /start et je poserai quatre questions.",
     ru: "Профиля ещё нет. Напиши /start, и я задам четыре вопроса.",
+  },
+  deleteAsk: {
+    en: "This erases your profile, your history and your CV text. It cannot be undone. Sure?",
+    uk: "Це зітре профіль, історію добірок і текст резюме. Скасувати неможливо. Точно?",
+    fr: "Cela efface votre profil, votre historique et le texte de votre CV. Irréversible. Sûr ?",
+    ru: "Это сотрёт профиль, историю подборок и текст резюме. Отменить нельзя. Точно?",
+  },
+  deleteYes: { en: "Yes, erase everything", uk: "Так, видалити все", fr: "Oui, tout effacer", ru: "Да, удалить всё" },
+  deleteNo:  { en: "Cancel", uk: "Скасувати", fr: "Annuler", ru: "Отмена" },
+  deleteKept: {
+    en: "Nothing was deleted.", uk: "Нічого не видалено.", fr: "Rien n'a été supprimé.", ru: "Ничего не удалено.",
   },
   deleted: {
     en: "Account and all data deleted. Want to come back? Just /start.",
@@ -238,6 +258,29 @@ const P = {
     uk: "Щось пішло не так під час читання. Спробуй ще раз або просто напиши речення.",
     fr: "Un problème est survenu. Réessayez, ou écrivez simplement une phrase.",
     ru: "Что-то пошло не так при чтении. Попробуй ещё раз или просто напиши предложение.",
+  },
+  // Текст не команда від того, хто вже підключений. Раніше будь-які три
+  // літери від такої людини переписували їй профіль порожніми сферами.
+  freeTextHint: {
+    en: "I only take commands here. /profile shows your profile, /start redoes the four questions, or send your CV as a file. /help lists the rest.",
+    uk: "Тут я розумію лише команди. /profile — твій профіль, /start — чотири питання заново, або надішли резюме файлом. /help — решта.",
+    fr: "Ici je ne comprends que les commandes. /profile montre votre profil, /start refait les quatre questions, ou envoyez votre CV en fichier. /help pour le reste.",
+    ru: "Здесь я понимаю только команды. /profile — твой профиль, /start — четыре вопроса заново, или пришли резюме файлом. /help — остальное.",
+  },
+  // Коротке слово посеред питань: кнопки чекають, а слово ні до чого не веде.
+  useButtons: {
+    en: "Use the buttons above, or write a full sentence about the work you want and I will tick the boxes.",
+    uk: "Скористайся кнопками вище або напиши цілим реченням, яку роботу шукаєш, — я проставлю галочки.",
+    fr: "Utilisez les boutons ci-dessus, ou écrivez une phrase complète sur le travail voulu et je cocherai pour vous.",
+    ru: "Воспользуйся кнопками выше или напиши целым предложением, какую работу ищешь, — я проставлю галочки.",
+  },
+  // Цей Telegram уже тримає акаунт із історією добірок: мовчки перекинути
+  // його на інший — втратити її. Людина сама обирає, куди заходити.
+  alreadyLinked: {
+    en: "This Telegram is already connected to an account that has received digests. Send /site to sign in to that one on the web.",
+    uk: "Цей Telegram уже прив'язаний до акаунта, який отримував добірки. Напиши /site, щоб увійти в нього на сайті.",
+    fr: "Ce Telegram est déjà relié à un compte qui a reçu des sélections. Envoyez /site pour y accéder sur le site.",
+    ru: "Этот Telegram уже привязан к аккаунту, который получал подборки. Напиши /site, чтобы войти в него на сайте.",
   },
   unknown: {
     en: "I do not know that command. /help shows what I can do.",

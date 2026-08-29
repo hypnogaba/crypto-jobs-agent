@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import Shell from "../shell";
 import ApplyButton from "./apply-button";
@@ -10,6 +11,12 @@ import { dayLabel } from "@/lib/digest-time";
 import type { Locale } from "@/lib/vocab";
 
 type Match = Awaited<ReturnType<typeof listMatches>>[number];
+
+
+export async function generateMetadata(): Promise<Metadata> {
+  const locale = await detectLocale();
+  return { title: t(locale, "dash.title") };
+}
 
 export default async function Dashboard({ searchParams }: { searchParams: Promise<{ queued?: string }> }) {
   const { queued } = await searchParams;

@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import Shell from "../shell";
 import { detectLocale, readDraft, saveProfile } from "../actions";
@@ -25,6 +26,12 @@ function Question({ n, title, hint, children }: {
       </div>
     </fieldset>
   );
+}
+
+
+export async function generateMetadata(): Promise<Metadata> {
+  const locale = await detectLocale();
+  return { title: t(locale, "onboarding.title") };
 }
 
 export default async function Onboarding() {

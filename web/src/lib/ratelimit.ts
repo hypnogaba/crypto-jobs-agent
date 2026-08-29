@@ -7,9 +7,17 @@ import { one, run } from "./db";
  * було підбирати нескінченно. Рахуємо спроби у вікні й блокуємо на час.
  */
 
-const WINDOW_MINUTES = 15;
-const MAX_ATTEMPTS = 8;
-const BLOCK_MINUTES = 30;
+export interface Limits { windowMinutes: number; maxAttempts: number; blockMinutes: number }
+
+/** Підбір пароля: жорстко. */
+export const AUTH_LIMITS: Limits = { windowMinutes: 15, maxAttempts: 8, blockMinutes: 30 };
+
+/**
+ * Відгук: м'яко. Він рахує УСПІШНІ надсилання, а не невдачі, і за однією
+ * адресою може сидіти цілий офіс чи мобільна мережа за NAT. Вісім відгуків
+ * за чверть години блокували на пів години всіх сусідів по адресі.
+ */
+export const FEEDBACK_LIMITS: Limits = { windowMinutes: 60, maxAttempts: 20, blockMinutes: 60 };
 
 export interface RateVerdict { allowed: boolean; retryAfterMinutes: number }
 
@@ -24,15 +32,15 @@ export function decide(row: AttemptRow | null, now: Date): RateVerdict {
 }
 
 /** Чистий підрахунок наступного стану після невдалої спроби. */
-export function nextState(row: AttemptRow | null, now: Date): AttemptRow {
+export function nextState(row: AttemptRow | null, now: Date, limits: Limits = AUTH_LIMITS): AttemptRow {
   const windowExpired = !row ||
-    (now.getTime() - new Date(row.window_start).getTime()) > WINDOW_MINUTES * 60_000;
+    (now.getTime() - new Date(row.window_start).getTime()) > limits.windowMinutes * 60_000;
   const attempts = windowExpired ? 1 : row.attempts + 1;
   return {
     attempts,
     window_start: windowExpired ? now.toISOString() : row.window_start,
-    blocked_until: attempts >= MAX_ATTEMPTS
-      ? new Date(now.getTime() + BLOCK_MINUTES * 60_000).toISOString() : null,
+    blocked_until: attempts >= limits.maxAttempts
+      ? new Date(now.getTime() + limits.blockMinutes * 60_000).toISOString() : null,
   };
 }
 
@@ -42,11 +50,11 @@ export async function checkRate(key: string): Promise<RateVerdict> {
   return decide(row, new Date());
 }
 
-/** Викликається ПІСЛЯ невдалої спроби. */
-export async function recordFailure(key: string): Promise<void> {
+/** Викликається ПІСЛЯ невдалої спроби (або, з м'якими лімітами, після кожної). */
+export async function recordFailure(key: string, limits: Limits = AUTH_LIMITS): Promise<void> {
   const row = await one<AttemptRow>(
     "SELECT attempts,window_start,blocked_until FROM auth_attempts WHERE key=?", key);
-  const next = nextState(row, new Date());
+  const next = nextState(row, new Date(), limits);
   await run(
     `INSERT INTO auth_attempts (key,attempts,window_start,blocked_until) VALUES (?,?,?,?)
      ON CONFLICT(key) DO UPDATE SET attempts=excluded.attempts,

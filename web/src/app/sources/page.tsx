@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Shell from "../shell";
 import Footer from "../footer";
 import { detectLocale } from "../actions";
@@ -28,6 +29,12 @@ const ATTRIBUTED = [
   { name: "Hacker News «Who is hiring»", url: "https://news.ycombinator.com", note: "щомісячний тред" },
   { name: "Getro", url: "https://getro.com", note: "борди екосистем фондів" },
 ];
+
+
+export async function generateMetadata(): Promise<Metadata> {
+  const locale = await detectLocale();
+  return { title: t(locale, "sources.title") };
+}
 
 export default async function Sources() {
   const locale = await detectLocale();

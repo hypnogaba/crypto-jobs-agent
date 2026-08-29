@@ -10,18 +10,15 @@ import { parseProfile } from "./parse";
 import { t as say, timeNow, timeSet } from "./bot-copy";
 import type { Locale } from "./vocab";
 import { persistCountry } from "@/lib/profile-country";
+import { timezoneFor } from "./geo";
+import { callTelegram, sendText } from "./telegram-send";
 
 /** Команди бота. Кабінет у чаті — мінімальний, повний лишається на сайті. */
 
 type Env = Record<string, string | undefined>;
 
 async function send(env: Env, chatId: number, text: string): Promise<void> {
-  const token = env.TELEGRAM_BOT_TOKEN;
-  if (!token) return;
-  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true }),
-  });
+  await sendText(env.TELEGRAM_BOT_TOKEN, chatId, text);
 }
 
 // ── Покроковий онбординг ──────────────────────────────────────
@@ -33,13 +30,8 @@ interface Keyed { text: string; callback_data: string }
 async function sendKeyboard(
   env: Env, chatId: number, text: string, rows: Keyed[][]
 ): Promise<number | null> {
-  const token = env.TELEGRAM_BOT_TOKEN;
-  if (!token) return null;
-  const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text, reply_markup: { inline_keyboard: rows } }),
-  });
-  const body = (await res.json()) as { result?: { message_id?: number } };
+  const body = await callTelegram<{ message_id?: number }>(env.TELEGRAM_BOT_TOKEN, "sendMessage",
+    { chat_id: chatId, text, reply_markup: { inline_keyboard: rows } });
   return body.result?.message_id ?? null;
 }
 
@@ -47,23 +39,13 @@ async function sendKeyboard(
 async function editKeyboard(
   env: Env, chatId: number, messageId: number, text: string, rows: Keyed[][]
 ): Promise<void> {
-  const token = env.TELEGRAM_BOT_TOKEN;
-  if (!token) return;
-  await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, message_id: messageId, text,
-                           reply_markup: { inline_keyboard: rows } }),
-  });
+  await callTelegram(env.TELEGRAM_BOT_TOKEN, "editMessageText",
+    { chat_id: chatId, message_id: messageId, text, reply_markup: { inline_keyboard: rows } });
 }
 
 /** Без цього кнопка крутиться, доки Telegram не здасться. */
 async function ackButton(env: Env, callbackId: string): Promise<void> {
-  const token = env.TELEGRAM_BOT_TOKEN;
-  if (!token) return;
-  await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ callback_query_id: callbackId }),
-  });
+  await callTelegram(env.TELEGRAM_BOT_TOKEN, "answerCallbackQuery", { callback_query_id: callbackId });
 }
 
 interface StateRow { step: string; draft: string; message_id: number | null }
@@ -307,7 +289,7 @@ async function finishOnboarding(
     await run(
       `INSERT INTO users (id,telegram_chat_id,locale,timezone,delivery_hour,last_interaction_at)
        VALUES (?,?,?,?,9,datetime('now'))`,
-      userId, String(chatId), locale, "UTC");
+      userId, String(chatId), locale, timezoneFor(locale, draft.location));
   }
 
   await run(
@@ -448,7 +430,7 @@ export async function handleDocument(
     if (!existing) {
       await run(
         `INSERT INTO users (id,telegram_chat_id,locale,timezone,delivery_hour,last_interaction_at)
-         VALUES (?,?,?,?,9,datetime('now'))`, userId, String(chatId), locale, "UTC");
+         VALUES (?,?,?,?,9,datetime('now'))`, userId, String(chatId), locale, timezoneFor(locale, parsed.location));
     }
 
     await run(
@@ -479,6 +461,24 @@ export async function handleDocument(
   return true;
 }
 
+/** Підтвердження /delete. Повертає true, якщо кнопка була саме про це. */
+export async function handleDeleteButton(
+  env: Env, chatId: number, data: string, callbackId: string | undefined, locale: Locale
+): Promise<boolean> {
+  if (!data.startsWith("del:")) return false;
+  if (callbackId) await ackButton(env, callbackId);
+
+  if (data !== "del:yes") {
+    await send(env, chatId, say("deleteKept", locale));
+    return true;
+  }
+  const user = await one<{ id: string }>("SELECT id FROM users WHERE telegram_chat_id=?", String(chatId));
+  if (user) await run("DELETE FROM users WHERE id=?", user.id);
+  await run("DELETE FROM bot_state WHERE chat_id=?", String(chatId));
+  await send(env, chatId, say("deleted", locale));
+  return true;
+}
+
 export const botLocale = (code: string | undefined): Locale => {
   const two = (code ?? "en").slice(0, 2).toLowerCase();
   return isLocale(two) ? two : "en";
@@ -499,7 +499,11 @@ export async function continueBotOnboarding(
       if (reaction === "more") {
         // Черга, а не обіцянка: сайт на Workers не дотягнеться до сканера,
         // тому запит підбирає сервер під час найближчого прогону доставки.
-        await run("INSERT INTO delivery_requests (id,user_id) VALUES (?,?)", uuid(), user.id);
+        // Один відкритий запит на людину — те саме правило, що й на сайті.
+        await run(
+          `INSERT INTO delivery_requests (id,user_id)
+           SELECT ?,? WHERE NOT EXISTS (SELECT 1 FROM delivery_requests WHERE user_id=? AND handled_at IS NULL)`,
+          uuid(), user.id, user.id);
         await send(env, chatId, say("moreQueued", locale));
       } else {
         // «Дякую, врахую» було неправдою: реакція нікуди не впливала.
@@ -553,7 +557,9 @@ export async function handleCommand(
       const zone = row?.timezone ?? "UTC";
 
       if (arg === undefined) {
-        await send(env, chatId, `${timeNow(locale, current, zone)}\n\n${say("timeUsage", locale)}`);
+        // Зону бот лише вгадує з мови чи міста — і каже про це прямо.
+        await send(env, chatId,
+          `${timeNow(locale, current, zone)}\n${say("timeZoneHint", locale)}\n\n${say("timeUsage", locale)}`);
         break;
       }
 
@@ -626,9 +632,14 @@ export async function handleCommand(
       await send(env, chatId, say("help", locale));
       break;
 
+    // Одна команда стирала все одразу — без жодного «точно?». Кнопка
+    // «Скасувати» — бо в меню /delete стоїть поруч із /help, і промах пальцем
+    // не має коштувати профілю.
     case "/delete":
-      await run("DELETE FROM users WHERE id=?", user!.id);
-      await send(env, chatId, say("deleted", locale));
+      await sendKeyboard(env, chatId, say("deleteAsk", locale), [
+        [{ text: say("deleteYes", locale), callback_data: "del:yes" },
+         { text: say("deleteNo", locale),  callback_data: "del:no" }],
+      ]);
       break;
 
     default:

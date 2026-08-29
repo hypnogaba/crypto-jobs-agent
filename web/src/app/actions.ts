@@ -9,9 +9,10 @@ import { parseProfile, type ParsedProfile } from "@/lib/parse";
 import { CvError, extractCvText } from "@/lib/cv";
 import { isLocale, localeFromHeader } from "@/lib/i18n";
 import { safeTimezone } from "@/lib/digest-time";
-import { checkRate, recordFailure } from "@/lib/ratelimit";
+import { FEEDBACK_LIMITS, checkRate, recordFailure } from "@/lib/ratelimit";
 import type { Locale } from "@/lib/vocab";
 import { persistCountry } from "@/lib/profile-country";
+import { sendText } from "@/lib/telegram-send";
 
 const DRAFT_COOKIE = "nr_draft";
 
@@ -100,29 +101,38 @@ export async function saveProfile(formData: FormData): Promise<void> {
     await run("UPDATE users SET timezone=?, updated_at=datetime('now') WHERE id=?", timezone, user.id);
   }
 
-  await persistProfile(user.id, draft?.text ?? "", profile);
+  // «Змінити профіль» приходить без чернетки: людина правила лише галочки.
+  // Текст резюме, з якого їх колись розібрано, має пережити це редагування.
+  await persistProfile(user.id, draft?.text ?? null, profile);
   (await cookies()).delete(DRAFT_COOKIE);
   redirect("/telegram");
 }
 
 async function persistProfile(
-  userId: string, rawInput: string,
+  userId: string, rawInput: string | null,
   p: { spheres: string[]; industries: string[]; seniority: string | null; remoteMode: string;
        location: string | null; salaryMin: number | null; salaryCurrency: string | null }
 ): Promise<void> {
-  const isCv = rawInput.length > 800;
+  // Без нового тексту (null) три текстові стовпці лишаються як були: раніше
+  // редагування без чернетки ставило cv_text=NULL, raw_input='' і
+  // mode='freetext', і резюме зникало з профілю мовчки.
+  const keepText = rawInput === null;
+  const isCv = (rawInput ?? "").length > 800;
+  const textCols = keepText
+    ? "mode=profiles.mode, raw_input=profiles.raw_input, cv_text=profiles.cv_text"
+    : "mode=excluded.mode, raw_input=excluded.raw_input, cv_text=excluded.cv_text";
   await run(
     `INSERT INTO profiles (user_id,mode,raw_input,cv_text,spheres,industries,seniority,remote_mode,location,salary_min,salary_currency,updated_at)
      VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
      ON CONFLICT(user_id) DO UPDATE SET
-       mode=excluded.mode, raw_input=excluded.raw_input, cv_text=excluded.cv_text,
+       ${textCols},
        spheres=excluded.spheres, industries=excluded.industries, seniority=excluded.seniority,
        remote_mode=excluded.remote_mode, location=excluded.location,
        salary_min=excluded.salary_min, salary_currency=excluded.salary_currency,
        updated_at=datetime('now')`,
     userId, isCv ? "cv" : "freetext",
-    isCv ? null : rawInput,           // файл резюме не зберігаємо, лише розібраний текст
-    isCv ? rawInput.slice(0, 20_000) : null,
+    isCv || keepText ? null : rawInput,   // файл резюме не зберігаємо, лише розібраний текст
+    isCv ? rawInput!.slice(0, 20_000) : null,
     JSON.stringify(p.spheres), JSON.stringify(p.industries),
     p.seniority, p.remoteMode, p.location, p.salaryMin, p.salaryCurrency);
   await persistCountry(userId, p.location);
@@ -157,11 +167,13 @@ export async function createConnectToken(): Promise<void> {
 export async function saveSettings(formData: FormData): Promise<void> {
   const user = await requireUser();
   const hour = Math.min(23, Math.max(0, Number.parseInt(String(formData.get("deliveryHour") ?? "9"), 10) || 9));
-  const locale = String(formData.get("locale") ?? user.locale);
+  const raw = String(formData.get("locale") ?? user.locale);
+  const locale = isLocale(raw) ? raw : "en";
   const timezone = safeTimezone(String(formData.get("timezone") ?? ""));
   await run("UPDATE users SET delivery_hour=?, locale=?, timezone=?, updated_at=datetime('now') WHERE id=?",
-    hour, isLocale(locale) ? locale : "en", timezone, user.id);
-  (await cookies()).set("nr_locale", locale, { path: "/", maxAge: 31_536_000 });
+    hour, locale, timezone, user.id);
+  // У куку йде вже перевірене значення — те саме, що й у базу.
+  (await cookies()).set("nr_locale", locale, { path: "/", maxAge: 31_536_000, sameSite: "lax" });
   redirect("/settings?saved=1");
 }
 
@@ -187,13 +199,23 @@ export async function recordFeedback(formData: FormData): Promise<void> {
   const reaction = String(formData.get("reaction") ?? "");
   if (reaction !== "not_relevant" && reaction !== "more") return;
 
+  // digest_id приходить із форми: без звірки власника реакцію можна було б
+  // повісити на чужу добірку, підставивши id.
+  const mine = await one<{ n: number }>(
+    "SELECT 1 n FROM sent WHERE digest_id=? AND user_id=? LIMIT 1", digestId, user.id);
+  if (!mine) redirect("/dashboard");
+
   await run("INSERT INTO feedback (id,user_id,digest_id,reaction) VALUES (?,?,?,?)",
     uuid(), user.id, digestId, reaction);
   await run("UPDATE users SET last_interaction_at=datetime('now') WHERE id=?", user.id);
 
-  // «Ще п'ять» — це запит, який мусить хтось виконати, а не просто відмітка
+  // «Ще п'ять» — це запит, який мусить хтось виконати, а не просто відмітка.
+  // Один відкритий запит на людину: другий дотик не має замовляти другу добірку.
   if (reaction === "more") {
-    await run("INSERT INTO delivery_requests (id,user_id) VALUES (?,?)", uuid(), user.id);
+    await run(
+      `INSERT INTO delivery_requests (id,user_id)
+       SELECT ?,? WHERE NOT EXISTS (SELECT 1 FROM delivery_requests WHERE user_id=? AND handled_at IS NULL)`,
+      uuid(), user.id, user.id);
   }
   redirect("/dashboard?queued=1");
 }
@@ -258,8 +280,10 @@ export async function sendFeedback(formData: FormData): Promise<void> {
   if (message.length < 3) redirect("/feedback?error=empty");
 
   const ip = (await headers()).get("cf-connecting-ip") ?? "unknown";
+  // М'який ліміт: тут рахується кожен надісланий відгук, а за адресою може
+  // стояти ціла мережа. Жорсткий авторизаційний ліміт блокував їх усіх.
   if (!(await checkRate(`feedback:${ip}`)).allowed) redirect("/feedback?error=tooMany");
-  await recordFailure(`feedback:${ip}`);
+  await recordFailure(`feedback:${ip}`, FEEDBACK_LIMITS);
 
   const locale = await detectLocale();
   const user = await currentUser();
@@ -276,13 +300,8 @@ export async function sendFeedback(formData: FormData): Promise<void> {
       (page ? `\nСторінка: ${page}` : "") +
       (contact ? `\nЗв'язок: ${contact}` : "") +
       `\n\n${message.slice(0, 3000)}`;
-    try {
-      await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat_id: ADMIN_CHAT_ID, text, disable_web_page_preview: true }),
-      });
-    } catch { /* база вже має запис — мовчки далі */ }
+    // База вже має запис: невдача лише потрапляє в лог, не до людини.
+    await sendText(TELEGRAM_BOT_TOKEN, ADMIN_CHAT_ID, text);
   }
 
   redirect("/feedback?sent=1");
