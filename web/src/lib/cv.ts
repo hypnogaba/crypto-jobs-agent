@@ -10,6 +10,16 @@
 
 const MAX_BYTES = 4 * 1024 * 1024;
 
+/**
+ * Стеля на розпакований потік і на всі потоки разом.
+ *
+ * Deflate стискає нулі в тисячі разів: файл на 4 МБ може розгорнутись у
+ * гігабайти й покласти ізолят. Текстове резюме — це десятки кілобайт, тож
+ * межі щедрі, але скінченні.
+ */
+const MAX_INFLATED_STREAM = 2 * 1024 * 1024;
+const MAX_INFLATED_TOTAL = 8 * 1024 * 1024;
+
 export class CvError extends Error {}
 
 /**
@@ -36,10 +46,33 @@ const indexOfBytes = (hay: Uint8Array, needle: string, from: number): number => 
   return -1;
 };
 
+/** Читає розпакований потік, зупиняючись на стелі замість того, щоб рости. */
+async function inflateCapped(slice: Uint8Array, cap: number): Promise<Uint8Array> {
+  const ds = new DecompressionStream("deflate");
+  const reader = new Blob([slice.buffer as ArrayBuffer]).stream().pipeThrough(ds).getReader();
+  const parts: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > cap) {
+      await reader.cancel();
+      throw new CvError("tooBig");
+    }
+    parts.push(value);
+  }
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const p of parts) { out.set(p, off); off += p.byteLength; }
+  return out;
+}
+
 /** Розпаковує потоки FlateDecode і збирає текст із рядкових літералів. */
 async function extractPdf(bytes: Uint8Array): Promise<string> {
   const chunks: string[] = [];
   let cursor = 0;
+  let inflated = 0;
 
   for (;;) {
     // Межі потоку шукаємо в БАЙТАХ: будь-який рядковий проміжний крок
@@ -60,10 +93,12 @@ async function extractPdf(bytes: Uint8Array): Promise<string> {
     const slice = bytes.slice(start, end);   // копія: subarray не приймається як BlobPart
     let text: string;
     try {
-      const ds = new DecompressionStream("deflate");
-      const buf = await new Response(new Blob([slice.buffer as ArrayBuffer]).stream().pipeThrough(ds)).arrayBuffer();
-      text = toBinaryString(new Uint8Array(buf));
-    } catch {
+      const buf = await inflateCapped(slice, MAX_INFLATED_STREAM);
+      inflated += buf.byteLength;
+      if (inflated > MAX_INFLATED_TOTAL) throw new CvError("tooBig");
+      text = toBinaryString(buf);
+    } catch (e) {
+      if (e instanceof CvError) throw e;
       text = toBinaryString(slice);   // нестиснений потік
     }
 

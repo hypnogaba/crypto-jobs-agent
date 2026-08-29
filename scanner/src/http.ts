@@ -1,4 +1,93 @@
+import { lookup as dnsLookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import type { RawJob, SourceResult } from "./types.js";
+
+/**
+ * Політика вихідних адрес.
+ *
+ * Сканер крутиться на VPS, а адреси стрічок приходять із бази (адмінка) і
+ * з чужих серверів (редиректи). Без цієї перевірки «дошка» з адресою
+ * http://127.0.0.1:… або редирект на 169.254.169.254 читав би те, що
+ * бачить лише сам сервер. Тому: лише http(s), лише публічні хости, і
+ * кожен стрибок редиректу перевіряється заново.
+ */
+export class UnsafeUrlError extends Error {
+  constructor(message: string) { super(message); this.name = "UnsafeUrlError"; }
+}
+
+const MAX_REDIRECTS = 3;
+/** Стеля на тіло відповіді: стрічка на десятки мегабайт — уже не стрічка. */
+export const MAX_BODY_BYTES = 8 * 1024 * 1024;
+
+const isPrivateV4 = (ip: string): boolean => {
+  const [a, b] = ip.split(".").map(Number) as [number, number];
+  return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) ||
+    (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) ||
+    (a === 192 && b === 0) || (a === 198 && (b === 18 || b === 19)) || a >= 224;
+};
+
+const isPrivateV6 = (ip: string): boolean => {
+  const v = ip.toLowerCase().replace(/^\[|\]$/g, "");
+  if (v === "::" || v === "::1") return true;
+  if (v.startsWith("::ffff:")) { const tail = v.slice(7); return isIP(tail) === 4 ? isPrivateV4(tail) : true; }
+  return /^(fc|fd|fe[89ab]|ff)/.test(v);
+};
+
+export const isPrivateIp = (ip: string): boolean =>
+  isIP(ip) === 4 ? isPrivateV4(ip) : isIP(ip) === 6 ? isPrivateV6(ip) : true;
+
+/** Чистий розбір адреси без мережі: схема, userinfo, локальні імена, IP-літерали. */
+export function checkUrlShape(raw: string): URL {
+  let u: URL;
+  try { u = new URL(raw); } catch { throw new UnsafeUrlError(`не адреса: ${raw.slice(0, 120)}`); }
+  if (u.protocol !== "https:" && u.protocol !== "http:") throw new UnsafeUrlError(`схема ${u.protocol} заборонена`);
+  if (u.username || u.password) throw new UnsafeUrlError("адреса з userinfo заборонена");
+  const host = u.hostname.toLowerCase().replace(/\.$/, "");
+  if (!host || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") ||
+      host.endsWith(".internal") || !host.includes(".") && isIP(host) === 0) {
+    throw new UnsafeUrlError(`локальний хост заборонений: ${host}`);
+  }
+  const literal = host.replace(/^\[|\]$/g, "");
+  if (isIP(literal) && isPrivateIp(literal)) throw new UnsafeUrlError(`приватна адреса заборонена: ${host}`);
+  return u;
+}
+
+export type Lookup = (host: string) => Promise<string[]>;
+const realLookup: Lookup = async (host) => (await dnsLookup(host, { all: true })).map((r) => r.address);
+
+/** Повна перевірка: форма плюс DNS — щоб публічне ім'я не вело в приватну мережу. */
+export async function assertSafeUrl(raw: string, lookup: Lookup | null): Promise<URL> {
+  const u = checkUrlShape(raw);
+  const host = u.hostname.replace(/^\[|\]$/g, "");
+  if (isIP(host) || !lookup) return u;
+  let addrs: string[];
+  try { addrs = await lookup(host); } catch { throw new SourceUnavailableError(`${host}: DNS не відповів`); }
+  if (addrs.length === 0) throw new SourceUnavailableError(`${host}: DNS порожній`);
+  if (addrs.some(isPrivateIp)) throw new UnsafeUrlError(`${host} вказує в приватну мережу`);
+  return u;
+}
+
+/** Читає тіло зі стелею замість того, щоб довіряти Content-Length. */
+async function readCapped(res: Response, cap: number, url: string): Promise<string> {
+  if (!res.body) return "";
+  const reader = res.body.getReader();
+  const parts: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > cap) {
+      await reader.cancel().catch(() => undefined);
+      throw new SourceUnavailableError(`${url} віддав більше ${Math.round(cap / 1024 / 1024)} МБ`);
+    }
+    parts.push(value);
+  }
+  const buf = new Uint8Array(total);
+  let off = 0;
+  for (const p of parts) { buf.set(p, off); off += p.byteLength; }
+  return new TextDecoder("utf-8", { fatal: false }).decode(buf);
+}
 
 /**
  * Джерело недоступне — двері зачинені, а не кімната порожня.
@@ -41,21 +130,53 @@ export interface FetchOptions {
   timeoutMs?: number;
   retries?: number;
   retryDelayMs?: number;
+  /** DNS для перевірки хоста. Тести з підміненим fetchImpl мережі не мають — тоді null. */
+  lookup?: Lookup | null;
+  maxBodyBytes?: number;
+}
+
+/**
+ * fetch із перевіркою адреси на кожному стрибку.
+ *
+ * Редиректи — вручну: стандартний follow перейшов би на будь-що, включно
+ * з внутрішнім хостом, і ми б цього не побачили.
+ */
+export async function safeFetch(url: string, init: RequestInit, o: FetchOptions): Promise<Response> {
+  const fetchImpl = o.fetchImpl ?? fetch;
+  const lookup = o.lookup === undefined ? (o.fetchImpl ? null : realLookup) : o.lookup;
+  let current = url;
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    const u = await assertSafeUrl(current, lookup);
+    const res = await fetchImpl(u.toString(), { ...init, redirect: "manual" });
+    const location = res.headers.get("location");
+    if (res.status >= 300 && res.status < 400 && location) {
+      if (hop === MAX_REDIRECTS) throw new SourceUnavailableError(`${url} → забагато редиректів`);
+      // Тіло редиректу нікому не потрібне; не тримаємо з'єднання.
+      await res.body?.cancel().catch(() => undefined);
+      current = new URL(location, u).toString();
+      // Метод і тіло після редиректу не переносимо: POST у Workday — єдиний
+      // не-GET, і редиректу він не очікує.
+      init = { ...init, method: "GET", body: undefined };
+      continue;
+    }
+    return res;
+  }
+  throw new SourceUnavailableError(`${url} → забагато редиректів`);
 }
 
 async function fetchText(url: string, init: RequestInit, o: FetchOptions, base: Record<string, string> = JSON_HEADERS): Promise<string> {
-  const { fetchImpl = fetch, timeoutMs = 25_000, retries = 2, retryDelayMs = 800 } = o;
+  const { timeoutMs = 25_000, retries = 2, retryDelayMs = 800, maxBodyBytes = MAX_BODY_BYTES } = o;
   let last = "невідома помилка";
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const res = await fetchImpl(url, {
+      const res = await safeFetch(url, {
         ...init,
         signal: controller.signal,
         headers: { ...base, ...(init.headers as Record<string, string> | undefined) },
-      });
+      }, o);
       if (isBrokenStatus(res.status)) {
         throw new SourceUnavailableError(`${url} → ${res.status}`, res.status);
       }
@@ -75,7 +196,7 @@ async function fetchText(url: string, init: RequestInit, o: FetchOptions, base: 
       if (!res.ok) {
         last = `${url} → ${res.status}`;
       } else {
-        const text = await res.text();
+        const text = await readCapped(res, maxBodyBytes, url);
         if (CHALLENGE.some((m) => text.slice(0, 600).toLowerCase().includes(m))) {
           throw new SourceUnavailableError(`${url} віддав сторінку-заглушку захисту`);
         }
@@ -83,6 +204,8 @@ async function fetchText(url: string, init: RequestInit, o: FetchOptions, base: 
       }
     } catch (e) {
       if (e instanceof SourceUnavailableError) throw e;
+      // Небезпечна адреса — це не «спробуй ще раз», це «ніколи».
+      if (e instanceof UnsafeUrlError) throw new SourceUnavailableError(`${url}: ${e.message}`, 403);
       last = e instanceof Error ? e.message : String(e);
     } finally {
       clearTimeout(timer);
@@ -105,6 +228,20 @@ export async function fetchJson<T>(url: string, init: RequestInit = {}, o: Fetch
 
 export async function fetchXml(url: string, init: RequestInit = {}, o: FetchOptions = {}): Promise<string> {
   return fetchText(url, init, o, XML_HEADERS);
+}
+
+/** Чи відповідає адреса 2xx. Для перевірок «ожило?» — без повторів, з коротким таймаутом. */
+export async function probe(url: string, o: FetchOptions = {}): Promise<boolean> {
+  const { timeoutMs = 10_000 } = o;
+  try {
+    const res = await safeFetch(url, {
+      headers: JSON_HEADERS, signal: AbortSignal.timeout(timeoutMs),
+    }, o);
+    await res.body?.cancel().catch(() => undefined);
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
 
 /** Обгортка: збій джерела стає даними, а не винятком. */

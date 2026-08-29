@@ -47,3 +47,16 @@ describe("fetchLever", () => {
     expect(jobs[0]!.description).toBeNull();
   });
 });
+
+import { hostSlug, fetchBreezy } from "./ats.js";
+
+describe("slug у хості", () => {
+  it("звичайний slug проходить", () => expect(hostSlug("acme-corp", "breezy")).toBe("acme-corp"));
+  it.each(["evil.com/x?", "a b", "", "acme.breezy.hr", "../x"])("«%s» відкидається", (s) => {
+    expect(() => hostSlug(s, "breezy")).toThrow(/slug/);
+  });
+  it("fetchBreezy не робить запиту з поганим slug-ом", async () => {
+    const fetchImpl = (async () => new Response("[]")) as unknown as typeof fetch;
+    await expect(fetchBreezy("evil.com/x?", "Acme", { fetchImpl })).rejects.toThrow(/slug/);
+  });
+});

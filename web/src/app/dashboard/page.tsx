@@ -24,7 +24,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const user = await currentUser();
   if (!user) redirect("/login");
 
-  const matches = await listMatches(user.id);
+  const matches = await listMatches();
   const me = await one<{ timezone: string; delivery_hour: number }>(
     "SELECT timezone,delivery_hour FROM users WHERE id=?", user.id);
   const tz = me?.timezone ?? "UTC";

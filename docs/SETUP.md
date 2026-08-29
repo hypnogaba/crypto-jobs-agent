@@ -26,7 +26,10 @@ curl "https://api.telegram.org/bot<ТОКЕН>/setWebhook" \
 Токен також потрібен на сервері, де крутиться доставка:
 
 ```bash
-ssh root@<сервер> "echo 'TELEGRAM_BOT_TOKEN=<ТОКЕН>' >> /etc/nextrole-scanner.env"
+# Токен НЕ в командному рядку: він лишився б в історії shell і в журналі sshd.
+# Файл створюється з правами 600, значення йде через stdin.
+printf 'TELEGRAM_BOT_TOKEN=%s\n' '<ТОКЕН>' | ssh root@<сервер> \
+  'umask 077; touch /etc/nextrole-scanner.env; chmod 600 /etc/nextrole-scanner.env; cat >> /etc/nextrole-scanner.env'
 ```
 
 **Вебхук закритий за замовчуванням.** Поки секрет не заданий, він відповідає 401
@@ -82,7 +85,8 @@ dash.cloudflare.com → My Profile → API Tokens → Create Custom Token
 
 ```bash
 cd web && npx wrangler secret put ANTHROPIC_API_KEY
-ssh root@<сервер> "echo 'ANTHROPIC_API_KEY=<КЛЮЧ>' >> /etc/nextrole-scanner.env"
+printf 'ANTHROPIC_API_KEY=%s\n' '<КЛЮЧ>' | ssh root@<сервер> \
+  'umask 077; chmod 600 /etc/nextrole-scanner.env; cat >> /etc/nextrole-scanner.env'
 ```
 
 Вартість: ранжування на Haiku ≈ $0.10 на людину в місяць.

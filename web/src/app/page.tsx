@@ -5,8 +5,6 @@ import { detectLocale, startOnboarding } from "./actions";
 import { all, one } from "@/lib/db";
 import { t } from "@/lib/i18n";
 
-export const revalidate = 900;
-
 type FeedRow = {
   company: string;
   title: string;

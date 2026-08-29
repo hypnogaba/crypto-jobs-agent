@@ -16,6 +16,7 @@
  */
 import { loadConfig } from "./config.js";
 import { D1Client } from "./d1.js";
+import { probe } from "./http.js";
 
 export type Kind = "deprecate_never_worked" | "revive_source" | "drop_dry_companies" | "notice";
 export type Severity = "high" | "medium" | "low";
@@ -160,12 +161,12 @@ async function collect(d1: D1Client): Promise<Snapshot> {
     "SELECT source_name,last_error FROM sources_state WHERE status='deprecated' LIMIT 40");
   const deprecatedButAlive: string[] = [];
   for (const d of dead) {
+    // Адреса витягується з тексту помилки, який частково пишуть чужі
+    // сервери, — тому лише через probe: та сама політика хостів, що й на
+    // скані, плюс таймаут, щоб одне мовчазне з'єднання не тримало огляд.
     const url = /https?:\/\/\S+/.exec(d.last_error ?? "")?.[0]?.replace(/\s*→.*$/, "");
     if (!url) continue;
-    try {
-      const res = await fetch(url, { headers: { Accept: "application/json" } });
-      if (res.ok) deprecatedButAlive.push(d.source_name);
-    } catch { /* мережа підвела — не вирок */ }
+    if (await probe(url)) deprecatedButAlive.push(d.source_name);
   }
 
   const dryCompanies = (await q<{ slug: string; name: string; dry_scans: number }>(

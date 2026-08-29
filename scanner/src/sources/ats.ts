@@ -104,8 +104,20 @@ export async function fetchSmartRecruiters(slug: string, name: string, o: FetchO
   });
 }
 
+/**
+ * Slug стає частиною ХОСТА. Джерела slug-ів — посилання зі стрічок і
+ * адмінка, і кожне з них обмежує символи по-своєму. Тут остання лінія:
+ * «evil.com/x?» замість slug-а вів би запит на evil.com.
+ */
+const SLUG = /^[a-z0-9][a-z0-9_-]{0,62}$/i;
+export function hostSlug(slug: string, provider: string): string {
+  if (!SLUG.test(slug)) throw new Error(`${provider}: неприпустимий slug «${slug.slice(0, 40)}»`);
+  return slug.toLowerCase();
+}
+
 // ── Breezy HR ─────────────────────────────────────────────────
-export async function fetchBreezy(slug: string, name: string, o: FetchOptions = {}): Promise<RawJob[]> {
+export async function fetchBreezy(rawSlug: string, name: string, o: FetchOptions = {}): Promise<RawJob[]> {
+  const slug = hostSlug(rawSlug, "breezy");
   const rows = await fetchJson<Array<{ name: string; url: string; published_date?: string; location?: { city?: string; country?: { name?: string }; is_remote?: boolean } }>>(
     `https://${slug}.breezy.hr/json`, {}, o);
   return rows.map((j) => {
@@ -128,7 +140,8 @@ export async function fetchRippling(slug: string, name: string, o: FetchOptions 
 }
 
 // ── Personio ─── XML, не JSON
-export async function fetchPersonio(slug: string, name: string, o: FetchOptions = {}): Promise<RawJob[]> {
+export async function fetchPersonio(rawSlug: string, name: string, o: FetchOptions = {}): Promise<RawJob[]> {
+  const slug = hostSlug(rawSlug, "personio");
   const xml = await fetchXml(`https://${slug}.jobs.personio.de/xml`, {}, o);
   const jobs: RawJob[] = [];
   const tag = (block: string, t: string): string | null => {
@@ -150,8 +163,10 @@ export async function fetchPersonio(slug: string, name: string, o: FetchOptions 
 // ── Workday ─── розблоковує великий ентерпрайз
 export async function fetchWorkday(slug: string, name: string, o: FetchOptions = {}): Promise<RawJob[]> {
   // slug має вигляд "tenant|wdN|SiteName"
-  const [tenant, wd, site] = slug.split("|");
-  if (!tenant || !wd || !site) return [];
+  const [tenantRaw, wdRaw, site] = slug.split("|");
+  if (!tenantRaw || !wdRaw || !site) return [];
+  const tenant = hostSlug(tenantRaw, "workday");
+  const wd = hostSlug(wdRaw, "workday");
   const host = `https://${tenant}.${wd}.myworkdayjobs.com`;
   const p = await fetchJson<{ jobPostings?: Array<{ title: string; externalPath: string; locationsText?: string; postedOn?: string }> }>(
     `${host}/wday/cxs/${tenant}/${site}/jobs`,
@@ -170,7 +185,8 @@ export type AtsFetcher = (slug: string, name: string, o?: FetchOptions) => Promi
 // Публічний ендпоінт, ключа не потребує. Додано, щоб розбавити концентрацію:
 // Greenhouse і Ashby разом давали 67% усього кешу — зміна одного їхнього API
 // забирала б дві третини продукту за ніч.
-export async function fetchBambooHr(slug: string, name: string, o: FetchOptions = {}): Promise<RawJob[]> {
+export async function fetchBambooHr(rawSlug: string, name: string, o: FetchOptions = {}): Promise<RawJob[]> {
+  const slug = hostSlug(rawSlug, "bamboohr");
   const p = await fetchJson<{ result?: Array<{ id: string; jobOpeningName: string;
     location?: { city?: string; state?: string; country?: string };
     isRemote?: boolean; departmentLabel?: string }> }>(

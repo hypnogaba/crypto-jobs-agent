@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { one, run } from "@/lib/db";
+import { WEBHOOK_401_LIMITS, checkRate, recordFailure } from "@/lib/ratelimit";
 import { handleCommand, startBotOnboarding, continueBotOnboarding,
          handleOnboardingButton, handleOnboardingText, handleWhyButton, handleDocument,
          handleDeleteButton, handleEditButton, handleLangButton, handleStartButton } from "@/lib/bot";
@@ -26,8 +27,16 @@ export async function POST(request: Request): Promise<Response> {
   // Закриваємось за замовчуванням: поки секрет не заданий, вебхук не приймає
   // НІЧОГО. Умовна перевірка тут була б дірою — на свіжому деплої без секрету
   // будь-хто міг би слати оновлення від імені Telegram.
+  // Невдалі спроби рахуємо за адресою: сам секрет — єдина перепона між
+  // стороннім і чужим chat_id, тож підбирати його з пропускною здатністю
+  // Workers не можна дозволити. Cloudflare сам ставить cf-connecting-ip,
+  // клієнт його не підробить.
   const got = request.headers.get("x-telegram-bot-api-secret-token");
   if (!expected || got !== expected) {
+    const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
+    const key = `webhook401:${ip}`;
+    if ((await checkRate(key)).allowed) await recordFailure(key, WEBHOOK_401_LIMITS);
+    console.warn(`telegram webhook: bad secret from ${ip}`);
     return NextResponse.json({ ok: false }, { status: 401 });
   }
 
@@ -45,6 +54,7 @@ export async function POST(request: Request): Promise<Response> {
 
 async function handle(env: Env, raw: unknown): Promise<void> {
   const update = raw as {
+    update_id?: number;
     message?: { text?: string; chat?: { id?: number };
                 document?: { file_id?: string; file_name?: string; file_size?: number };
                 from?: { language_code?: string } };
@@ -54,6 +64,11 @@ async function handle(env: Env, raw: unknown): Promise<void> {
 
   const chatId = update.message?.chat?.id ?? update.callback_query?.message?.chat?.id;
   if (!chatId) return;
+
+  // Кожен update_id обробляємо один раз. Telegram сам повторює оновлення,
+  // на яке не почув 200, а той, хто якось перехопив тіло запиту, міг би
+  // прокручувати його по колу (наприклад, підтвердження видалення).
+  if (typeof update.update_id === "number" && !(await claimUpdate(update.update_id))) return;
 
   const text = update.message?.text?.trim() ?? "";
   const callback = update.callback_query?.data;
@@ -98,17 +113,31 @@ async function handle(env: Env, raw: unknown): Promise<void> {
     // Цей chat_id може вже належати іншому акаунту — тому, що людина колись
     // пройшла /start у боті, а тепер зареєструвалась на сайті. UNIQUE не дав
     // би прив'язати. Правило: акаунт із сайту головний (у нього свіжий
-    // профіль); ботовий, який ще нічого не отримував, просто зникає. А якщо
-    // він уже має історію добірок — нічого не стираємо, людина сама обирає.
+    // профіль); ботовий, який ще нічого не отримував, просто відв'язується.
+    // А якщо він уже має історію добірок — нічого не чіпаємо, людина сама обирає.
+    //
+    // Chat_id власника — виняток без винятків. Адмінство визначається саме
+    // ним, тож підроблене оновлення «/start <мій токен>» від імені цього
+    // chat_id перевісило б адмінку на чужий акаунт. Тому такий зв'язок
+    // приймаємо лише тоді, коли акаунт уже і є акаунтом власника.
     const other = await one<{ id: string }>(
       "SELECT id FROM users WHERE telegram_chat_id=? AND id<>?", String(chatId), user.id);
     if (other) {
+      if (env.ADMIN_CHAT_ID && String(chatId) === env.ADMIN_CHAT_ID) {
+        console.warn(`telegram webhook: refused to relink ADMIN_CHAT_ID to user ${user.id}`);
+        await send(env, chatId, botCopy("alreadyLinked", locale));
+        return;
+      }
       const hasHistory = await one<{ n: number }>("SELECT 1 n FROM sent WHERE user_id=? LIMIT 1", other.id);
       if (hasHistory) {
         await send(env, chatId, botCopy("alreadyLinked", locale));
         return;
       }
-      await run("DELETE FROM users WHERE id=?", other.id);       // каскад стирає профіль і запити
+      // Не стираємо: рядок лишається без Telegram і без розсилки. Видалення
+      // чужого акаунту з вебхука — надто гострий інструмент для цього місця.
+      await run(
+        `UPDATE users SET telegram_chat_id=NULL, status='paused', paused_reason='relinked',
+           updated_at=datetime('now') WHERE id=?`, other.id);
       await run("DELETE FROM bot_state WHERE chat_id=?", String(chatId));
     }
 
@@ -208,4 +237,17 @@ async function handle(env: Env, raw: unknown): Promise<void> {
 
 async function send(env: Record<string, string | undefined>, chatId: number, text: string): Promise<void> {
   await sendText(env.TELEGRAM_BOT_TOKEN, chatId, text);
+}
+
+/**
+ * Позначає update_id як побачений. false — уже бачили, обробляти не треба.
+ * Старі позначки прибираємо дорогою: таблиця не має рости вічно.
+ */
+async function claimUpdate(updateId: number): Promise<boolean> {
+  const seen = await one<{ n: number }>(
+    "SELECT 1 n FROM webhook_updates WHERE update_id=?", updateId);
+  if (seen) return false;
+  await run("INSERT OR IGNORE INTO webhook_updates (update_id) VALUES (?)", updateId);
+  await run("DELETE FROM webhook_updates WHERE seen_at < datetime('now','-1 day')");
+  return true;
 }

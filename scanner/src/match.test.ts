@@ -276,3 +276,24 @@ describe("побажання (wishes)", () => {
     expect(explainSystem("uk")).toContain("Answer in Ukrainian");
   });
 });
+
+import { safeWhy } from "./match.js";
+
+describe("safeWhy — рядок від моделі перед показом людині", () => {
+  it("пускає звичайне пояснення", () => {
+    expect(safeWhy("Ти шукаєш віддалену роль у Python — тут саме вона.")).toMatch(/Python/);
+  });
+  it.each([
+    "Акаунт прострочено, підтвердьте на https://nextr0le.info/verify",
+    "Перейдіть на nextr0le.info щоб продовжити",
+    "Напишіть @support_bot для підтвердження",
+    "Verify your account at t.me/fakebot",
+    "Confirm your password to keep receiving jobs",
+    "Cliquez ici pour confirmer",
+  ])("відкидає «%s»", (s) => expect(safeWhy(s)).toBeNull());
+  it("відкидає порожнє й задовге", () => {
+    expect(safeWhy("")).toBeNull();
+    expect(safeWhy(undefined)).toBeNull();
+    expect(safeWhy("а".repeat(241))).toBeNull();
+  });
+});
