@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { one, run } from "@/lib/db";
 import { handleCommand, startBotOnboarding, continueBotOnboarding,
-         handleOnboardingButton, handleOnboardingText, handleWhyButton, handleDocument } from "@/lib/bot";
+         handleOnboardingButton, handleOnboardingText, handleWhyButton, handleDocument,
+         handleDeleteButton } from "@/lib/bot";
 import { isLocale } from "@/lib/i18n";
 import { t as botCopy } from "@/lib/bot-copy";
 import { sendText } from "@/lib/telegram-send";
@@ -130,6 +131,9 @@ async function handle(env: Env, raw: unknown): Promise<void> {
   }
 
   if (callback) {
+    if (await handleDeleteButton(env, chatId, callback, update.callback_query?.id, locale)) {
+      return;
+    }
     // Кнопки онбордингу йдуть першими: реакції на добірку мають префікс fb:
     if (await handleOnboardingButton(env, chatId, callback, update.callback_query?.id, locale)) {
       return;

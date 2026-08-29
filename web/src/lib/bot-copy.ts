@@ -159,6 +159,17 @@ const P = {
     fr: "Pas encore de profil. Envoyez /start et je poserai quatre questions.",
     ru: "Профиля ещё нет. Напиши /start, и я задам четыре вопроса.",
   },
+  deleteAsk: {
+    en: "This erases your profile, your history and your CV text. It cannot be undone. Sure?",
+    uk: "Це зітре профіль, історію добірок і текст резюме. Скасувати неможливо. Точно?",
+    fr: "Cela efface votre profil, votre historique et le texte de votre CV. Irréversible. Sûr ?",
+    ru: "Это сотрёт профиль, историю подборок и текст резюме. Отменить нельзя. Точно?",
+  },
+  deleteYes: { en: "Yes, erase everything", uk: "Так, видалити все", fr: "Oui, tout effacer", ru: "Да, удалить всё" },
+  deleteNo:  { en: "Cancel", uk: "Скасувати", fr: "Annuler", ru: "Отмена" },
+  deleteKept: {
+    en: "Nothing was deleted.", uk: "Нічого не видалено.", fr: "Rien n'a été supprimé.", ru: "Ничего не удалено.",
+  },
   deleted: {
     en: "Account and all data deleted. Want to come back? Just /start.",
     uk: "Видалив акаунт і всі дані. Захочеш повернутись — просто /start.",

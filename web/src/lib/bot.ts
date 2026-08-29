@@ -460,6 +460,24 @@ export async function handleDocument(
   return true;
 }
 
+/** Підтвердження /delete. Повертає true, якщо кнопка була саме про це. */
+export async function handleDeleteButton(
+  env: Env, chatId: number, data: string, callbackId: string | undefined, locale: Locale
+): Promise<boolean> {
+  if (!data.startsWith("del:")) return false;
+  if (callbackId) await ackButton(env, callbackId);
+
+  if (data !== "del:yes") {
+    await send(env, chatId, say("deleteKept", locale));
+    return true;
+  }
+  const user = await one<{ id: string }>("SELECT id FROM users WHERE telegram_chat_id=?", String(chatId));
+  if (user) await run("DELETE FROM users WHERE id=?", user.id);
+  await run("DELETE FROM bot_state WHERE chat_id=?", String(chatId));
+  await send(env, chatId, say("deleted", locale));
+  return true;
+}
+
 export const botLocale = (code: string | undefined): Locale => {
   const two = (code ?? "en").slice(0, 2).toLowerCase();
   return isLocale(two) ? two : "en";
@@ -607,9 +625,14 @@ export async function handleCommand(
       await send(env, chatId, say("help", locale));
       break;
 
+    // Одна команда стирала все одразу — без жодного «точно?». Кнопка
+    // «Скасувати» — бо в меню /delete стоїть поруч із /help, і промах пальцем
+    // не має коштувати профілю.
     case "/delete":
-      await run("DELETE FROM users WHERE id=?", user!.id);
-      await send(env, chatId, say("deleted", locale));
+      await sendKeyboard(env, chatId, say("deleteAsk", locale), [
+        [{ text: say("deleteYes", locale), callback_data: "del:yes" },
+         { text: say("deleteNo", locale),  callback_data: "del:no" }],
+      ]);
       break;
 
     default:
