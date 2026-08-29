@@ -1,4 +1,5 @@
 import { run } from "@/lib/db";
+import { costUsd } from "./pricing";
 
 /**
  * Облік звернень до моделі.
@@ -8,9 +9,8 @@ import { run } from "@/lib/db";
  * ключа навмисно — щоб історія почалася з першого ж виклику, а не з дня,
  * коли хтось згадав про облік.
  *
- * Записуємо ТОКЕНИ, а не гроші. Ціна за токен змінюється й залежить від
- * моделі; вигадана ставка на панелі власника виглядала б як факт. Долари
- * рахуємо тоді, коли ставку внесено свідомо.
+ * Долари рахуємо за таблицею pricing.ts у момент запису; невідома модель
+ * дає 0.
  */
 export interface Usage {
   operation: string;          // parse_profile | match_reason
@@ -29,8 +29,9 @@ export async function logUsage(u: Usage): Promise<void> {
   try {
     await run(
       `INSERT INTO api_usage (id,service,operation,model,input_tokens,output_tokens,cost_usd,ok)
-       VALUES (?,'anthropic',?,?,?,?,0,?)`,
-      crypto.randomUUID(), u.operation, u.model, u.inputTokens, u.outputTokens, u.ok ? 1 : 0);
+       VALUES (?,'anthropic',?,?,?,?,?,?)`,
+      crypto.randomUUID(), u.operation, u.model, u.inputTokens, u.outputTokens,
+      costUsd(u.model, u.inputTokens, u.outputTokens), u.ok ? 1 : 0);
   } catch { /* журнал не важливіший за роботу */ }
 }
 
