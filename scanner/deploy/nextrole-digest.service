@@ -11,5 +11,5 @@ ExecStart=/usr/bin/node dist/digest.js
 StandardOutput=journal
 StandardError=journal
 # Стеля пам'яті: чужа стрічка на гігабайт не має класти весь VPS.
-MemoryMax=512M
+MemoryMax=1G
 TimeoutStartSec=1800
