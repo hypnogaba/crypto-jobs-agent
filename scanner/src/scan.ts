@@ -2,7 +2,7 @@ import { loadConfig } from "./config.js";
 import { D1Client } from "./d1.js";
 import { Repo } from "./repo.js";
 import { climbLadder, type LadderRungs } from "./ladder.js";
-import { applySourceOutcomes, skipSet } from "./selfrepair.js";
+import { applySourceOutcomes, skipCompanies, skipSet } from "./selfrepair.js";
 import { runR1, runR2, runR3, runR4, harvestAtsFromJobs } from "./rungs.js";
 import { prepare } from "./normalize.js";
 import type { RawJob, SourceResult } from "./types.js";
@@ -29,7 +29,9 @@ async function main(): Promise<void> {
 
   const rungs: LadderRungs = {
     R1: async () => {
-      const companies = await repo.listCompanies();
+      // Мертві ATS-дошки (позначені самолікуванням) не опитуємо знову:
+      // раніше skip діяв лише на R2/R3, і 404-компанії пробивались щодня.
+      const companies = skipCompanies(await repo.listCompanies(), skip);
       if (companies.length === 0) return { jobs: [], results: [] };
       return runR1(companies, {
         markScanned: (slug, found) => repo.markCompanyScanned(slug, found),
@@ -154,7 +156,11 @@ async function main(): Promise<void> {
       `${outcome.distinctCompanies} різних компаній, драбина до ${outcome.reached}, статус ${status}.\n` +
       `У кеші всього: ${total} вакансій.`);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    // fetch ховає справжню причину (ECONNRESET, ENOTFOUND) у e.cause —
+    // без неї в журналі стоїть лише «fetch failed», і шукати нічого.
+    const cause = e instanceof Error ? (e as { cause?: unknown }).cause : undefined;
+    const msg = (e instanceof Error ? e.message : String(e)) +
+      (cause instanceof Error ? ` (${cause.message})` : cause ? ` (${String(cause)})` : "");
     await repo.finishRun(runId, {
       distinctCompanies: 0, jobsFound: 0, ladderReached: "none", status: "failed", notes: msg });
     console.error(`Прогін ${runId.slice(0, 8)} впав: ${msg}`);

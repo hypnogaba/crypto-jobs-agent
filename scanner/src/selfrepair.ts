@@ -1,4 +1,4 @@
-import type { SourceResult, SourceStatus } from "./types.js";
+import type { Company, SourceResult, SourceStatus } from "./types.js";
 
 export interface SourceSnapshot {
   source: string; status: SourceStatus; consecutiveFailDays: number;
@@ -32,6 +32,9 @@ export async function applySourceOutcomes(
   for (const r of results) {
     // Вгадування, що не влучило, — не джерело; не засмічуємо таблицю здоров'я
     if (r.source.startsWith("guess:") || r.source.startsWith("unknown:")) continue;
+    // 429 — «занадто швидко», а не «померло». Це не день падіння: джерело
+    // живе, ми просто прийшли завчасно. Ні лічильник, ні статус не чіпаємо.
+    if (r.rateLimited) continue;
     await repo.recordSourceOutcome(r.source, r.ok, r.jobs.length, r.error);
     if (r.ok) continue;
     const prior = byName.get(r.source);
@@ -49,3 +52,12 @@ export async function applySourceOutcomes(
 /** Мертві пропускаємо; ті, що просто збоять, отримують ще шанс. */
 export const skipSet = (states: SourceSnapshot[]): Set<string> =>
   new Set(states.filter((s) => s.status === "deprecated").map((s) => s.source));
+
+/** Ім'я джерела компанії в таблиці здоров'я: provider:slug. Без ATS — немає. */
+export const companySource = (c: Pick<Company, "atsProvider" | "atsSlug">): string | null =>
+  c.atsProvider && c.atsSlug ? `${c.atsProvider}:${c.atsSlug}` : null;
+
+/** Компанії, чиї ATS-дошки позначені мертвими, на R1 не йдуть. */
+export const skipCompanies = <C extends Pick<Company, "atsProvider" | "atsSlug">>(
+  companies: C[], skip: Set<string>
+): C[] => companies.filter((c) => { const s = companySource(c); return !s || !skip.has(s); });

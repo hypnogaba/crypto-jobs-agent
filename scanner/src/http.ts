@@ -112,11 +112,13 @@ export async function runSource(source: string, fn: () => Promise<RawJob[]>): Pr
   try {
     return { source, ok: true, jobs: await fn() };
   } catch (e) {
+    const rateLimited = e instanceof SourceUnavailableError && e.status === 429;
     return {
       source,
       ok: false,
       jobs: [],
-      broken: e instanceof SourceUnavailableError,
+      broken: e instanceof SourceUnavailableError && !rateLimited,
+      rateLimited,
       error: e instanceof Error ? e.message : String(e),
     };
   }

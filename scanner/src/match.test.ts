@@ -57,13 +57,26 @@ describe("pickTop", () => {
 describe("explainLocally", () => {
   it("пише про людину, а не переказує вакансію", () => {
     const [top] = pickTop([job()], p, 1);
-    const why = explainLocally(top!, p);
+    const why = explainLocally(top!, p, "uk");
     expect(why).toContain("partnerships");
     expect(why).toContain("віддалено");
   });
   it("ніколи не повертає порожній рядок", () => {
     const [top] = pickTop([job({ tags: ["partnerships"] })], p, 1);
     expect(explainLocally(top!, p).length).toBeGreaterThan(5);
+  });
+  it("говорить мовою людини, а не лише українською", () => {
+    // Без ключа Anthropic це єдиний рядок «чому ти», який бачить француз.
+    const [top] = pickTop([job()], p, 1);
+    expect(explainLocally(top!, p, "fr")).toBe("partnerships, un de vos domaines, secteur web3, entièrement à distance.");
+    expect(explainLocally(top!, p, "en")).toContain("fully remote");
+    expect(explainLocally(top!, p, "ru")).toContain("удалённо");
+    expect(explainLocally(top!, p)).not.toMatch(/[а-яіїє]/i);
+  });
+  it("без жодної причини — запасний рядок теж локалізований", () => {
+    const only = { ...p, spheres: [], industries: [], remoteMode: "any", salaryMin: null };
+    const [top] = pickTop([job({ tags: ["senior"], title: "Anything" })], { ...only, customRole: "anything" }, 1);
+    expect(explainLocally(top!, only, "en")).toBe("role title matches your profile.");
   });
 });
 
