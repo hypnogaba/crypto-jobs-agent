@@ -8,6 +8,7 @@ import { createSession, currentUser, destroySession, requireUser } from "@/lib/a
 import { parseProfile, type ParsedProfile } from "@/lib/parse";
 import { CvError, extractCvText } from "@/lib/cv";
 import { isLocale, localeFromHeader } from "@/lib/i18n";
+import { safeTimezone } from "@/lib/digest-time";
 import { checkRate, recordFailure } from "@/lib/ratelimit";
 import type { Locale } from "@/lib/vocab";
 import { persistCountry } from "@/lib/profile-country";
@@ -63,6 +64,10 @@ export async function saveProfile(formData: FormData): Promise<void> {
   const user = await currentUser();
   const draft = await readDraft();
 
+  // Зону знімає скрипт на самій формі. Перевіряємо її через сам Intl —
+  // підроблене значення мовчки стало б розкладом доставки.
+  const timezone = safeTimezone(String(formData.get("timezone") ?? ""));
+
   const profile = {
     spheres: formData.getAll("spheres").map(String),
     industries: formData.getAll("industries").map(String),
@@ -81,11 +86,18 @@ export async function saveProfile(formData: FormData): Promise<void> {
     await run(
       `INSERT INTO users (id,locale,timezone,delivery_hour,last_interaction_at)
        VALUES (?,?,?,9,datetime('now'))`,
-      id, await detectLocale(), "UTC");
+      id, await detectLocale(), timezone);
     await persistProfile(id, draft?.text ?? "", profile);
     (await cookies()).delete(DRAFT_COOKIE);
     await createSession(id);
     redirect("/telegram");
+  }
+
+  // Той, хто зареєструвався до появи цього поля, лишався з UTC назавжди.
+  // Перезбереження профілю тепер його виправляє. Справжню зону на UTC не
+  // міняємо: порожній браузерний сигнал не має стирати відоме значення.
+  if (timezone !== "UTC") {
+    await run("UPDATE users SET timezone=?, updated_at=datetime('now') WHERE id=?", timezone, user.id);
   }
 
   await persistProfile(user.id, draft?.text ?? "", profile);
@@ -146,7 +158,7 @@ export async function saveSettings(formData: FormData): Promise<void> {
   const user = await requireUser();
   const hour = Math.min(23, Math.max(0, Number.parseInt(String(formData.get("deliveryHour") ?? "9"), 10) || 9));
   const locale = String(formData.get("locale") ?? user.locale);
-  const timezone = String(formData.get("timezone") ?? "UTC").slice(0, 64);
+  const timezone = safeTimezone(String(formData.get("timezone") ?? ""));
   await run("UPDATE users SET delivery_hour=?, locale=?, timezone=?, updated_at=datetime('now') WHERE id=?",
     hour, isLocale(locale) ? locale : "en", timezone, user.id);
   (await cookies()).set("nr_locale", locale, { path: "/", maxAge: 31_536_000 });

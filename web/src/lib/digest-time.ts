@@ -11,6 +11,24 @@ import type { Locale } from "./vocab";
 
 const intlOf = (locale: Locale): string => (locale === "en" ? "en-GB" : locale);
 
+/**
+ * Зона, надіслана браузером.
+ *
+ * Приймаємо лише те, що справді розуміє Intl: підроблене або порожнє
+ * значення мовчки стало б розкладом доставки. UTC — свідомий запасний
+ * варіант, а не помилка.
+ */
+export function safeTimezone(raw: string | null | undefined): string {
+  const t = (raw ?? "").trim().slice(0, 64);
+  if (!t) return "UTC";
+  try {
+    new Intl.DateTimeFormat("en-CA", { timeZone: t });
+    return t;
+  } catch {
+    return "UTC";
+  }
+}
+
 /** Невідома зона не має валити сторінку кабінету. */
 const safe = (timezone: string): string => {
   try {

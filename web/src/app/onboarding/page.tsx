@@ -112,8 +112,17 @@ export default async function Onboarding() {
           </Question>
         </div>
 
+        {/* Часовий пояс людини. Досі він визначався ЛИШЕ на сторінці
+            налаштувань, куди майже ніхто не заходить, тож у базі в усіх
+            лишався зашитий UTC — і «щодня о 09:00» означало 12:00 за Києвом.
+            Тепер зона знімається там, де людина насправді є: у реєстрації. */}
+        <input type="hidden" name="timezone" defaultValue="UTC" id="tz" />
+
         <button type="submit" className="btn mt-8">{t(locale, "onboarding.save")}</button>
       </form>
+
+      <script dangerouslySetInnerHTML={{ __html:
+        `try{document.getElementById('tz').value=Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC'}catch(e){}` }} />
     </Shell>
   );
 }

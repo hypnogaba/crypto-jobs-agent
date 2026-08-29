@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dayLabel } from "./digest-time";
+import { dayLabel, safeTimezone } from "./digest-time";
 
 const now = new Date("2026-08-28T12:00:00Z");
 
@@ -34,5 +34,22 @@ describe("dayLabel", () => {
 
   it("невідома зона не валить сторінку", () => {
     expect(() => dayLabel("2026-08-28T06:00:00Z", "Марс/Олімп", "uk", now)).not.toThrow();
+  });
+});
+
+describe("safeTimezone", () => {
+  it("приймає справжні зони, зокрема триланкові", () => {
+    for (const tz of ["Europe/Kyiv", "America/New_York", "Asia/Ho_Chi_Minh",
+                      "America/Argentina/Buenos_Aires", "Etc/GMT+3", "UTC"]) {
+      expect(safeTimezone(tz)).toBe(tz);
+    }
+  });
+
+  it("відкидає сміття, а не кладе його в розклад доставки", () => {
+    expect(safeTimezone("Марс/Олімп")).toBe("UTC");
+    expect(safeTimezone("'; DROP TABLE users; --")).toBe("UTC");
+    expect(safeTimezone("")).toBe("UTC");
+    expect(safeTimezone(null)).toBe("UTC");
+    expect(safeTimezone("x".repeat(200))).toBe("UTC");
   });
 });
