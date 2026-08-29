@@ -85,7 +85,12 @@ export async function replyToFeedback(formData: FormData): Promise<void> {
 
   const row = await one<{ contact: string | null }>(
     "SELECT contact FROM site_feedback WHERE id=?", id);
-  const chat = row?.contact?.startsWith("tg:") ? row.contact.slice(3) : null;
+  // Контакт із сайту — вільний текст: «tg:<id>» там міг написати будь-хто.
+  // Відповідаємо лише в чат, який справді є нашим користувачем.
+  const claimed = row?.contact?.startsWith("tg:") ? row.contact.slice(3) : null;
+  const known = claimed
+    ? await one<{ n: number }>("SELECT 1 n FROM users WHERE telegram_chat_id=?", claimed) : null;
+  const chat = known ? claimed : null;
 
   const { env } = getCloudflareContext();
   const token = (env as unknown as Record<string, string | undefined>).TELEGRAM_BOT_TOKEN;

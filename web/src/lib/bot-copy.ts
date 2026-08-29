@@ -32,6 +32,23 @@ const P = {
     fr: "C'est fait. Les cinq premières offres arrivent dans l'heure, puis chaque jour à votre heure. Pour la changer : /time.",
     ru: "Готово. Первые пять вакансий придут в течение часа, дальше — каждый день в твой час. Изменить его — /time.",
   },
+  // Прив'язка через посилання з сайту — лише після підтвердження кнопкою:
+  // інакше чуже посилання «отримай 5 вакансій» тихо переписувало б чат на
+  // чужий акаунт, і все написане далі йшло б у чужий профіль.
+  linkAsk: {
+    en: "Link this Telegram to the nextrole.info account that opened this link?\n\nSay no if someone else sent you this link — your messages and CV would go to their profile.",
+    uk: "Прив'язати цей Telegram до акаунта на nextrole.info, з якого відкрито це посилання?\n\nЯкщо посилання тобі надіслав хтось інший — відмовся: твої повідомлення і резюме йшли б у його профіль.",
+    fr: "Lier ce Telegram au compte nextrole.info qui a ouvert ce lien ?\n\nRefusez si quelqu’un d’autre vous a envoyé ce lien — vos messages et votre CV iraient dans son profil.",
+    ru: "Привязать этот Telegram к аккаунту на nextrole.info, из которого открыта эта ссылка?\n\nЕсли ссылку прислал кто-то другой — откажись: твои сообщения и резюме шли бы в его профиль.",
+  },
+  linkYes: { en: "Yes, that’s me", uk: "Так, це я", fr: "Oui, c’est moi", ru: "Да, это я" },
+  linkNo:  { en: "No", uk: "Ні", fr: "Non", ru: "Нет" },
+  linkCancelled: {
+    en: "Not linked. Nothing changed.",
+    uk: "Не прив'язано. Нічого не змінилось.",
+    fr: "Non lié. Rien n’a changé.",
+    ru: "Не привязано. Ничего не изменилось.",
+  },
   linkExpired: {
     en: "That link has expired. Refresh the connect page and try again.",
     uk: "Посилання застаріло. Онови сторінку підключення й спробуй ще раз.",

@@ -7,8 +7,9 @@ import { handleCommand, startBotOnboarding, continueBotOnboarding,
          handleDeleteButton, handleEditButton, handleFirstButton, handleLangButton, handleStartButton } from "@/lib/bot";
 import { freeTextAction } from "@/lib/bot-onboarding";
 import { isLocale } from "@/lib/i18n";
+import type { Locale } from "@/lib/vocab";
 import { t as botCopy, tf as botCopyF } from "@/lib/bot-copy";
-import { sendText } from "@/lib/telegram-send";
+import { callTelegram, sendText } from "@/lib/telegram-send";
 
 /**
  * Вебхук Telegram.
@@ -110,42 +111,20 @@ async function handle(env: Env, raw: unknown): Promise<void> {
       return;
     }
 
-    // Цей chat_id може вже належати іншому акаунту — тому, що людина колись
-    // пройшла /start у боті, а тепер зареєструвалась на сайті. UNIQUE не дав
-    // би прив'язати. Правило: акаунт із сайту головний (у нього свіжий
-    // профіль); ботовий, який ще нічого не отримував, просто відв'язується.
-    // А якщо він уже має історію добірок — нічого не чіпаємо, людина сама обирає.
-    //
-    // Chat_id власника — виняток без винятків. Адмінство визначається саме
-    // ним, тож підроблене оновлення «/start <мій токен>» від імені цього
-    // chat_id перевісило б адмінку на чужий акаунт. Тому такий зв'язок
-    // приймаємо лише тоді, коли акаунт уже і є акаунтом власника.
-    const other = await one<{ id: string }>(
-      "SELECT id FROM users WHERE telegram_chat_id=? AND id<>?", String(chatId), user.id);
-    if (other) {
-      if (env.ADMIN_CHAT_ID && String(chatId) === env.ADMIN_CHAT_ID) {
-        console.warn(`telegram webhook: refused to relink ADMIN_CHAT_ID to user ${user.id}`);
-        await send(env, chatId, botCopy("alreadyLinked", locale));
-        return;
-      }
-      const hasHistory = await one<{ n: number }>("SELECT 1 n FROM sent WHERE user_id=? LIMIT 1", other.id);
-      if (hasHistory) {
-        await send(env, chatId, botCopy("alreadyLinked", locale));
-        return;
-      }
-      // Не стираємо: рядок лишається без Telegram і без розсилки. Видалення
-      // чужого акаунту з вебхука — надто гострий інструмент для цього місця.
-      await run(
-        `UPDATE users SET telegram_chat_id=NULL, status='paused', paused_reason='relinked',
-           updated_at=datetime('now') WHERE id=?`, other.id);
-      await run("DELETE FROM bot_state WHERE chat_id=?", String(chatId));
-    }
-
+    // Не прив'язуємо одразу: спершу людина підтверджує кнопкою. Токен
+    // лишається в bot_state до відповіді; його свіжість перевіримо ще раз.
     await run(
-      `UPDATE users SET telegram_chat_id=?, connect_token=NULL, connect_expires_at=NULL,
-         last_interaction_at=datetime('now') WHERE id=?`,
-      String(chatId), user.id);
-    await send(env, chatId, botCopy("linked", locale));
+      `INSERT INTO bot_state (chat_id, step, draft, message_id, updated_at)
+       VALUES (?, ?, '{}', NULL, datetime('now'))
+       ON CONFLICT(chat_id) DO UPDATE SET step=excluded.step, draft='{}', message_id=NULL, updated_at=datetime('now')`,
+      String(chatId), `link:${startToken}`);
+    await callTelegram(env.TELEGRAM_BOT_TOKEN, "sendMessage", {
+      chat_id: chatId, text: botCopy("linkAsk", locale),
+      reply_markup: { inline_keyboard: [[
+        { text: botCopy("linkYes", locale), callback_data: "lk:yes" },
+        { text: botCopy("linkNo", locale),  callback_data: "lk:no" },
+      ]] },
+    });
     return;
   }
 
@@ -162,6 +141,11 @@ async function handle(env: Env, raw: unknown): Promise<void> {
 
   if (callback) {
     const cbId = update.callback_query?.id;
+    if (callback.startsWith("lk:")) {
+      if (cbId) await callTelegram(env.TELEGRAM_BOT_TOKEN, "answerCallbackQuery", { callback_query_id: cbId });
+      await handleLinkButton(env, chatId, callback, locale);
+      return;
+    }
     if (await handleDeleteButton(env, chatId, callback, cbId, locale)) return;
     if (await handleStartButton(env, chatId, callback, cbId, locale)) return;
     if (await handleFirstButton(env, chatId, callback, cbId, locale)) return;
@@ -251,4 +235,68 @@ async function claimUpdate(updateId: number): Promise<boolean> {
   await run("INSERT OR IGNORE INTO webhook_updates (update_id) VALUES (?)", updateId);
   await run("DELETE FROM webhook_updates WHERE seen_at < datetime('now','-1 day')");
   return true;
+}
+
+/** Відповідь на «прив'язати цей Telegram?». Токен беремо з bot_state, не з кнопки. */
+async function handleLinkButton(
+  env: Record<string, string | undefined>, chatId: number, data: string, locale: Locale,
+): Promise<void> {
+  const state = await one<{ step: string }>("SELECT step FROM bot_state WHERE chat_id=?", String(chatId));
+  await run("DELETE FROM bot_state WHERE chat_id=? AND step LIKE 'link:%'", String(chatId));
+  const token = state?.step.startsWith("link:") ? state.step.slice(5) : null;
+  if (data !== "lk:yes" || !token) {
+    await send(env, chatId, botCopy("linkCancelled", locale));
+    return;
+  }
+  const user = await one<{ id: string; connect_expires_at: string | null }>(
+    "SELECT id,connect_expires_at FROM users WHERE connect_token=?", token);
+  const fresh = user?.connect_expires_at && new Date(user.connect_expires_at).getTime() > Date.now();
+  if (!user || !fresh) {
+    await send(env, chatId, botCopy("linkExpired", locale));
+    return;
+  }
+  await bindChat(env, chatId, user.id, locale);
+}
+
+/** Власне прив'язка chat_id до акаунта — після підтвердження. */
+async function bindChat(
+  env: Record<string, string | undefined>, chatId: number, userId: string, locale: Locale,
+): Promise<void> {
+  const user = { id: userId };
+  // Цей chat_id може вже належати іншому акаунту — тому, що людина колись
+  // пройшла /start у боті, а тепер зареєструвалась на сайті. UNIQUE не дав
+  // би прив'язати. Правило: акаунт із сайту головний (у нього свіжий
+  // профіль); ботовий, який ще нічого не отримував, просто відв'язується.
+  // А якщо він уже має історію добірок — нічого не чіпаємо, людина сама обирає.
+  //
+  // Chat_id власника — виняток без винятків. Адмінство визначається саме
+  // ним, тож підроблене оновлення «/start <мій токен>» від імені цього
+  // chat_id перевісило б адмінку на чужий акаунт. Тому такий зв'язок
+  // приймаємо лише тоді, коли акаунт уже і є акаунтом власника.
+  const other = await one<{ id: string }>(
+    "SELECT id FROM users WHERE telegram_chat_id=? AND id<>?", String(chatId), user.id);
+  if (other) {
+    if (env.ADMIN_CHAT_ID && String(chatId) === env.ADMIN_CHAT_ID) {
+      console.warn(`telegram webhook: refused to relink ADMIN_CHAT_ID to user ${user.id}`);
+      await send(env, chatId, botCopy("alreadyLinked", locale));
+      return;
+    }
+    const hasHistory = await one<{ n: number }>("SELECT 1 n FROM sent WHERE user_id=? LIMIT 1", other.id);
+    if (hasHistory) {
+      await send(env, chatId, botCopy("alreadyLinked", locale));
+      return;
+    }
+    // Не стираємо: рядок лишається без Telegram і без розсилки. Видалення
+    // чужого акаунту з вебхука — надто гострий інструмент для цього місця.
+    await run(
+      `UPDATE users SET telegram_chat_id=NULL, status='paused', paused_reason='relinked',
+         updated_at=datetime('now') WHERE id=?`, other.id);
+    await run("DELETE FROM bot_state WHERE chat_id=?", String(chatId));
+  }
+
+  await run(
+    `UPDATE users SET telegram_chat_id=?, connect_token=NULL, connect_expires_at=NULL,
+       last_interaction_at=datetime('now') WHERE id=?`,
+    String(chatId), user.id);
+  await send(env, chatId, botCopy("linked", locale));
 }
