@@ -90,9 +90,7 @@ export async function startOnboarding(formData: FormData): Promise<void> {
   await run(
     "INSERT INTO onboarding_drafts (id,text,parsed) VALUES (?,?,?)",
     id, text.slice(0, DRAFT_TEXT_MAX), JSON.stringify(parsed));
-  // Покинуті чернетки (людина не дійшла до кроку 2) — це чужий текст у нашій
-  // базі без власника. Зносимо їх тим самим проходом, без окремого розкладу.
-  await run(`DELETE FROM onboarding_drafts WHERE created_at < datetime('now', ?)`, DRAFT_TTL);
+  await sweepDrafts();
 
   const jar = await cookies();
   jar.set(DRAFT_COOKIE, id, {
@@ -104,8 +102,12 @@ export async function startOnboarding(formData: FormData): Promise<void> {
 export async function readDraft(): Promise<{ text: string; parsed: ParsedProfile } | null> {
   const id = (await cookies()).get(DRAFT_COOKIE)?.value;
   if (!id) return null;
+  // Прострочену чернетку не віддаємо навіть тоді, коли прибиральник до неї ще
+  // не дійшов: кука живе годину, рядок — добу, і читати текст, який ми
+  // пообіцяли не тримати, не можна через одну лише розбіжність у розкладі.
   const row = await one<{ text: string; parsed: string }>(
-    "SELECT text, parsed FROM onboarding_drafts WHERE id=?", id);
+    `SELECT text, parsed FROM onboarding_drafts
+      WHERE id=? AND created_at >= datetime('now', ?)`, id, DRAFT_TTL);
   if (!row) return null;
   try { return { text: row.text, parsed: JSON.parse(row.parsed) as ParsedProfile }; }
   catch { return null; }
@@ -117,6 +119,20 @@ async function dropDraft(): Promise<void> {
   const id = jar.get(DRAFT_COOKIE)?.value;
   if (id) await run("DELETE FROM onboarding_drafts WHERE id=?", id);
   jar.delete(DRAFT_COOKIE);
+  await sweepDrafts();
+}
+
+/**
+ * Знести покинуті чернетки. Викликається на обох кінцях анкети — і коли її
+ * починають, і коли завершують.
+ *
+ * Спершу прибирання стояло лише в startOnboarding. Виходило, що поки ніхто не
+ * починає нову анкету, чужий текст лежить у базі безстроково — попри те, що
+ * і коментар у міграції, і сторінка приватності обіцяють добу. Окремого крона
+ * у Воркера немає, тож чистимо там, де й так уже пишемо.
+ */
+async function sweepDrafts(): Promise<void> {
+  await run(`DELETE FROM onboarding_drafts WHERE created_at < datetime('now', ?)`, DRAFT_TTL);
 }
 
 /**

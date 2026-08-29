@@ -264,6 +264,11 @@ export async function handleOnboardingText(
     if (parsed.remoteMode) draft.remoteMode = parsed.remoteMode;
     if (parsed.location) draft.location = parsed.location;
     if (parsed.salaryMin) { draft.salaryMin = parsed.salaryMin; draft.salaryCurrency = parsed.salaryCurrency; }
+    // Те, що не влізло в жодну кнопку («тільки стартапи», «без on-call»), —
+    // не сміття: підбір дає за нього до +6 балів. Сайт кладе його в wishes,
+    // а бот досі губив, тобто той самий текст працював по-різному залежно
+    // від того, звідки прийшла людина. Уже написане не перетираємо.
+    if (parsed.leftover && !draft.wishes) draft.wishes = parsed.leftover;
 
     const step = row.step as Step;
     await saveState(chatId, step, draft, null);

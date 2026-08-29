@@ -103,6 +103,17 @@ describe("більше не вигадує", () => {
     expect(parseLocally("90 000 EUR").salaryCurrency).toBe("EUR");
   });
 
+  it("цитата зарплати береться з місця збігу, а не з першого схожого рядка", () => {
+    // indexOf знаходив ПЕРШЕ входження «25k» у тексті, а не те, яке дало
+    // вилку, — і людині показувалась цитата зовсім з іншого місця.
+    const p = parseLocally("team of 25k9 people, salary from 25k");
+    expect(p.salaryMin).toBe(25_000);
+    expect(p.evidence.salary).toContain("salary from 25k");
+    // «25k9» — приманка на початку рядка; цитата не має бути навколо неї.
+    expect(p.evidence.salary).not.toContain("25k9");
+    expect(p.evidence.salary).not.toContain("team of");
+  });
+
   it("місто більше не вигадується з прийменника", () => {
     // «in Product», «in June», «in Python» ставали містом — а з міста
     // виводиться країна, яка вирішує доступ до національних дошок.
@@ -156,6 +167,16 @@ describe("підстави", () => {
 });
 
 describe("verifyEvidence", () => {
+  it("не спотикається на переносах рядка", () => {
+    // Цитата вже зведена до одного пробілу, а текст лишався сирим — тож
+    // будь-яка цитата через перенос не знаходилась. Саме так виглядає
+    // резюме з PDF, тобто на резюме підстави відкидались майже завжди.
+    const kept = verifyEvidence(
+      { "sphere:product": "Chef de produit Paris" },
+      "Jean Dupont\nChef de produit\nParis, France");
+    expect(kept).toHaveProperty("sphere:product");
+  });
+
   it("викидає підставу, якої немає в тексті", () => {
     const kept = verifyEvidence(
       { "sphere:product": "продакт-менеджер", "sphere:design": "я дизайнер" },

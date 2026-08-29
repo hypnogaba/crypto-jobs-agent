@@ -125,13 +125,19 @@ const CURRENCIES: Array<[string, RegExp]> = [
  * 25» — від 25 000: будь-яке двоцифрове число з пробілом ставало вилкою.
  * Нижня межа теж піднята: 10 000 на рік — це не зарплата, це вік числа в тексті.
  */
-function parseSalary(text: string): { min: number | null; currency: string | null; hit: string | null } {
+function parseSalary(text: string): {
+  min: number | null; currency: string | null;
+  /** Де саме збіглося. Не сам рядок: `indexOf` знаходив ПЕРШЕ входження
+   *  «25k» у тексті, а не те, яке дало вилку, — і людині показувалась цитата
+   *  зовсім з іншого місця («team of 25k9 people» замість «salary from 25k»). */
+  at: { index: number; length: number } | null;
+} {
   const m = /(\d{2,3})\s*[kк](?![\p{L}\p{N}])/iu.exec(text) ?? /(\d{2,3})[\s,.](\d{3})(?![\p{L}\p{N}])/u.exec(text);
-  if (!m) return { min: null, currency: null, hit: null };
+  if (!m) return { min: null, currency: null, at: null };
   const value = m[2] ? Number.parseInt(`${m[1]}${m[2]}`, 10) : Number.parseInt(m[1]!, 10) * 1000;
-  if (Number.isNaN(value) || value < 20_000 || value > 1_000_000) return { min: null, currency: null, hit: null };
+  if (Number.isNaN(value) || value < 20_000 || value > 1_000_000) return { min: null, currency: null, at: null };
   const currency = CURRENCIES.find(([, rx]) => rx.test(text))?.[0] ?? null;
-  return { min: value, currency, hit: m[0] };
+  return { min: value, currency, at: { index: m.index, length: m[0].length } };
 }
 
 const WANTS_REMOTE = w(`remote|anywhere|${stem("віддален")}|${stem("удалён")}|${stem("удален")}|${stem("t[ée]l[ée]travail")}`);
@@ -220,8 +226,8 @@ export function parseLocally(text: string): ParsedProfile {
   if (modes.length === 0 && remoteHit) modes.push("remote_only");
   if (modes.length > 0) evidence.remoteMode = relocateHit ?? remoteHit!;
 
-  const { min, currency, hit: salaryHit } = parseSalary(text);
-  if (salaryHit) evidence.salary = snippet(text, text.indexOf(salaryHit), salaryHit.length);
+  const { min, currency, at: salaryAt } = parseSalary(text);
+  if (salaryAt) evidence.salary = snippet(text, salaryAt.index, salaryAt.length);
 
   return {
     spheres,
@@ -287,7 +293,11 @@ const str = (v: unknown, max: number): string | null => {
  */
 export function verifyEvidence(raw: unknown, text: string): Record<string, string> {
   if (!raw || typeof raw !== "object") return {};
-  const hay = text.toLowerCase();
+  // Пробіли схлопуємо з ОБОХ боків. `str()` уже звів цитату до одного пробілу,
+  // а текст лишався сирим — тож будь-яка цитата, що перетинала перенос рядка,
+  // не знаходилась. Саме так виглядає текст із PDF-резюме, тобто на резюме
+  // підстави від моделі відкидалися майже завжди.
+  const hay = text.replace(/\s+/g, " ").toLowerCase();
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
     const quote = str(value, EVIDENCE_MAX);
@@ -311,7 +321,12 @@ export async function parseProfile(text: string, apiKey?: string | null): Promis
       },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: 1024,
+        // Схема виросла: до сімох полів додались мапа evidence (до ~15 записів
+        // по 48 символів) і leftover до 400. Кирилиця й французька в JSON
+        // коштують по кілька токенів на літеру, тож 1024 впиралися в стелю —
+        // а обрізаний JSON падає в catch і мовчки лишає локальний розбір,
+        // який міста не дає взагалі.
+        max_tokens: 4096,
         system: SYSTEM,
         messages: [{ role: "user", content: `<text>\n${text.slice(0, 12_000)}\n</text>` }],
       }),
