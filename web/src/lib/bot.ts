@@ -406,16 +406,36 @@ async function finishOnboarding(
 
   // Дата найближчої планової добірки — і кнопка, щоб побачити формат уже
   // зараз. Автоматично першу добірку більше не замовляємо: людина сама
-  // вирішує, чекати понеділка чи отримати п'ять одразу.
-  const when = nextDelivery(timezone, 9, new Date());
-  const done = `${summary(draft, locale)}\n\n${readyText(locale, {
-    h: "09:00", tz: zoneName(timezone, locale), when: formatWhen(when, timezone, locale) })}`;
-  const keys = [[
-    { text: say("firstNow", locale),  callback_data: "first:now" },
-    { text: say("firstWait", locale), callback_data: "first:wait" },
-  ]];
-  if (messageId) await editKeyboard(env, chatId, messageId, done, keys);
-  else await sendKeyboard(env, chatId, done, keys);
+  // вирішує, чекати понеділка чи отримати п'ять одразу. Година — та, що
+  // в базі: /time міг її вже змінити.
+  const hour = (await one<{ delivery_hour: number }>(
+    "SELECT delivery_hour FROM users WHERE id=?", userId))?.delivery_hour ?? 9;
+  const done = `${summary(draft, locale)}\n\n${readyText(locale, firstOfferVars(timezone, hour, locale))}`;
+  if (messageId) await editKeyboard(env, chatId, messageId, done, FIRST_KEYS(locale));
+  else await sendKeyboard(env, chatId, done, FIRST_KEYS(locale));
+}
+
+/** Кнопки «Прислати 5 зараз / Чекатиму» — одна пара для всіх шляхів реєстрації. */
+export const FIRST_KEYS = (locale: Locale): Keyed[][] => [[
+  { text: say("firstNow", locale),  callback_data: "first:now" },
+  { text: say("firstWait", locale), callback_data: "first:wait" },
+]];
+
+/** Підстановки для тексту «добірки приходять у робочі дні о … найближча …». */
+export function firstOfferVars(timezone: string, hour: number, locale: Locale): { h: string; tz: string; when: string } {
+  return {
+    h: `${String(hour).padStart(2, "0")}:00`,
+    tz: zoneName(timezone, locale),
+    when: formatWhen(nextDelivery(timezone, hour, new Date()), timezone, locale),
+  };
+}
+
+/** Після CV чи прив'язки з сайту: та сама пропозиція, що й після анкети. */
+export async function sendFirstOffer(env: Env, chatId: number, userId: string, locale: Locale): Promise<void> {
+  const u = await one<{ timezone: string; delivery_hour: number }>(
+    "SELECT timezone, delivery_hour FROM users WHERE id=?", userId);
+  if (!u) return;
+  await sendKeyboard(env, chatId, tf("firstOffer", locale, firstOfferVars(u.timezone, u.delivery_hour, locale)), FIRST_KEYS(locale));
 }
 
 /** Кнопки під «Готово»: п'ять вакансій зараз або чекати планової. */
@@ -762,6 +782,7 @@ export async function handleDocument(
       seniority: parsed.seniority, remoteMode: parsed.remoteMode,
       salaryMin: parsed.salaryMin, salaryCurrency: parsed.salaryCurrency,
     }, locale)}`);
+    await sendFirstOffer(env, chatId, userId, locale);
   } catch (e) {
     await send(env, chatId, e instanceof CvError ? say("cvUnreadable", locale) : say("cvFailed", locale));
   }

@@ -4,7 +4,7 @@ import { one, run } from "@/lib/db";
 import { WEBHOOK_401_LIMITS, checkRate, recordFailure } from "@/lib/ratelimit";
 import { handleCommand, startBotOnboarding, continueBotOnboarding,
          handleOnboardingButton, handleOnboardingText, handleWhyButton, handleDocument,
-         handleDeleteButton, handleEditButton, handleFirstButton, handleLangButton, handleStartButton } from "@/lib/bot";
+         handleDeleteButton, handleEditButton, handleFirstButton, handleLangButton, handleStartButton, sendFirstOffer } from "@/lib/bot";
 import { freeTextAction } from "@/lib/bot-onboarding";
 import { isLocale } from "@/lib/i18n";
 import type { Locale } from "@/lib/vocab";
@@ -299,4 +299,5 @@ async function bindChat(
        last_interaction_at=datetime('now') WHERE id=?`,
     String(chatId), user.id);
   await send(env, chatId, botCopy("linked", locale));
+  await sendFirstOffer(env, chatId, user.id, locale);
 }

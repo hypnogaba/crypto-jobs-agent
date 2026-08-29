@@ -27,11 +27,19 @@ const P = {
   // (delivery_requests); ту саму обіцянку дає кабінет. Далі — щодня о
   // вибраній годині, її рухає /time.
   linked: {
-    en: "Done. The first five roles arrive within the hour, then every day at your hour. Send /time to move it.",
-    uk: "Готово. Перші п'ять вакансій прийдуть протягом години, далі — щодня о твоїй годині. Змінити її — /time.",
-    fr: "C'est fait. Les cinq premières offres arrivent dans l'heure, puis chaque jour à votre heure. Pour la changer : /time.",
-    ru: "Готово. Первые пять вакансий придут в течение часа, дальше — каждый день в твой час. Изменить его — /time.",
+    en: "Linked. This chat now gets your batches.",
+    uk: "Прив'язано. Добірки тепер приходять сюди.",
+    fr: "Lié. Vos sélections arrivent désormais ici.",
+    ru: "Привязано. Подборки теперь приходят сюда.",
   },
+  // Після CV або прив'язки з сайту — та сама пропозиція, що й після анкети.
+  firstOffer: {
+    en: "Batches come on weekdays at {h} ({tz}). Next one: {when}.\n\nWant to see how it looks right now?",
+    uk: "Добірки приходять у робочі дні о {h} ({tz}). Найближча: {when}.\n\nХочеш побачити, як це виглядає, вже зараз?",
+    fr: "Les sélections arrivent en semaine à {h} ({tz}). Prochaine : {when}.\n\nVoir à quoi ça ressemble dès maintenant ?",
+    ru: "Подборки приходят в рабочие дни в {h} ({tz}). Ближайшая: {when}.\n\nХочешь увидеть, как это выглядит, прямо сейчас?",
+  },
+
   // Прив'язка через посилання з сайту — лише після підтвердження кнопкою:
   // інакше чуже посилання «отримай 5 вакансій» тихо переписувало б чат на
   // чужий акаунт, і все написане далі йшло б у чужий профіль.

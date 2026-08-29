@@ -79,7 +79,12 @@ export async function translateJobs(
   try { cached = await store.get(jobs.map((j) => j.id), locale); }
   catch { cached = new Map(); }
 
-  const todo = jobs.filter((j) => !cached.has(j.id));
+  // Кеш без опису (переклали, коли summary ще не було) — не кеш, а
+  // напівпереклад: опис з'явився пізніше, тож перекладаємо заново.
+  const todo = jobs.filter((j) => {
+    const c = cached.get(j.id);
+    return !c || (Boolean(j.summary) && !c.summary);
+  });
   if (todo.length === 0) return cached;
 
   const out = new Map(cached);

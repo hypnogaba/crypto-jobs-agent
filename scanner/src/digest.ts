@@ -589,11 +589,12 @@ export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
     if (onRequest) await closeRequests(d1, u.id);
     return;
   }
-  if (pending.length > 0 && !canSend) {
+  if (pending.length > 0 && !canSend && !onRequest) {
     // Немає куди дотискати (без Telegram або без токена), а добірка вже
     // лежить у кабінеті. Нову щогодини не підбираємо — інакше кабінет
     // заповнювався б відкладеними добірками, доки не скінчаться вакансії.
-    if (onRequest) await closeRequests(d1, u.id);
+    // На явне «Ще п'ять» із сайту нова добірка все ж підбирається (нижче):
+    // кабінет і є її каналом доставки, а стеля 20/день тримає обсяг.
     console.log(`  ${u.id.slice(0, 8)}: відкладена добірка вже лежить у кабінеті, нової не підбираю`);
     return;
   }
