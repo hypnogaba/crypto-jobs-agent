@@ -11,6 +11,14 @@ export const RELEASES: Release[] = [
     "date": "2026-08-29",
     "changes": [
       {
+        "hash": "c5c09d0",
+        "subject": "web: англійська як мова першого візиту, сталий приклад у макеті"
+      },
+      {
+        "hash": "2341736",
+        "subject": "Історія версій"
+      },
+      {
         "hash": "323c3d4",
         "subject": "Кабінет: кнопка «Уточнити» замість «Не те, що треба» — як у боті"
       },
@@ -574,4 +582,4 @@ export const RELEASES: Release[] = [
   }
 ];
 
-export const GENERATED_AT = "2026-08-29 15:12";
+export const GENERATED_AT = "2026-08-29 16:16";
