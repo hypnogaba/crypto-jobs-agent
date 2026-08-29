@@ -13,6 +13,10 @@ export const RELEASES: Release[] = [
     "date": "2026-08-29",
     "changes": [
       {
+        "hash": "df86ffa",
+        "subject": "Правка профілю в боті — одне повідомлення й кнопка «Назад»"
+      },
+      {
         "hash": "fd0fd57",
         "subject": "Список людей терпить порожню дату реєстрації"
       },
@@ -225,7 +229,7 @@ export const RELEASES: Release[] = [
         "subject": "Часовий пояс знімається при реєстрації, а не лише в налаштуваннях"
       }
     ],
-    "chores": 11
+    "chores": 12
   },
   {
     "date": "2026-08-28",
@@ -585,4 +589,4 @@ export const RELEASES: Release[] = [
   }
 ];
 
-export const GENERATED_AT = "2026-08-29 19:54";
+export const GENERATED_AT = "2026-08-29 20:06";
