@@ -6,6 +6,8 @@
  * функціональний з першого дня, а Anthropic — покращення, не залежність.
  */
 
+import { whyLine, type Locale, type WhyBit } from "./digest-copy.js";
+
 export interface Profile {
   userId: string;
   spheres: string[];
@@ -237,24 +239,27 @@ export function pickTop(jobs: CandidateJob[], p: Profile, limit = 5, now = new D
   return picked.sort((a, b) => b.score - a.score);
 }
 
-/** Пояснення без моделі — шаблон із реальних причин, а не переказ вакансії. */
-export function explainLocally(job: ScoredJob, p: Profile): string {
-  const bits: string[] = [];
+/**
+ * Пояснення без моделі — шаблон із реальних причин, а не переказ вакансії.
+ * Мовою людини: без ключа Anthropic це єдиний рядок «чому ти», який вона бачить.
+ */
+export function explainLocally(job: ScoredJob, p: Profile, locale: Locale = "en"): string {
+  const bits: WhyBit[] = [];
   const sphere = p.spheres.find((s) => job.tags.includes(s));
-  if (sphere) bits.push(`це ${sphere}, одна з твоїх сфер`);
-  else if (matchesCustomRole(job.title, p.customRole)) bits.push(`це ${p.customRole}, як ти й просив`);
+  if (sphere) bits.push({ k: "sphere", v: sphere });
+  else if (matchesCustomRole(job.title, p.customRole)) bits.push({ k: "role", v: p.customRole! });
   const industry = p.industries.find((i) => job.tags.includes(i));
-  if (industry) bits.push(`індустрія ${industry}`);
-  if (job.remote && p.remoteMode === "remote_only") bits.push("повністю віддалено");
-  if (p.salaryMin && job.salaryMin && job.salaryMin >= p.salaryMin) bits.push("вилка вища за твій поріг");
-  if (bits.length === 0) bits.push("збігається з профілем за назвою ролі");
-  return `${bits.join(", ")}.`;
+  if (industry) bits.push({ k: "industry", v: industry });
+  if (job.remote && p.remoteMode === "remote_only") bits.push({ k: "remote" });
+  if (p.salaryMin && job.salaryMin && job.salaryMin >= p.salaryMin) bits.push({ k: "salary" });
+  if (bits.length === 0) bits.push({ k: "title" });
+  return whyLine(locale, bits);
 }
 
 const EXPLAIN_SYSTEM =
   `Ти пишеш один рядок про те, чому вакансія підходить конкретній людині.
 Пиши ПРО ЛЮДИНУ, не переказуй вакансію. Одне-два речення, без вступів,
-тією ж мовою, що й профіль. Відповідай ЛИШЕ JSON: {"why":["...","..."]} —
+мовою, вказаною в МОВА ВІДПОВІДІ (код локалі). Відповідай ЛИШЕ JSON: {"why":["...","..."]} —
 по одному рядку на вакансію, у тому ж порядку.`;
 
 /** Скільки токенів коштував виклик. Гроші не рахуємо тут: ставка за токен
@@ -273,8 +278,9 @@ export interface UsageReport {
 export async function explainWithClaude(
   jobs: ScoredJob[], p: Profile, apiKey: string | null, model = "claude-haiku-4-5",
   onUsage?: (u: UsageReport) => Promise<void> | void,
+  locale: Locale = "en",
 ): Promise<string[]> {
-  const local = jobs.map((j) => explainLocally(j, p));
+  const local = jobs.map((j) => explainLocally(j, p, locale));
   if (!apiKey || jobs.length === 0) return local;
 
   const profileText =
@@ -291,7 +297,7 @@ export async function explainWithClaude(
       headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
       body: JSON.stringify({
         model, max_tokens: 1024, system: EXPLAIN_SYSTEM,
-        messages: [{ role: "user", content: `ПРОФІЛЬ:\n${profileText}\n\nВАКАНСІЇ:\n${jobsText}` }],
+        messages: [{ role: "user", content: `МОВА ВІДПОВІДІ: ${locale}\n\nПРОФІЛЬ:\n${profileText}\n\nВАКАНСІЇ:\n${jobsText}` }],
       }),
     });
     if (!res.ok) {

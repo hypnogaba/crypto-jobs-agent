@@ -467,7 +467,7 @@ async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
          VALUES (?,'anthropic','match_reason',?,?,?,0,?)`,
         [crypto.randomUUID(), u.model, u.inputTokens, u.outputTokens, u.ok ? 1 : 0]);
     } catch { /* журнал не важливіший за доставку */ }
-  });
+  }, asLocale(u.locale));
   const digestId = crypto.randomUUID();
 
   const summaries = await fillMissingSummaries(

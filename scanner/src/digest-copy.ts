@@ -87,3 +87,52 @@ export const scanned = (locale: Locale, jobs: number, companies: number): string
   };
   return map[locale] ?? map.en;
 };
+
+/**
+ * Рядок «чому ти» без моделі — з ідентифікаторів причин збігу.
+ *
+ * Досі explainLocally писав українською для всіх, і без ключа Anthropic саме
+ * цей рядок бачив кожен француз. Сфери й індустрії лишаються сирими
+ * ідентифікаторами: словник назв живе на сайті, сканер його навмисно не
+ * бачить (див. MatchFact у match.ts).
+ */
+export type WhyBit =
+  | { k: "sphere"; v: string }
+  | { k: "role"; v: string }
+  | { k: "industry"; v: string }
+  | { k: "remote" }
+  | { k: "salary" }
+  | { k: "title" };
+
+const WHY: Record<WhyBit["k"], (v: string) => Phrase> = {
+  sphere: (v) => ({
+    en: `${v} is one of your fields`, uk: `це ${v}, одна з твоїх сфер`,
+    fr: `${v}, un de vos domaines`, ru: `это ${v}, одна из твоих сфер`,
+  }),
+  role: (v) => ({
+    en: `${v}, as you asked`, uk: `це ${v}, як ти й просив`,
+    fr: `${v}, comme vous l'avez demandé`, ru: `это ${v}, как ты и просил`,
+  }),
+  industry: (v) => ({
+    en: `${v} industry`, uk: `індустрія ${v}`, fr: `secteur ${v}`, ru: `индустрия ${v}`,
+  }),
+  remote: () => ({
+    en: "fully remote", uk: "повністю віддалено", fr: "entièrement à distance", ru: "полностью удалённо",
+  }),
+  salary: () => ({
+    en: "salary above your floor", uk: "вилка вища за твій поріг",
+    fr: "salaire au-dessus de votre seuil", ru: "вилка выше твоего порога",
+  }),
+  title: () => ({
+    en: "role title matches your profile", uk: "збігається з профілем за назвою ролі",
+    fr: "l'intitulé correspond à votre profil", ru: "совпадает с профилем по названию роли",
+  }),
+};
+
+export const whyLine = (locale: Locale, bits: WhyBit[]): string => {
+  const words = bits.map((b) => {
+    const ph = WHY[b.k]("v" in b ? b.v : "");
+    return ph[locale] ?? ph.en;
+  });
+  return `${words.join(", ")}.`;
+};
