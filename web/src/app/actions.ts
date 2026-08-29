@@ -9,7 +9,7 @@ import { parseProfile, type ParsedProfile } from "@/lib/parse";
 import { CvError, extractCvText } from "@/lib/cv";
 import { isLocale, localeFromHeader } from "@/lib/i18n";
 import { safeTimezone } from "@/lib/digest-time";
-import { checkRate, recordFailure } from "@/lib/ratelimit";
+import { FEEDBACK_LIMITS, checkRate, recordFailure } from "@/lib/ratelimit";
 import type { Locale } from "@/lib/vocab";
 import { persistCountry } from "@/lib/profile-country";
 import { sendText } from "@/lib/telegram-send";
@@ -268,8 +268,10 @@ export async function sendFeedback(formData: FormData): Promise<void> {
   if (message.length < 3) redirect("/feedback?error=empty");
 
   const ip = (await headers()).get("cf-connecting-ip") ?? "unknown";
+  // М'який ліміт: тут рахується кожен надісланий відгук, а за адресою може
+  // стояти ціла мережа. Жорсткий авторизаційний ліміт блокував їх усіх.
   if (!(await checkRate(`feedback:${ip}`)).allowed) redirect("/feedback?error=tooMany");
-  await recordFailure(`feedback:${ip}`);
+  await recordFailure(`feedback:${ip}`, FEEDBACK_LIMITS);
 
   const locale = await detectLocale();
   const user = await currentUser();
