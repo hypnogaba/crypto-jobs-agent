@@ -465,3 +465,39 @@ describe("deliverTo", () => {
     expect(body.text).toContain("20");
   });
 });
+
+import { nextDelivery, formatWhen } from "./digest-copy.js";
+
+describe("nextDelivery / formatWhen", () => {
+  const sat = new Date("2026-08-29T11:00:00Z"); // субота 13:00 Париж
+  it("із суботи — понеділок о 9 за Парижем", () => {
+    expect(nextDelivery("Europe/Paris", 9, sat).toISOString()).toBe("2026-08-31T07:00:00.000Z");
+  });
+  it("у робочий день до години — сьогодні; після — наступний робочий", () => {
+    expect(nextDelivery("Europe/Paris", 9, new Date("2026-08-31T06:00:00Z")).toISOString()).toBe("2026-08-31T07:00:00.000Z");
+    expect(nextDelivery("Europe/Paris", 9, new Date("2026-08-28T08:00:00Z")).toISOString()).toBe("2026-08-31T07:00:00.000Z");
+  });
+  it("Київ", () => {
+    expect(nextDelivery("Europe/Kyiv", 9, sat).toISOString()).toBe("2026-08-31T06:00:00.000Z");
+  });
+  it("формат мовою людини", () => {
+    const d = new Date("2026-08-31T07:00:00Z");
+    expect(formatWhen(d, "Europe/Paris", "uk")).toMatch(/понеділок.*31 серпня.*09:00/);
+    expect(formatWhen(d, "Europe/Paris", "en")).toMatch(/Monday.*31 August.*09:00/);
+    expect(formatWhen(d, "Europe/Paris", "fr")).toMatch(/lundi.*31 août.*09:00/);
+  });
+});
+
+describe("футер першої добірки", () => {
+  const five = [1, 2, 3, 4, 5].map((i) => ({
+    id: `j${i}`, company: `Company ${i}`, companyKey: `c${i}`, title: "Senior Engineer",
+    location: "Paris", remote: true, url: `https://x.test/${i}`, tags: [], postedAt: null,
+    salaryMin: null, salaryCurrency: null, why: "why", summary: "Plain summary.", sentId: `sent-${i}` }));
+  it("на першу доставку на запит — пояснення з датою наприкінці", () => {
+    const text = formatDigest(five, "uk", { trialWhen: "понеділок, 31 серпня, 09:00" });
+    expect(text).toMatch(/Ось так працює бот.*понеділок, 31 серпня, 09:00\.$/s);
+  });
+  it("звичайна — без нього", () => {
+    expect(formatDigest(five, "uk")).not.toContain("Ось так працює бот");
+  });
+});

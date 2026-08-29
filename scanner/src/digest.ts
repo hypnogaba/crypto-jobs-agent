@@ -13,7 +13,7 @@
 import { loadConfig } from "./config.js";
 import { D1Client } from "./d1.js";
 import { explainWithClaude, pickTop, type CandidateJob, type Profile } from "./match.js";
-import { asLocale, salaryLine, say, thin, type Locale } from "./digest-copy.js";
+import { asLocale, formatWhen, nextDelivery, salaryLine, say, thin, type Locale } from "./digest-copy.js";
 import { summarize } from "./summary.js";
 import { costUsd } from "./pricing.js";
 import { extractSalary, type Salary } from "./salary.js";
@@ -319,6 +319,8 @@ export interface FormatOptions {
    * Тоді замість «менше ніж зазвичай» іде чесне «це останні на сьогодні».
    */
   capped?: boolean;
+  /** Перша доставлена добірка взагалі: дописуємо, коли прийде планова. */
+  trialWhen?: string;
 }
 
 export function formatDigest(
@@ -360,6 +362,11 @@ export function formatDigest(
     lines.push("─────────────");
     lines.push("");
     lines.push(escapeHtml(opts.capped ? say(locale, "capLast") : thin(locale, jobs.length, DIGEST_SIZE)));
+  }
+  if (opts.trialWhen) {
+    lines.push("─────────────");
+    lines.push("");
+    lines.push(escapeHtml(say(locale, "trialFooter").replace("{when}", opts.trialWhen)));
   }
   return lines.join("\n").replace(/\n+$/, "");
 }
@@ -530,6 +537,13 @@ export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
   const recent = await d1.query<{ created_at: string; sent_at: string | null; status: string }>(
     "SELECT created_at, sent_at, status FROM sent WHERE user_id=? AND created_at >= datetime('now','-2 day')", [u.id]);
   const deliveredToday = sentToday(u.timezone, now, recent).length;
+  // Перша доставлена добірка взагалі — людина натиснула «Прислати 5 зараз»
+  // одразу після анкети. Дописуємо, коли прийде справжня планова.
+  const everSent = await d1.query<{ n: number }>(
+    "SELECT COUNT(*) AS n FROM sent WHERE user_id=? AND status='sent'", [u.id]);
+  const trialWhen = onRequest && (everSent[0]?.n ?? 0) === 0
+    ? formatWhen(nextDelivery(u.timezone, u.delivery_hour, now), u.timezone, locale)
+    : undefined;
 
   // ── Спершу дотиснути непроставлене ──
   // Запис зі статусом pending означає «підібрано, але не доставлено».
@@ -767,7 +781,7 @@ export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
 
   // Менше за п'ять через стелю — не «тонкий день», а «решта завтра».
   const capped = onRequest && allowance < DIGEST_SIZE;
-  const text = fitDigest(await localizeJobs(withWhy, locale, ctx), locale, DIGEST_MAX, { capped });
+  const text = fitDigest(await localizeJobs(withWhy, locale, ctx), locale, DIGEST_MAX, { capped, trialWhen });
   if (botToken && u.telegram_chat_id) {
     const sent = await sendTelegram(botToken, u.telegram_chat_id, text, digestId, locale);
     if (!sent.ok) {

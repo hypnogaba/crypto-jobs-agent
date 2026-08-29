@@ -45,6 +45,15 @@ const P = {
   },
   // Запит «ще п'ять» уперся в денну стелю: людина отримала менше за п'ять
   // не тому, що вакансій мало, а тому, що добова квота закінчилась.
+  // Перша доставлена добірка взагалі — на кнопку «Прислати 5 зараз» після
+  // анкети. Це справжні вакансії за профілем; пояснюємо лише, що далі буде
+  // за розкладом.
+  trialFooter: {
+    en: "That’s how the bot works — these are real roles for your profile. From now on, as agreed: weekdays, next one {when}.",
+    uk: "Ось так працює бот — це справжні вакансії під твій профіль. Далі — як домовилися: у робочі дні, найближча {when}.",
+    fr: "Voilà comment le bot fonctionne — ce sont de vrais postes pour votre profil. Ensuite, comme convenu : en semaine, la prochaine {when}.",
+    ru: "Вот так работает бот — это настоящие вакансии под твой профиль. Дальше — как договорились: в рабочие дни, ближайшая {when}.",
+  },
   capLast: {
     en: "These are the last for today — the cap is 20 jobs a day. The rest comes tomorrow.",
     uk: "Це останні на сьогодні — стеля 20 вакансій на день. Решта завтра.",
@@ -209,3 +218,50 @@ export const whyLine = (locale: Locale, bits: WhyBit[]): string => {
   });
   return `${words.join(", ")}.`;
 };
+
+/** Частини локального часу в зоні: дата, година, день тижня 0..6 (нд=0). */
+function partsIn(tz: string, at: Date): { y: number; m: number; d: number; h: number; wd: number } {
+  const f = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz, hour12: false, weekday: "short",
+    year: "numeric", month: "numeric", day: "numeric", hour: "numeric",
+  });
+  const p = Object.fromEntries(f.formatToParts(at).map((x) => [x.type, x.value]));
+  const wd = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(p.weekday!);
+  return { y: +p.year!, m: +p.month!, d: +p.day!, h: +p.hour! % 24, wd };
+}
+
+/** Момент, коли в зоні tz настає локальна дата y-m-d о h:00. Ітерація по зсуву — без бібліотек. */
+function zonedTime(tz: string, y: number, m: number, d: number, h: number): Date {
+  let guess = Date.UTC(y, m - 1, d, h);
+  for (let i = 0; i < 3; i++) {
+    const p = partsIn(tz, new Date(guess));
+    const seen = Date.UTC(p.y, p.m - 1, p.d, p.h);
+    const want = Date.UTC(y, m - 1, d, h);
+    if (seen === want) break;
+    guess += want - seen;
+  }
+  return new Date(guess);
+}
+
+/**
+ * Найближча планова доставка: робочий день (Пн–Пт) у зоні людини о hour:00,
+ * не раніше за now. Той самий алгоритм у web/src/lib/digest-time.ts.
+ */
+export function nextDelivery(tz: string, hour: number, now: Date): Date {
+  const p = partsIn(tz, now);
+  for (let add = 0; add < 8; add++) {
+    const day = new Date(Date.UTC(p.y, p.m - 1, p.d + add, 12));
+    const wd = day.getUTCDay();
+    if (wd === 0 || wd === 6) continue;
+    const at = zonedTime(tz, day.getUTCFullYear(), day.getUTCMonth() + 1, day.getUTCDate(), hour);
+    if (at.getTime() >= now.getTime()) return at;
+  }
+  return now;
+}
+
+/** «понеділок, 31 серпня, 09:00» мовою людини, у її зоні. */
+export function formatWhen(at: Date, tz: string, locale: Locale): string {
+  const day = new Intl.DateTimeFormat(intlOf(locale), { timeZone: tz, weekday: "long", day: "numeric", month: "long" }).format(at);
+  const time = new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit", hour12: false }).format(at);
+  return `${day}, ${time}`;
+}
