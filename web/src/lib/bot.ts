@@ -5,7 +5,7 @@ import {
   STEPS, EDITABLE,
   summary, toggle, type Draft, type Step,
 } from "./bot-onboarding";
-import { isLocale, LOCALES } from "./i18n";
+import { isLocale, LOCALES, toLocale } from "./i18n";
 import { CvError, extractCvText } from "./cv";
 import { parseProfile } from "./parse";
 import { t as say, tf, timeNow, timeSet } from "./bot-copy";
@@ -929,8 +929,9 @@ export async function handleCommand(
     case "/lang": {
       const arg = (text.split(/\s+/)[1] ?? "").toLowerCase();
       if (!arg) { await sendLangKeyboard(env, chatId, locale); break; }
-      if (!isLocale(arg)) { await send(env, chatId, say("langBad", locale)); break; }
-      await setLocale(env, chatId, user!.id, arg);
+      const chosen = toLocale(arg);
+      if (!chosen) { await send(env, chatId, say("langBad", locale)); break; }
+      await setLocale(env, chatId, user!.id, chosen);
       break;
     }
 

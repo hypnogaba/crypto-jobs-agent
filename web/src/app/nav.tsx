@@ -60,7 +60,7 @@ export default async function Nav({ locale }: { locale: Locale }) {
                 data-on={l.id === locale}
                 aria-pressed={l.id === locale}
                 title={l.name} aria-label={l.name}>
-                {l.id}
+                {l.short}
               </button>
             ))}
           </form>

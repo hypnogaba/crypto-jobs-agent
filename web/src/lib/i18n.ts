@@ -946,14 +946,39 @@ const ru: Dict = {
 
 const DICTS: Record<Locale, Dict> = { en, uk, fr, ru };
 
-export const LOCALES: Array<{ id: Locale; name: string }> = [
-  { id: "en", name: "English" },
-  { id: "uk", name: "Українська" },
-  { id: "fr", name: "Français" },
-  { id: "ru", name: "Русский" },
+/**
+ * `id` — код мови (ISO 639-1), яким живе вся система: кука, стовпець
+ * users.locale, ключі словників, команда бота. `short` — те, що бачить
+ * людина в перемикачі.
+ *
+ * Вони розходяться рівно в одному місці. Українська за ISO 639-1 — це `uk`,
+ * але «UK» поруч із «EN» читається як United Kingdom, а не як мова. Країна
+ * за ISO 3166 — `UA`, і саме її очікує побачити людина. Міняти сам
+ * ідентифікатор було б переписуванням бази й усіх словників заради підпису,
+ * тож розходяться лише два символи на екрані.
+ */
+export const LOCALES: Array<{ id: Locale; short: string; name: string }> = [
+  { id: "en", short: "EN", name: "English" },
+  { id: "uk", short: "UA", name: "Українська" },
+  { id: "fr", short: "FR", name: "Français" },
+  { id: "ru", short: "RU", name: "Русский" },
 ];
 
 export const isLocale = (v: string): v is Locale => v in DICTS;
+
+/**
+ * Псевдоніми, які людина може написати боту. Перемикач на сайті каже «UA»,
+ * тож `/lang ua` — те, що вона набере наступним. Відповідати на це «не знаю
+ * такої мови» було б покаранням за наш власний підпис.
+ */
+const LOCALE_ALIASES: Record<string, Locale> = { ua: "uk", ukr: "uk", gb: "en", us: "en" };
+
+/** Код мови з того, що написала людина: сам код або звичний псевдонім. */
+export const toLocale = (v: string): Locale | null => {
+  const s = v.trim().toLowerCase();
+  if (isLocale(s)) return s;
+  return LOCALE_ALIASES[s] ?? null;
+};
 
 export function t(locale: Locale, key: string): string {
   return DICTS[locale]?.[key] ?? DICTS.en[key] ?? key;
