@@ -8,6 +8,17 @@
 
 import { labelOf, languageName, whyLine, type Locale, type WhyBit } from "./digest-copy.js";
 
+/**
+ * «Тільки віддалено» — це коли людина прямо це сказала й не назвала при цьому
+ * жодного варіанта з місцем. Мовчання й невідоме значення сюди не рахуються:
+ * жорсткий мінус за офіс має спиратись на відповідь, а не на порожнє поле.
+ */
+const remoteOnly = (raw: string): boolean => {
+  const modes = raw.split(",").map((m) => m.trim());
+  return modes.includes("remote_only")
+    && !modes.some((m) => m === "remote_or_city" || m === "relocate");
+};
+
 export interface Profile {
   userId: string;
   spheres: string[];
@@ -17,6 +28,12 @@ export interface Profile {
   /** Вільні побажання людини: «тільки стартапи, без банків, 4-денний тиждень». */
   wishes?: string | null;
   seniority: string | null;
+  /**
+   * Набір варіантів через кому: «тільки віддалено» | «віддалено або офіс у
+   * моєму місті» | «готовий переїхати». Останні два сумісні між собою, тож
+   * поле — список, а не одне значення. Рядки, записані до цієї зміни, — це
+   * список з одного елемента, тож старі профілі читаються без міграції.
+   */
   remoteMode: string;
   location: string | null;
   salaryMin: number | null;
@@ -155,7 +172,7 @@ export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): Score
     }
   }
 
-  if (p.remoteMode === "remote_only") {
+  if (remoteOnly(p.remoteMode)) {
     if (job.remote) { score += 3; facts.push({ k: "remote" }); }
     else score -= 6;                       // майже завжди відсікає onsite
   } else if (job.remote) {
@@ -281,7 +298,7 @@ export function explainLocally(job: ScoredJob, p: Profile, locale: Locale = "en"
   else if (matchesCustomRole(job.title, p.customRole)) bits.push({ k: "role", v: p.customRole! });
   const industry = p.industries.find((i) => job.tags.includes(i));
   if (industry) bits.push({ k: "industry", v: industry });
-  if (job.remote && p.remoteMode === "remote_only") bits.push({ k: "remote" });
+  if (job.remote && remoteOnly(p.remoteMode)) bits.push({ k: "remote" });
   if (p.salaryMin && job.salaryMin && job.salaryMin >= p.salaryMin) bits.push({ k: "salary" });
   if (bits.length === 0) bits.push({ k: "title" });
   return whyLine(locale, bits);

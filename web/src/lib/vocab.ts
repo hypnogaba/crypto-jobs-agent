@@ -49,3 +49,44 @@ export type Locale = "en" | "uk" | "fr" | "ru";
 export const label = (
   item: { en: string; uk: string; fr: string; ru: string }, locale: Locale
 ): string => item[locale] ?? item.en;
+
+/**
+ * «Де хочеш працювати» — це набір, а не один вибір.
+ *
+ * Людина, готова і на офіс у своєму місті, і на переїзд, раніше мусила
+ * викреслити одне з двох: поле було радіо-кнопкою. Тепер у стовпці
+ * `remote_mode` лежить список ідентифікаторів через кому. Старі рядки —
+ * це список з одного елемента, тож міграція не потрібна: формат читає
+ * і те, що записано до цієї зміни.
+ *
+ * `remote_only` виключний за змістом: «тільки віддалено» разом з «офіс у
+ * місті» — суперечність, і виграє те, що ширше.
+ */
+export const parseModes = (raw: string | null | undefined): RemoteModeId[] => {
+  // Порядок завжди словниковий, а не той, у якому людина натискала: інакше
+  // той самий набір показувався б по-різному в боті й на сайті.
+  const written = new Set((raw ?? "").split(",").map((s) => s.trim()));
+  const list = REMOTE_MODES.map((m) => m.id).filter((id) => written.has(id));
+  const wide = list.filter((m) => m !== "remote_only");
+  return (wide.length ? wide : list) as RemoteModeId[];
+};
+
+/** Порожній набір повертає порожній рядок: підставляти замовчування — справа того, хто пише в базу. */
+export const serializeModes = (modes: string[]): string =>
+  REMOTE_MODES.filter((m) => modes.includes(m.id)).map((m) => m.id).join(",");
+
+/**
+ * Дотик по одному варіанту. «Тільки віддалено» витісняє решту й витісняється
+ * нею — інакше кнопка виглядала б зламаною: людина тисне, а галочка не
+ * з'являється, бо parseModes мовчки викидає суперечність.
+ */
+export const toggleMode = (raw: string | null | undefined, id: string): string => {
+  const cur = parseModes(raw);
+  if (cur.includes(id as RemoteModeId)) return serializeModes(cur.filter((m) => m !== id));
+  if (id === "remote_only") return "remote_only";
+  return serializeModes([...cur.filter((m) => m !== "remote_only"), id]);
+};
+
+/** Місто питається лише в того, хто згоден не тільки на віддалену роботу. */
+export const needsCity = (modes: string[]): boolean =>
+  modes.some((m) => m === "remote_or_city" || m === "relocate");

@@ -167,6 +167,42 @@ describe("правка по пунктах", () => {
   });
 });
 
+describe("де хочеш працювати", () => {
+  // Офіс у своєму місті й готовність переїхати — не альтернативи. Радіо-кнопка
+  // змушувала викреслити одне з двох, і в базу йшла половина відповіді.
+  it("позначає обидва обрані варіанти", () => {
+    const rows = keyboard("where", { ...emptyDraft(), remoteMode: "remote_or_city,relocate" }, "uk");
+    const flat = rows.flat();
+    expect(flat.filter((b) => b.text.startsWith("✓ "))).toHaveLength(2);
+    expect(flat[flat.length - 1]!.callback_data).toBe("ob:where:__next");
+  });
+
+  it("не дає завершити, поки нічого не обрано", () => {
+    const rows = keyboard("where", emptyDraft(), "uk");
+    expect(rows[rows.length - 1]![0]!.callback_data).toBe("ob:noop:0");
+  });
+
+  it("веде до міста, коли обрано будь-який варіант із місцем", () => {
+    expect(nextStep("where", { ...emptyDraft(), remoteMode: "remote_or_city,relocate" })).toBe("city");
+  });
+
+  // Місто обов'язкове: питання ставиться лише тому, хто сам обрав місце,
+  // а профіль без міста лишається без країни й без місцевих дошок.
+  it("не пропонує пропустити місто", () => {
+    expect(keyboard("city", emptyDraft(), "uk")).toEqual([]);
+    expect(keyboard("wishes", emptyDraft(), "uk")[0]![0]!.callback_data).toBe("ob:wishes:__next");
+  });
+
+  it("пише набір одним рядком і показує обидва варіанти в підсумку", () => {
+    const draft = { ...emptyDraft(), remoteMode: "relocate,remote_or_city", location: "Берлін" };
+    expect(profileUpdateFor("where", draft)).toEqual({
+      set: "remote_mode=?, location=?", params: ["remote_or_city,relocate", "Берлін"] });
+    const text = summary(draft, "uk");
+    expect(text).toContain("Віддалено або офіс у місті + Готовий/готова переїхати");
+    expect(text).toContain("Берлін");
+  });
+});
+
 describe("readyText", () => {
   it("підставляє годину, зону й дату", () => {
     const s = readyText("uk", { h: "09:00", tz: "Париж", when: "понеділок, 31 серпня, 09:00" });

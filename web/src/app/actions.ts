@@ -10,7 +10,7 @@ import { CvError, extractCvText } from "@/lib/cv";
 import { DEFAULT_LOCALE, isLocale } from "@/lib/i18n";
 import { safeTimezone } from "@/lib/digest-time";
 import { FEEDBACK_LIMITS, ONBOARD_LIMITS, checkRate, recordFailure } from "@/lib/ratelimit";
-import { INDUSTRIES, REMOTE_MODES, SENIORITY, SPHERES, type Locale } from "@/lib/vocab";
+import { INDUSTRIES, SENIORITY, SPHERES, needsCity, parseModes, serializeModes, type Locale } from "@/lib/vocab";
 import { persistCountry } from "@/lib/profile-country";
 import { sendText } from "@/lib/telegram-send";
 
@@ -117,14 +117,20 @@ export async function saveProfile(formData: FormData): Promise<void> {
   // Усе, що має словник, звіряємо зі словником; вільні поля обрізаємо.
   // Форма й так дає лише ці значення, але форма — не межа довіри.
   const seniorityRaw = String(formData.get("seniority") ?? "");
-  const remoteRaw = String(formData.get("remoteMode") ?? "remote_only");
+  // «Де хочеш працювати» — набір: офіс у своєму місті й готовність переїхати
+  // не виключають одне одного. parseModes викидає «тільки віддалено», коли
+  // воно стоїть поруч із ширшим варіантом.
+  const modes = parseModes(formData.getAll("remoteMode").map(String).join(","));
+  const location = String(formData.get("location") ?? "").trim().slice(0, SHORT_FIELD_MAX) || null;
   const salaryMinRaw = Number.parseInt(String(formData.get("salaryMin") ?? ""), 10);
   const profile = {
     spheres: allowed(formData.getAll("spheres").map(String), SPHERES),
     industries: allowed(formData.getAll("industries").map(String), INDUSTRIES),
+    customRole: String(formData.get("customRole") ?? "").trim().slice(0, SHORT_FIELD_MAX) || null,
+    customIndustry: String(formData.get("customIndustry") ?? "").trim().slice(0, SHORT_FIELD_MAX) || null,
     seniority: SENIORITY.some((s) => s.id === seniorityRaw) ? seniorityRaw : null,
-    remoteMode: REMOTE_MODES.some((m) => m.id === remoteRaw) ? remoteRaw : "remote_only",
-    location: String(formData.get("location") ?? "").trim().slice(0, SHORT_FIELD_MAX) || null,
+    remoteMode: serializeModes(modes) || "remote_only",
+    location,
     salaryMin: Number.isFinite(salaryMinRaw) && salaryMinRaw > 0 && salaryMinRaw < 10_000_000 ? salaryMinRaw : null,
     salaryCurrency: String(formData.get("salaryCurrency") ?? "").trim().slice(0, 8) || null,
     wishes: String(formData.get("wishes") ?? "").trim().slice(0, 2000) || null,
@@ -132,6 +138,14 @@ export async function saveProfile(formData: FormData): Promise<void> {
   // Звідки прийшла форма: /profile повертає на себе, перший прохід — далі
   // до Telegram. Значення з форми обмежене двома варіантами, не адресою.
   const back = String(formData.get("back") ?? "") === "profile" ? "/profile?saved=1" : "/telegram";
+
+  // Місто — не прикраса: з нього виводиться країна, а з країни — національні
+  // дошки вакансій. Хто обрав офіс у своєму місті чи переїзд, а міста не
+  // назвав, лишався б з самою лише глобальною стрічкою й ніколи б не дізнався
+  // чому. Форма це вимагає сама; тут — межа довіри, бо форму можна обійти.
+  if (needsCity(modes) && !profile.location) {
+    redirect(String(formData.get("back") ?? "") === "profile" ? "/profile?error=city" : "/onboarding?error=city");
+  }
 
   if (!user) {
     await guardOnboarding();
@@ -165,7 +179,8 @@ export async function saveProfile(formData: FormData): Promise<void> {
 
 async function persistProfile(
   userId: string, rawInput: string | null,
-  p: { spheres: string[]; industries: string[]; seniority: string | null; remoteMode: string;
+  p: { spheres: string[]; industries: string[]; customRole: string | null;
+       customIndustry: string | null; seniority: string | null; remoteMode: string;
        location: string | null; salaryMin: number | null; salaryCurrency: string | null;
        wishes: string | null }
 ): Promise<void> {
@@ -178,11 +193,13 @@ async function persistProfile(
     ? "mode=profiles.mode, raw_input=profiles.raw_input, cv_text=profiles.cv_text"
     : "mode=excluded.mode, raw_input=excluded.raw_input, cv_text=excluded.cv_text";
   await run(
-    `INSERT INTO profiles (user_id,mode,raw_input,cv_text,spheres,industries,seniority,remote_mode,location,salary_min,salary_currency,wishes,updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+    `INSERT INTO profiles (user_id,mode,raw_input,cv_text,spheres,custom_role,industries,custom_industry,seniority,remote_mode,location,salary_min,salary_currency,wishes,updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
      ON CONFLICT(user_id) DO UPDATE SET
        ${textCols},
-       spheres=excluded.spheres, industries=excluded.industries, seniority=excluded.seniority,
+       spheres=excluded.spheres, custom_role=excluded.custom_role,
+       industries=excluded.industries, custom_industry=excluded.custom_industry,
+       seniority=excluded.seniority,
        remote_mode=excluded.remote_mode, location=excluded.location,
        salary_min=excluded.salary_min, salary_currency=excluded.salary_currency,
        wishes=excluded.wishes,
@@ -190,7 +207,8 @@ async function persistProfile(
     userId, isCv ? "cv" : "freetext",
     isCv || keepText ? null : rawInput,   // файл резюме не зберігаємо, лише розібраний текст
     isCv ? rawInput!.slice(0, 20_000) : null,
-    JSON.stringify(p.spheres), JSON.stringify(p.industries),
+    JSON.stringify(p.spheres), p.customRole,
+    JSON.stringify(p.industries), p.customIndustry,
     p.seniority, p.remoteMode, p.location, p.salaryMin, p.salaryCurrency, p.wishes);
   await persistCountry(userId, p.location);
 

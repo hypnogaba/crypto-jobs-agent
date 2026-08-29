@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { countryFromLocation, countryFromTimezone, deriveCountry, fixLayout, timezoneFor } from "./geo.js";
+import { countryFromLocation, countryFromTimezone, deriveCountry, fixLayout, timezoneFor, toLatin } from "./geo.js";
 
 describe("fixLayout", () => {
   it("розпізнає локацію в неправильній розкладці", () => {
@@ -105,5 +105,35 @@ describe("timezoneFor", () => {
   });
   it("невпізнане місто — знову з мови", () => {
     expect(timezoneFor("fr", "Springfield")).toBe("Europe/Paris");
+  });
+});
+
+describe("toLatin", () => {
+  it("відомі міста — усталеним правописом, не побуквенно", () => {
+    expect(toLatin("Київ")).toBe("Kyiv");
+    expect(toLatin("Київ, Львів")).toBe("Kyiv, Lviv");
+    expect(toLatin("Кривий Ріг")).toBe("Kryvyi Rih");
+    expect(toLatin("Івано-Франківськ")).toBe("Ivano-Frankivsk");
+  });
+
+  it("латиницю не чіпає", () => {
+    expect(toLatin("Berlin, DE")).toBe("Berlin, DE");
+    expect(toLatin("Paris, Lyon")).toBe("Paris, Lyon");
+    expect(toLatin("Remote")).toBe("Remote");
+  });
+
+  it("невідоме слово — побуквенно, а не кирилицею", () => {
+    const out = toLatin("Бориспіль");
+    expect(out).toBe("Boryspil");
+    expect(/\p{Script=Cyrillic}/u.test(out)).toBe(false);
+  });
+
+  it("велика літера лишається великою", () => {
+    expect(toLatin("Ялта")).toBe("Yalta");
+    expect(toLatin("Южне")).toBe("Yuzhne");
+  });
+
+  it("мішаний рядок: кирилиця перекладається, решта — ні", () => {
+    expect(toLatin("Київ, Poland")).toBe("Kyiv, Poland");
   });
 });

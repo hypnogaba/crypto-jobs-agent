@@ -12,7 +12,8 @@
  * Чисті функції зверху, робота з базою й Telegram — знизу.
  */
 import {
-  SPHERES, INDUSTRIES, SENIORITY, REMOTE_MODES, label, type Locale,
+  SPHERES, INDUSTRIES, SENIORITY, REMOTE_MODES, label, needsCity, parseModes,
+  serializeModes, type Locale,
 } from "./vocab";
 import { timezoneFromCity, timeOptions, zoneName } from "./tz";
 import { timezoneFor } from "./geo";
@@ -39,6 +40,7 @@ export interface Draft {
   customWhere?: string | null;
   industries: string[];
   seniority: string | null;
+  /** Набір варіантів через кому: «офіс у місті» і «переїзд» сумісні. */
   remoteMode: string | null;
   /**
    * Місто. Питається лише в того, хто готовий працювати не тільки віддалено:
@@ -79,7 +81,7 @@ export function draftTimezone(draft: Draft, locale: Locale): string | null {
  * і тому, хто вже назвав місце своїми словами на попередньому кроці.
  */
 const skipsCity = (draft: Draft): boolean =>
-  draft.remoteMode === "remote_only" || Boolean(draft.location?.trim());
+  !needsCity(parseModes(draft.remoteMode)) || Boolean(draft.location?.trim());
 
 /**
  * Наступне питання, або null якщо це було останнє.
@@ -300,17 +302,37 @@ export function keyboard(step: Step, draft: Draft, locale: Locale, opts: Keyboar
     return rows;
   }
 
-  // Місто й побажання — вільний текст: жодного списку тут бути не може.
-  // Єдина кнопка дозволяє не відповідати.
-  if (step === "city" || step === "wishes") {
-    return [[{ text: say(WORD.skip, locale), callback_data: `${pre}:${step}:__next` }]];
+  // Побажання — вільний текст: жодного списку тут бути не може, а єдина
+  // кнопка дозволяє не відповідати.
+  if (step === "wishes") {
+    return [[{ text: say(WORD.skip, locale), callback_data: `${pre}:wishes:__next` }]];
   }
 
+  // Місто теж вільний текст, але «Пропустити» тут немає: питання ставиться
+  // лише тому, хто сам обрав офіс у своєму місті чи переїзд. Пропущене місто
+  // означало б профіль без країни — тобто без жодної національної дошки, і
+  // людина ніколи б не дізналась, чому їй приходить сама лише глобальна стрічка.
+  if (step === "city") return [];
+
+  // Кілька відповідей: офіс у своєму місті й готовність переїхати одне одного
+  // не виключають. Виключне тільки «тільки віддалено» — див. toggleMode.
   if (step === "where") {
+    const chosen = parseModes(draft.remoteMode);
     for (const it of REMOTE_MODES) {
-      rows.push([{ text: label(it, locale), callback_data: `${pre}:where:${it.id}` }]);
+      rows.push([{
+        text: `${chosen.includes(it.id) ? "✓ " : ""}${label(it, locale)}`,
+        callback_data: `${pre}:where:${it.id}`,
+      }]);
     }
-    rows.push([{ text: say(WORD.mine, locale), callback_data: `${pre}:where:__mine` }]);
+    rows.push([{
+      text: `${draft.customWhere ? "✓ " : ""}${say(WORD.mine, locale)}`,
+      callback_data: `${pre}:where:__mine`,
+    }]);
+    const canFinish = chosen.length > 0 || Boolean(draft.customWhere);
+    rows.push([{
+      text: say(canFinish ? WORD.done : WORD.pickOne, locale),
+      callback_data: canFinish ? `${pre}:where:__next` : `${pre}:noop:0`,
+    }]);
     return rows;
   }
 
@@ -358,7 +380,8 @@ export function profileUpdateFor(step: Step, draft: Draft): { set: string; param
       return { set: "seniority=?, custom_seniority=?", params: [draft.seniority ?? null, draft.customSeniority ?? null] };
     case "where":
     case "city":
-      return { set: "remote_mode=?, location=?", params: [draft.remoteMode ?? "remote_only", draft.location ?? null] };
+      return { set: "remote_mode=?, location=?",
+        params: [serializeModes(parseModes(draft.remoteMode)) || "remote_only", draft.location ?? null] };
     case "salary":
       return { set: "salary_min=?, salary_currency=?", params: [draft.salaryMin ?? null, draft.salaryCurrency ?? null] };
     case "wishes":
@@ -384,7 +407,10 @@ export function summary(draft: Draft, locale: Locale): string {
     ids.map((id) => { const it = src.find((x) => x.id === id); return it ? label(it, locale) : id; }).join(", ") || "—";
 
   const level = SENIORITY.find((x) => x.id === draft.seniority);
-  const where = REMOTE_MODES.find((x) => x.id === draft.remoteMode);
+  const where = parseModes(draft.remoteMode)
+    .map((id) => REMOTE_MODES.find((x) => x.id === id))
+    .filter(Boolean)
+    .map((x) => label(x!, locale)).join(" + ") || null;
   const money = draft.salaryMin
     ? `${draft.salaryMin.toLocaleString("uk-UA")} ${draft.salaryCurrency ?? "EUR"}`
     : say(WORD.noMatter, locale);
@@ -397,7 +423,7 @@ export function summary(draft: Draft, locale: Locale): string {
     both(draft.spheres, SPHERES, draft.customRole) ?? "—",
     both(draft.industries, INDUSTRIES, draft.customIndustry),
     draft.customSeniority ?? (level ? label(level, locale) : null),
-    draft.customWhere ?? (where ? label(where, locale) : null),
+    draft.customWhere ?? where,
     draft.location ?? null,
     money,
     draft.wishes?.trim() ? `«${draft.wishes.trim()}»` : null,
