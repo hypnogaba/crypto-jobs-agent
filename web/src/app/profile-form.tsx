@@ -58,19 +58,98 @@ function OwnWords({ name, locale, placeholder, value }: {
   );
 }
 
-export default function ProfileForm({ locale, pre, back, error }: {
+/**
+ * Чому саме ця галочка стоїть.
+ *
+ * Досі крок 2 показував заповнену анкету й жодного натяку, звідки взялися
+ * значення. Людина писала про себе тези, бачила чужі їй галочки й не мала
+ * як зрозуміти, що пішло не так. Тепер під кожною групою стоять її ж слова
+ * поруч із тим, у що ми їх перетворили, — помилку видно одразу.
+ */
+function Reasons({ items, guessed, guessLabel }: {
+  items: Array<{ name: string; quote: string }>;
+  /** Поставлено без цитати — здогад із загального змісту, а не з рядка тексту. */
+  guessed?: string[];
+  guessLabel?: string;
+}) {
+  if (items.length === 0 && !guessed?.length) return null;
+  return (
+    <ul className="mt-3 space-y-1">
+      {items.map((i) => (
+        <li key={i.name} className="mono text-xs leading-relaxed" style={{ color: "var(--faint)" }}>
+          «{i.quote}» → {i.name}
+        </li>
+      ))}
+      {/* Галочка без цитати — не мовчазна. Модель інколи ставить сферу з
+          загального змісту, а її «цитата» не збігається з текстом дослівно й
+          відсіюється (verifyEvidence). Раніше така галочка стояла зовсім без
+          пояснення — тобто рівно те, на що людина й скаржилась. Вигадувати
+          цитату не можна, а от чесно назвати це здогадом — можна. */}
+      {guessed?.length ? (
+        <li className="mono text-xs leading-relaxed" style={{ color: "var(--faint)" }}>
+          {guessLabel}: {guessed.join(", ")}
+        </li>
+      ) : null}
+    </ul>
+  );
+}
+
+export default function ProfileForm({ locale, pre, back, error, quote, evidence }: {
   locale: Locale; pre: ProfilePre;
   /** `profile` — після збереження назад на /profile; інакше — до Telegram. */
   back?: "profile";
   /** Код помилки з попередньої спроби зберегти. Поки що лише `city`. */
   error?: string;
+  /** Текст, який людина написала на кроці 1. Є лише в першому проході. */
+  quote?: string;
+  /** Підстави з розбору: `sphere:<id>` → уривок із тексту. Див. lib/parse.ts. */
+  evidence?: Record<string, string>;
 }) {
   const spheres = new Set(pre.spheres);
   const industries = new Set(pre.industries);
   const modes = parseModes(pre.remoteMode);
 
+  /** Підстава для одного значення, якщо вона є. */
+  const why = (key: string, name: string): { name: string; quote: string } | null => {
+    const q = evidence?.[key];
+    return q ? { name, quote: q } : null;
+  };
+  const kept = (items: Array<{ name: string; quote: string } | null>) =>
+    items.filter((i): i is { name: string; quote: string } => i !== null);
+  /** Назви того, що поставлено, але чим саме — сказати нема чим. */
+  const guesses = (items: Array<{ key: string; name: string }>) =>
+    quote ? items.filter((i) => !evidence?.[i.key]).map((i) => i.name) : [];
+
+  // Порожній розбір — це теж відповідь, і краще сказати про це прямо, ніж
+  // показати порожню форму так, ніби ми щось зрозуміли.
+  const nothing = Boolean(quote) && Object.keys(evidence ?? {}).length === 0;
+
   return (
     <form action={saveProfile}>
+      {quote && (
+        <div className="card mb-6 px-6 py-5">
+          <p className="eyebrow">{t(locale, "onboarding.youWrote")}</p>
+          {/* Довгий текст згорнутий: цитата має нагадати, а не переписати
+              екран. `whitespace-pre-line` тримає абзаци тез. */}
+          <p className="mt-3 whitespace-pre-line text-sm leading-relaxed"
+             style={{ color: "var(--muted)" }}>
+            {quote.length > 320 ? `${quote.slice(0, 320).trimEnd()}…` : quote}
+          </p>
+          {quote.length > 320 && (
+            <details className="mt-3">
+              <summary className="mono cursor-pointer text-xs" style={{ color: "var(--ember)" }}>
+                {t(locale, "onboarding.showAll")}
+              </summary>
+              <p className="mt-3 whitespace-pre-line text-sm leading-relaxed"
+                 style={{ color: "var(--muted)" }}>{quote}</p>
+            </details>
+          )}
+          {nothing && (
+            <p className="tag tag-warn mt-4 inline-block">{t(locale, "onboarding.nothingFound")}</p>
+          )}
+        </div>
+      )}
+
       <div className="ruled card">
         <Question n={1} title={t(locale, "onboarding.spheres")}>
           <div className="flex flex-wrap gap-2">
@@ -98,6 +177,16 @@ export default function ProfileForm({ locale, pre, back, error }: {
             <OwnWords name="customIndustry" locale={locale} value={pre.customIndustry}
               placeholder={t(locale, "onboarding.industryPlaceholder")} />
           </div>
+          <Reasons
+            items={kept([
+              ...SPHERES.filter((x) => spheres.has(x.id)).map((x) => why(`sphere:${x.id}`, label(x, locale))),
+              ...INDUSTRIES.filter((x) => industries.has(x.id)).map((x) => why(`industry:${x.id}`, label(x, locale))),
+            ])}
+            guessed={guesses([
+              ...SPHERES.filter((x) => spheres.has(x.id)).map((x) => ({ key: `sphere:${x.id}`, name: label(x, locale) })),
+              ...INDUSTRIES.filter((x) => industries.has(x.id)).map((x) => ({ key: `industry:${x.id}`, name: label(x, locale) })),
+            ])}
+            guessLabel={t(locale, "onboarding.guessed")} />
         </Question>
 
         <Question n={2} title={t(locale, "onboarding.seniority")}>
@@ -109,6 +198,10 @@ export default function ProfileForm({ locale, pre, back, error }: {
               </label>
             ))}
           </div>
+          <Reasons items={kept([
+            why("seniority", SENIORITY.find((x) => x.id === pre.seniority)
+              ? label(SENIORITY.find((x) => x.id === pre.seniority)!, locale) : ""),
+          ])} />
         </Question>
 
         {/* Галочки, не радіо: «офіс у моєму місті» і «готовий переїхати» —
@@ -133,6 +226,11 @@ export default function ProfileForm({ locale, pre, back, error }: {
               {t(locale, "onboarding.locationHint")}
             </span>
           </label>
+          <Reasons items={kept([
+            why("remoteMode", REMOTE_MODES.filter((x) => modes.includes(x.id))
+              .map((x) => label(x, locale)).join(", ")),
+            why("location", pre.location ?? ""),
+          ])} />
           {error === "city" && (
             <p className="tag tag-warn mt-3 inline-block">{t(locale, "err.city")}</p>
           )}
@@ -147,6 +245,9 @@ export default function ProfileForm({ locale, pre, back, error }: {
               {["EUR", "USD", "GBP", "PLN", "CHF"].map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
+          <Reasons items={kept([
+            why("salary", pre.salaryMin ? `${pre.salaryMin} ${pre.salaryCurrency ?? ""}`.trim() : ""),
+          ])} />
         </Question>
 
         {/* Побажання: те, чого немає в кнопках. Той самий стовпець, у який

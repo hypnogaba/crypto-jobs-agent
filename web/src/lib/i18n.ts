@@ -159,6 +159,10 @@ const en: Dict = {
   "onboarding.wishesHint": "Free text: what to prefer, what to avoid. The bot saves any plain message you send it here too.",
   "onboarding.wishesPlaceholder": "Only startups, no on-call, English-speaking team…",
   "tg.refine": "Refine",
+  "onboarding.guessed": "guessed from the general sense, not from a line",
+  "onboarding.youWrote": "YOU WROTE",
+  "onboarding.showAll": "show the whole text",
+  "onboarding.nothingFound": "We got nothing usable out of this. Tick the boxes yourself — it takes a minute.",
   "onboarding.title": "Check what we understood",
   "onboarding.lede": "We filled this in from what you wrote. Fix anything that is off.",
   "onboarding.spheres": "Which fields?",
@@ -390,6 +394,10 @@ const uk: Dict = {
   "onboarding.wishesHint": "Вільним текстом: чому віддавати перевагу, чого уникати. Сюди ж бот записує будь-яке звичайне повідомлення.",
   "onboarding.wishesPlaceholder": "Тільки стартапи, без on-call, англомовна команда…",
   "tg.refine": "Уточнити",
+  "onboarding.guessed": "здогад із загального змісту, не з рядка",
+  "onboarding.youWrote": "ТИ НАПИСАВ",
+  "onboarding.showAll": "показати весь текст",
+  "onboarding.nothingFound": "З цього ми нічого не витягли. Познач кнопки сам — це хвилина.",
   "onboarding.title": "Перевір, що ми зрозуміли",
   "onboarding.lede": "Ми заповнили це з того, що ти написав. Виправ те, що не так.",
   "onboarding.spheres": "У яких сферах?",
@@ -621,6 +629,10 @@ const fr: Dict = {
   "onboarding.wishesHint": "En texte libre : ce que vous préférez, ce que vous évitez. Le bot y enregistre aussi tout message libre.",
   "onboarding.wishesPlaceholder": "Seulement des start-ups, pas d'astreinte, équipe anglophone…",
   "tg.refine": "Préciser",
+  "onboarding.guessed": "déduit du sens général, pas d'une phrase",
+  "onboarding.youWrote": "VOUS AVEZ ÉCRIT",
+  "onboarding.showAll": "afficher tout le texte",
+  "onboarding.nothingFound": "Nous n'en avons rien tiré d'exploitable. Cochez vous-même — c'est l'affaire d'une minute.",
   "onboarding.title": "Vérifiez ce que nous avons compris",
   "onboarding.lede": "Nous avons prérempli à partir de votre texte. Corrigez ce qui ne va pas.",
   "onboarding.spheres": "Dans quels domaines ?",
@@ -852,6 +864,10 @@ const ru: Dict = {
   "onboarding.wishesHint": "Свободным текстом: что предпочитать, чего избегать. Сюда же бот записывает любое обычное сообщение.",
   "onboarding.wishesPlaceholder": "Только стартапы, без on-call, англоязычная команда…",
   "tg.refine": "Уточнить",
+  "onboarding.guessed": "догадка из общего смысла, не из строки",
+  "onboarding.youWrote": "ТЫ НАПИСАЛ",
+  "onboarding.showAll": "показать весь текст",
+  "onboarding.nothingFound": "Из этого мы ничего не извлекли. Отметь кнопки сам — это минута.",
   "onboarding.title": "Проверь, что мы поняли",
   "onboarding.lede": "Мы заполнили это из твоего текста. Поправь то, что не так.",
   "onboarding.spheres": "В каких сферах?",
@@ -934,14 +950,39 @@ const ru: Dict = {
 
 const DICTS: Record<Locale, Dict> = { en, uk, fr, ru };
 
-export const LOCALES: Array<{ id: Locale; name: string }> = [
-  { id: "en", name: "English" },
-  { id: "uk", name: "Українська" },
-  { id: "fr", name: "Français" },
-  { id: "ru", name: "Русский" },
+/**
+ * `id` — код мови (ISO 639-1), яким живе вся система: кука, стовпець
+ * users.locale, ключі словників, команда бота. `short` — те, що бачить
+ * людина в перемикачі.
+ *
+ * Вони розходяться рівно в одному місці. Українська за ISO 639-1 — це `uk`,
+ * але «UK» поруч із «EN» читається як United Kingdom, а не як мова. Країна
+ * за ISO 3166 — `UA`, і саме її очікує побачити людина. Міняти сам
+ * ідентифікатор було б переписуванням бази й усіх словників заради підпису,
+ * тож розходяться лише два символи на екрані.
+ */
+export const LOCALES: Array<{ id: Locale; short: string; name: string }> = [
+  { id: "en", short: "EN", name: "English" },
+  { id: "uk", short: "UA", name: "Українська" },
+  { id: "fr", short: "FR", name: "Français" },
+  { id: "ru", short: "RU", name: "Русский" },
 ];
 
 export const isLocale = (v: string): v is Locale => v in DICTS;
+
+/**
+ * Псевдоніми, які людина може написати боту. Перемикач на сайті каже «UA»,
+ * тож `/lang ua` — те, що вона набере наступним. Відповідати на це «не знаю
+ * такої мови» було б покаранням за наш власний підпис.
+ */
+const LOCALE_ALIASES: Record<string, Locale> = { ua: "uk", ukr: "uk", gb: "en", us: "en" };
+
+/** Код мови з того, що написала людина: сам код або звичний псевдонім. */
+export const toLocale = (v: string): Locale | null => {
+  const s = v.trim().toLowerCase();
+  if (isLocale(s)) return s;
+  return LOCALE_ALIASES[s] ?? null;
+};
 
 export function t(locale: Locale, key: string): string {
   return DICTS[locale]?.[key] ?? DICTS.en[key] ?? key;

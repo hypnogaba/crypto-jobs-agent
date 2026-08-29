@@ -43,7 +43,7 @@ export default async function Nav({ locale, urlPath }: { locale: Locale; urlPath
   const user = await currentUser();
   const theme = (await cookies()).get("nr_theme")?.value ?? "system";
   const dim = "var(--muted)";
-  const home = urlPath ? pathFor(locale as Locale, "/") : "/";
+  const home = urlPath ? pathFor(locale, "/") : "/";
 
   return (
     <header className="topbar">
@@ -69,12 +69,12 @@ export default async function Nav({ locale, urlPath }: { locale: Locale; urlPath
             // лише тег hreflang у <head>.
             <div className="flex gap-2">
               {LOCALES.map((l) => (
-                <Link key={l.id} href={pathFor(l.id as Locale, urlPath)}
+                <Link key={l.id} href={pathFor(l.id, urlPath)}
                   className="pick mono text-xs uppercase"
                   data-on={l.id === locale}
                   hrefLang={l.id}
                   title={l.name} aria-label={l.name}>
-                  {l.id}
+                  {l.short}
                 </Link>
               ))}
             </div>
@@ -86,7 +86,7 @@ export default async function Nav({ locale, urlPath }: { locale: Locale; urlPath
                   data-on={l.id === locale}
                   aria-pressed={l.id === locale}
                   title={l.name} aria-label={l.name}>
-                  {l.id}
+                  {l.short}
                 </button>
               ))}
             </form>
