@@ -160,3 +160,51 @@ describe("стеля 4096", () => {
     expect(fitTelegram("a".repeat(5000)).length).toBe(TELEGRAM_MAX);
   });
 });
+
+// ── Розклад і відкладені добірки ─────────────────────────────
+import { hadDigestToday, isDue, localDate, parseDbTime, pendingIsStale } from "./digest.js";
+
+describe("isDue", () => {
+  // 2026-08-29T07:30Z = 09:30 у Парижі, 10:30 у Києві
+  const now = new Date("2026-08-29T07:30:00Z");
+  const paris = { timezone: "Europe/Paris", delivery_hour: 9 };
+
+  it("рівно в обрану годину — завжди", () => {
+    expect(isDue(paris, now, false)).toBe(true);
+    expect(isDue(paris, now, true)).toBe(true);
+  });
+  it("пізніше того ж дня — лише якщо добірки сьогодні ще не було", () => {
+    const kyiv = { timezone: "Europe/Kyiv", delivery_hour: 9 };
+    expect(isDue(kyiv, now, false)).toBe(true);
+    expect(isDue(kyiv, now, true)).toBe(false);
+  });
+  it("до обраної години — ніколи", () => {
+    expect(isDue({ timezone: "Europe/Paris", delivery_hour: 12 }, now, false)).toBe(false);
+  });
+});
+
+describe("hadDigestToday", () => {
+  const now = new Date("2026-08-29T07:30:00Z");
+  it("читає час D1 без літери Z як UTC", () => {
+    expect(parseDbTime("2026-08-29 06:00:00").toISOString()).toBe("2026-08-29T06:00:00.000Z");
+  });
+  it("дата рахується в поясі людини, а не в UTC", () => {
+    // 2026-08-28 23:30Z — це вже 29-те в Києві, але ще 28-ме в Лондоні
+    expect(hadDigestToday("Europe/Kyiv", now, ["2026-08-28 23:30:00"])).toBe(true);
+    expect(hadDigestToday("Europe/London", now, ["2026-08-28 23:30:00"])).toBe(false);
+    expect(hadDigestToday("Europe/Kyiv", now, [])).toBe(false);
+  });
+  it("localDate переживає невідомий пояс", () => {
+    expect(localDate("Mars/Olympus", now)).toBe("2026-08-29");
+  });
+});
+
+describe("pendingIsStale", () => {
+  const now = new Date("2026-08-29T07:30:00Z");
+  it("свіжий pending ще дотискаємо", () => {
+    expect(pendingIsStale("2026-08-28 09:00:00", now)).toBe(false);
+  });
+  it("старший за два дні — здаємось", () => {
+    expect(pendingIsStale("2026-08-26 09:00:00", now)).toBe(true);
+  });
+});

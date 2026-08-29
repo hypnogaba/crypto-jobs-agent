@@ -1,6 +1,7 @@
 /**
  * Ранкова добірка: підбір, оформлення, доставка.
- * Запускається щогодини — обслуговує тих, у кого зараз обрана година.
+ * Запускається щогодини — обслуговує тих, у кого настала обрана година,
+ * і надолужує тих, кого попередній прогін того ж дня пропустив.
  *
  *   node dist/digest.js [--force] [--user <id>]
  */
@@ -29,13 +30,64 @@ const list = (raw: string | null): string[] => {
 };
 
 /** Котра зараз година в поясі людини. Без цього «07:00» безглузде для світу. */
-function hourIn(timezone: string, now: Date): number {
+export function hourIn(timezone: string, now: Date): number {
   try {
     return Number.parseInt(new Intl.DateTimeFormat("en-GB",
       { timeZone: timezone, hour: "2-digit", hour12: false }).format(now), 10);
   } catch {
     return now.getUTCHours();
   }
+}
+
+/** Сьогоднішня дата в поясі людини, YYYY-MM-DD. */
+export function localDate(timezone: string, at: Date): string {
+  try {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: timezone,
+      year: "numeric", month: "2-digit", day: "2-digit" }).format(at);
+  } catch {
+    return at.toISOString().slice(0, 10);
+  }
+}
+
+/** D1 пише created_at як «YYYY-MM-DD HH:MM:SS» в UTC, без літери Z. */
+export const parseDbTime = (raw: string): Date =>
+  new Date(/[zZ]|[+-]\d\d:\d\d$/.test(raw) ? raw : raw.replace(" ", "T") + "Z");
+
+/** Чи була в людини добірка (будь-якого статусу) її локального сьогодні. */
+export function hadDigestToday(timezone: string, now: Date, createdAts: string[]): boolean {
+  const today = localDate(timezone, now);
+  return createdAts.some((t) => localDate(timezone, parseDbTime(t)) === today);
+}
+
+/**
+ * Чи пора слати планову добірку.
+ *
+ * Рівно в обрану годину — завжди, як і було. Пізніше того самого дня — лише
+ * якщо сьогодні добірки ще не було: так упалий прогін о 9:00 надолужується
+ * о 10:00, а не через добу. Раніше строге «===» означало, що одна мережева
+ * помилка в потрібну годину викреслювала людину на 24 години.
+ */
+export function isDue(
+  u: { timezone: string; delivery_hour: number }, now: Date, alreadyToday: boolean
+): boolean {
+  const h = hourIn(u.timezone, now);
+  if (h === u.delivery_hour) return true;
+  return h > u.delivery_hour && !alreadyToday;
+}
+
+/** Через скільки діб відкладену добірку перестаємо дотискати. */
+const PENDING_MAX_DAYS = 2;
+
+/**
+ * Відкладена добірка, яку вже не варто дотискати.
+ *
+ * Людина заблокувала бота — Telegram відповідає 403 на кожну спробу, і без
+ * цієї межі один pending-рядок щодня йшов на повтор і водночас блокував
+ * новий підбір назавжди. Окремого лічильника спроб у sent немає; вік рядка
+ * при щогодинному прогоні — той самий лічильник, лише чесніший.
+ */
+export function pendingIsStale(createdAt: string, now: Date): boolean {
+  return now.getTime() - parseDbTime(createdAt).getTime() > PENDING_MAX_DAYS * 86_400_000;
 }
 
 /**
@@ -265,7 +317,11 @@ interface RunContext {
 async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
   const { d1, cfg, now, botToken, force, scanned } = ctx;
   const onRequest = ctx.requested.has(u.id);
-  if (!force && !onRequest && hourIn(u.timezone, now) !== u.delivery_hour) return;
+  if (!force && !onRequest) {
+    const recent = await d1.query<{ created_at: string }>(
+      "SELECT created_at FROM sent WHERE user_id=? AND created_at >= datetime('now','-2 day')", [u.id]);
+    if (!isDue(u, now, hadDigestToday(u.timezone, now, recent.map((r) => r.created_at)))) return;
+  }
 
   // ── автопауза після 14 днів повної тиші ──
   // Того, хто щойно попросив ще, паузити безглуздо: він якраз активний.
@@ -286,9 +342,17 @@ async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
   // Запис зі статусом pending означає «підібрано, але не доставлено».
   // Без цієї гілки такі рядки блокували б вакансію назавжди: вона вже в sent,
   // тому в шортліст більше не потрапляє, а людина її так і не побачила.
-  const pending = await d1.query<{ digest_id: string }>(
-    "SELECT DISTINCT digest_id FROM sent WHERE user_id=? AND status='pending' ORDER BY created_at LIMIT 1", [u.id]);
-  if (pending.length > 0 && botToken && u.telegram_chat_id) {
+  //
+  // Для людини без Telegram pending — це нормальний кінцевий стан: добірка
+  // лежить у кабінеті на сайті, і дотискати її нікуди.
+  const pending = await d1.query<{ digest_id: string; created_at: string }>(
+    `SELECT digest_id, MIN(created_at) AS created_at FROM sent
+     WHERE user_id=? AND status='pending' GROUP BY digest_id ORDER BY created_at LIMIT 1`, [u.id]);
+  if (pending.length > 0 && botToken && u.telegram_chat_id && pendingIsStale(pending[0]!.created_at, now)) {
+    // Два дні щогодинних спроб — досить. Позначаємо і йдемо підбирати нове.
+    await d1.execute("UPDATE sent SET status='failed' WHERE digest_id=? AND status='pending'", [pending[0]!.digest_id]);
+    console.log(`  ${u.id.slice(0, 8)}: відкладена добірка ${pending[0]!.digest_id.slice(0, 8)} не доставлена за ${PENDING_MAX_DAYS} дні, позначено failed`);
+  } else if (pending.length > 0 && botToken && u.telegram_chat_id) {
     const digestId = pending[0]!.digest_id;
     const rows2 = await d1.query<{ company: string; title: string; location: string | null; remote: number;
       url: string; why_fits: string; salary_min: number | null; salary_currency: string | null;
@@ -449,7 +513,16 @@ async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
     }
     console.log(`  ${u.id.slice(0, 8)}: надіслано ${withWhy.length}${onRequest ? " (на запит)" : ""}`);
   } else {
-    console.log(`  ${u.id.slice(0, 8)}: підібрано ${withWhy.length}, доставка чекає на токен бота`);
+    // Немає куди слати — добірка вже в кабінеті як pending. Запит «ще» треба
+    // закрити й тут: інакше він лишався відкритим і щогодини породжував нову
+    // добірку для людини без Telegram — доти, доки не закінчились вакансії.
+    if (onRequest) {
+      await d1.execute(
+        "UPDATE delivery_requests SET handled_at=datetime('now') WHERE user_id=? AND handled_at IS NULL",
+        [u.id]);
+    }
+    console.log(`  ${u.id.slice(0, 8)}: підібрано ${withWhy.length}, ${
+      u.telegram_chat_id ? "доставка чекає на токен бота" : "лежить у кабінеті"}${onRequest ? " (на запит)" : ""}`);
     if (process.env.PRINT_DIGEST) console.log("\n" + text + "\n");
   }
 }
