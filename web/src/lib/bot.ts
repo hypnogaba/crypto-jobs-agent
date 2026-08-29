@@ -499,7 +499,11 @@ export async function continueBotOnboarding(
       if (reaction === "more") {
         // Черга, а не обіцянка: сайт на Workers не дотягнеться до сканера,
         // тому запит підбирає сервер під час найближчого прогону доставки.
-        await run("INSERT INTO delivery_requests (id,user_id) VALUES (?,?)", uuid(), user.id);
+        // Один відкритий запит на людину — те саме правило, що й на сайті.
+        await run(
+          `INSERT INTO delivery_requests (id,user_id)
+           SELECT ?,? WHERE NOT EXISTS (SELECT 1 FROM delivery_requests WHERE user_id=? AND handled_at IS NULL)`,
+          uuid(), user.id, user.id);
         await send(env, chatId, say("moreQueued", locale));
       } else {
         // «Дякую, врахую» було неправдою: реакція нікуди не впливала.

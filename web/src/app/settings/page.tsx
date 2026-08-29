@@ -56,7 +56,7 @@ export default async function Settings({ searchParams }: { searchParams: Promise
               {user.status === "paused" ? t(locale, "settings.resume") : t(locale, "settings.pause")}
             </h3>
             <p className="mt-1 text-xs" style={{ color: "var(--muted)" }}>
-              {user.telegramChatId ? "Telegram · connected" : "Telegram · not connected"}
+              {t(locale, user.telegramChatId ? "settings.tgOn" : "settings.tgOff")}
             </p>
           </div>
           <form action={togglePause}>

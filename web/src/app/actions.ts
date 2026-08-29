@@ -167,11 +167,13 @@ export async function createConnectToken(): Promise<void> {
 export async function saveSettings(formData: FormData): Promise<void> {
   const user = await requireUser();
   const hour = Math.min(23, Math.max(0, Number.parseInt(String(formData.get("deliveryHour") ?? "9"), 10) || 9));
-  const locale = String(formData.get("locale") ?? user.locale);
+  const raw = String(formData.get("locale") ?? user.locale);
+  const locale = isLocale(raw) ? raw : "en";
   const timezone = safeTimezone(String(formData.get("timezone") ?? ""));
   await run("UPDATE users SET delivery_hour=?, locale=?, timezone=?, updated_at=datetime('now') WHERE id=?",
-    hour, isLocale(locale) ? locale : "en", timezone, user.id);
-  (await cookies()).set("nr_locale", locale, { path: "/", maxAge: 31_536_000 });
+    hour, locale, timezone, user.id);
+  // У куку йде вже перевірене значення — те саме, що й у базу.
+  (await cookies()).set("nr_locale", locale, { path: "/", maxAge: 31_536_000, sameSite: "lax" });
   redirect("/settings?saved=1");
 }
 
@@ -197,13 +199,23 @@ export async function recordFeedback(formData: FormData): Promise<void> {
   const reaction = String(formData.get("reaction") ?? "");
   if (reaction !== "not_relevant" && reaction !== "more") return;
 
+  // digest_id приходить із форми: без звірки власника реакцію можна було б
+  // повісити на чужу добірку, підставивши id.
+  const mine = await one<{ n: number }>(
+    "SELECT 1 n FROM sent WHERE digest_id=? AND user_id=? LIMIT 1", digestId, user.id);
+  if (!mine) redirect("/dashboard");
+
   await run("INSERT INTO feedback (id,user_id,digest_id,reaction) VALUES (?,?,?,?)",
     uuid(), user.id, digestId, reaction);
   await run("UPDATE users SET last_interaction_at=datetime('now') WHERE id=?", user.id);
 
-  // «Ще п'ять» — це запит, який мусить хтось виконати, а не просто відмітка
+  // «Ще п'ять» — це запит, який мусить хтось виконати, а не просто відмітка.
+  // Один відкритий запит на людину: другий дотик не має замовляти другу добірку.
   if (reaction === "more") {
-    await run("INSERT INTO delivery_requests (id,user_id) VALUES (?,?)", uuid(), user.id);
+    await run(
+      `INSERT INTO delivery_requests (id,user_id)
+       SELECT ?,? WHERE NOT EXISTS (SELECT 1 FROM delivery_requests WHERE user_id=? AND handled_at IS NULL)`,
+      uuid(), user.id, user.id);
   }
   redirect("/dashboard?queued=1");
 }
