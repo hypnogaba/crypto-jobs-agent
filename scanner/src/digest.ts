@@ -34,6 +34,9 @@ export interface UserRow {
   remote_mode: string; location: string | null; salary_min: number | null;
   country: string | null;
   custom_role: string | null;
+  custom_industry: string | null;
+  custom_seniority: string | null;
+  cv_highlights: string | null;
   wishes: string | null;
   seniority_weight: number | null;
   location_weight: number | null;
@@ -645,6 +648,9 @@ export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
   const profile: Profile = {
     userId: u.id, spheres: list(u.spheres), industries: list(u.industries),
     customRole: u.custom_role,
+    customIndustry: u.custom_industry,
+    customSeniority: u.custom_seniority,
+    cvHighlights: u.cv_highlights,
     wishes: u.wishes,
     // Вивчене зі скарг. Немає рядка — усі ваги одиничні, поведінка як була.
     tuning: {
@@ -831,7 +837,7 @@ async function main(): Promise<void> {
   }
   const users = await d1.query<UserRow>(
     `SELECT u.*, p.spheres,p.industries,p.seniority,p.remote_mode,p.location,p.salary_min,p.custom_role,p.country,
-            p.wishes,
+            p.wishes,p.custom_industry,p.custom_seniority,p.cv_highlights,
             t.seniority_weight,t.location_weight,t.salary_weight
      FROM users u JOIN profiles p ON p.user_id = u.id
      LEFT JOIN user_tuning t ON t.user_id = u.id

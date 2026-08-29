@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import Nav from "@/app/nav";
 import { detectLocale } from "@/app/actions";
-import { addCompany, reviveSource, saveSourceKey, replyToFeedback, dismissFeedback, purgeNeverWorked, recheckSome, applyProposal, dismissProposal, applyAllProposals, addBoard, toggleBoard, toggleBoardGroup } from "./actions";
+import { addCompany, reviveSource, replyToFeedback, dismissFeedback, purgeNeverWorked, recheckSome, applyProposal, dismissProposal, applyAllProposals, addBoard, toggleBoard, toggleBoardGroup } from "./actions";
 import { currentUser } from "@/lib/auth";
 import { all, one } from "@/lib/db";
 import { RELEASES } from "@/lib/releases";
@@ -15,16 +15,10 @@ import { RELEASES } from "@/lib/releases";
  * «чи все добре», а не щоб гортати таблиці.
  */
 
-// Ключі зберігаються, але жодне з цих джерел ще не написане в сканері:
-// getSourceKey існує й нікого не викликає. Поки так — кажемо про це прямо,
-// а не вдаємо, що вставлений токен щось вмикає.
-const KEYED = [
-  { id: "adzuna",   opens: "16 країн, значна частина інвентарю Indeed", where: "developer.adzuna.com" },
-  { id: "reed",     opens: "британський ринок",                          where: "reed.co.uk/developers" },
-  { id: "jooble",   opens: "70+ країн",                                  where: "jooble.org/api/about — ключ дають листом" },
-  { id: "usajobs",  opens: "держсектор США",                             where: "developer.usajobs.gov" },
-  { id: "findwork", opens: "IT-специфічний",                             where: "findwork.dev/developers" },
-];
+// Блок «Ключі доступу» прибрано 2026-08-29: п'ять полів зберігали токени до
+// джерел, під які в сканері немає жодного розбирача (getSourceKey нікого не
+// викликає). Панель показувала важіль, що нічого не вмикає. Повернемо разом
+// із першим розбирачем — таблиця source_keys лишається на місці.
 
 const STATE = {
   ok:         { tag: "tag-ok",   c: "var(--ok)",   text: "працює" },
@@ -33,6 +27,8 @@ const STATE = {
 } as const;
 
 const DAYS = 14;
+/** Скільки змін показуємо в дні одразу; решта — під «ще N». */
+const KEY_CHANGES = 6;
 const num = (n: number) => n.toLocaleString("uk-UA");
 const usd = (n: number): string => `$${n < 0.01 && n > 0 ? n.toFixed(4) : n.toFixed(2)}`;
 const day = (iso: string) => iso.slice(5).replace("-", ".");
@@ -73,7 +69,10 @@ function Tile({ n, label, accent = false }: { n: number | string; label: string;
 function Spark({ points, label }: { points: Array<{ d: string; v: number }>; label: string }) {
   const peak = Math.max(1, ...points.map((p) => p.v));
   const last = points.at(-1)?.v ?? 0;
-  const base = points.find((p) => p.v > 0)?.v ?? 0;
+  // Приріст — від першого дня вікна. Раніше базою було перше НЕнульове
+  // значення, тож на графіку з порожнім початком «+909 за 14 дн.» описувало
+  // не два тижні, а три дні.
+  const base = points[0]?.v ?? 0;
   const delta = last - base;
   return (
     <div className="card px-5 py-4">
@@ -93,6 +92,42 @@ function Spark({ points, label }: { points: Array<{ d: string; v: number }>; lab
     </div>
   );
 }
+
+/**
+ * Воронка. Смужка міряється від першого щабля, а не від найбільшого: питання
+ * тут «скільки дійшло звідти, де всі», і масштаб від максимуму це б сховав.
+ */
+function Funnel({ steps }: { steps: Array<{ label: string; n: number; note: string }> }) {
+  const top = Math.max(1, steps[0]?.n ?? 1);
+  return (
+    <div className="ruled card">
+      {steps.map((x, i) => (
+        <div key={x.label} className="px-5 py-4">
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="text-sm">{x.label}</span>
+            <span className="mono text-sm" style={{ color: "var(--ember)" }}>
+              {num(x.n)}
+              {i > 0 && (
+                <span className="ml-2" style={{ color: "var(--muted)" }}>
+                  {Math.round((x.n / top) * 100)}%
+                </span>
+              )}
+            </span>
+          </div>
+          <div className="mt-2" style={{ height: 6, background: "var(--surface-2)" }}>
+            <div style={{ height: 6, width: `${Math.round((x.n / top) * 100)}%`, background: "var(--ember)" }} />
+          </div>
+          <div className="mt-2 text-xs" style={{ color: "var(--muted)" }}>{x.note}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Скільки сфер обрала людина. Порожній JSON — анкети ще немає. */
+const sphereCount = (raw: string | null): number => {
+  try { const v = JSON.parse(raw ?? "[]"); return Array.isArray(v) ? v.length : 0; } catch { return 0; }
+};
 
 function SourceTable({ rows, total }: {
   rows: Array<{ source_name: string; status: string; consecutive_fail_days: number; last_error: string | null }>;
@@ -151,7 +186,10 @@ export default async function Admin() {
            (SELECT COUNT(*) FROM companies) sources,
            (SELECT COUNT(*) FROM users WHERE status='active') users,
            (SELECT COUNT(*) FROM users WHERE status='paused') paused,
-           (SELECT COUNT(*) FROM sources_state WHERE status!='ok') broken,
+           -- Зламане — це те, що КОЛИСЬ працювало. Дошки, яких ніколи не
+           -- існувало (їх зібрали з посилань у чужих даних), система прибирає
+           -- сама; у лічильнику вони давали 153 замість десяти й лякали щодня.
+           (SELECT COUNT(*) FROM sources_state WHERE status!='ok' AND last_ok_at IS NOT NULL) broken,
            (SELECT COUNT(*) FROM sources_state WHERE status='ok') liveSources,
            (SELECT COUNT(*) FROM sent WHERE status='sent') sent,
            (SELECT COUNT(*) FROM users) allUsers,
@@ -164,18 +202,9 @@ export default async function Admin() {
            (SELECT COUNT(*) FROM feedback WHERE reaction='more') wantedMore,
            (SELECT COUNT(*) FROM jobs_cache WHERE fetched_at >= datetime('now','-3 day')) liveJobs`);
 
-  const sources = await all<{ source_name: string; status: string; last_ok_at: string | null;
-    consecutive_fail_days: number; last_error: string | null; jobs_last_run: number }>(
-    `SELECT * FROM sources_state
-     ORDER BY CASE status WHEN 'deprecated' THEN 0 WHEN 'degraded' THEN 1 ELSE 2 END,
-              jobs_last_run DESC LIMIT 120`);
-
   const lastRun = await one<{ started_at: string; status: string; jobs_found: number;
     ladder_reached: string | null; notes: string | null }>(
     "SELECT * FROM scan_runs ORDER BY started_at DESC LIMIT 1");
-
-  const keys = new Set((await all<{ source_name: string }>("SELECT source_name FROM source_keys"))
-    .map((k) => k.source_name));
 
   const proposals = await all<{ id: string; kind: string; target: string | null; title: string;
     detail: string; evidence: string | null; severity: string; created_at: string }>(
@@ -246,24 +275,68 @@ export default async function Admin() {
     "SELECT COUNT(*) n FROM users WHERE date(created_at) < date('now', ?)",
     `-${DAYS - 1} day`))?.n ?? 0;
 
+  // ── Люди ────────────────────────────────────────────────────────────────
+  // Панель знала про людей два числа: скільки всього й скільки за тиждень.
+  // На шести користувачах питання не «скільки», а «де вони застрягли»:
+  // зареєструвався — заповнив анкету — прив'язав Telegram — отримав добірку —
+  // відповів на неї. Кожен щабель, який не пройшли, це наша недоробка.
+  const funnel = await one<{ registered: number; profiled: number; connected: number;
+    delivered: number; reacted: number }>(`
+    SELECT (SELECT COUNT(*) FROM users) registered,
+           (SELECT COUNT(*) FROM profiles) profiled,
+           (SELECT COUNT(*) FROM users WHERE telegram_chat_id IS NOT NULL) connected,
+           (SELECT COUNT(DISTINCT user_id) FROM sent WHERE status='sent') delivered,
+           (SELECT COUNT(DISTINCT user_id) FROM feedback) reacted`);
+
+  // Пошти тут навмисно немає: панель відкривають на людях і показують з
+  // екрана, а для питання «де застрягли» досить восьми символів ідентифікатора.
+  const people = await all<{ id: string; created_at: string | null; locale: string; status: string;
+    tg: number; country: string | null; spheres: string | null; sent: number;
+    more: number; nope: number; last_seen: string | null }>(`
+    SELECT u.id, u.created_at, u.locale, u.status,
+           CASE WHEN u.telegram_chat_id IS NULL THEN 0 ELSE 1 END tg,
+           u.last_interaction_at last_seen,
+           p.country, p.spheres,
+           (SELECT COUNT(*) FROM sent WHERE user_id=u.id AND status='sent') sent,
+           (SELECT COUNT(*) FROM feedback WHERE user_id=u.id AND reaction='more') more,
+           (SELECT COUNT(*) FROM feedback WHERE user_id=u.id AND reaction='not_relevant') nope
+      FROM users u LEFT JOIN profiles p ON p.user_id = u.id
+     ORDER BY u.created_at DESC LIMIT 50`);
+
+  // Останній вимір ДО вікна. Без нього кожен день до першого скану у вікні
+  // малювався нулем: «вакансій у кеші» показувало одинадцять порожніх
+  // стовпчиків і стрибок наприкінці, хоч кеш весь час був повний. Нуль там
+  // означав не «нічого не було», а «ми того дня не міряли».
+  const beforeScan = await one<{ jobs: number; companies: number }>(
+    `SELECT jobs_found jobs, distinct_companies companies FROM scan_runs
+      WHERE status='ok' AND date(started_at) < date('now', ?)
+      ORDER BY started_at DESC LIMIT 1`, `-${DAYS - 1} day`);
+
   // Вісь днів рахує база, а не JS: під час рендера викликати Date.now() не
   // можна — React вимагає, щоб рендер був чистим, і лінтер це ловить.
+  //
+  // Вісь не починається раніше, ніж з'явились перші дані. Продукт молодший
+  // за два тижні, і решта вікна була б не «нулем», а порожнечею до запуску.
   const axis = (await all<{ d: string }>(
     `WITH RECURSIVE seq(n) AS (SELECT 0 UNION ALL SELECT n + 1 FROM seq WHERE n < ?)
-     SELECT date('now', '-' || n || ' day') d FROM seq ORDER BY d`, DAYS - 1)).map((x) => x.d);
+     SELECT d FROM (SELECT date('now', '-' || n || ' day') d FROM seq)
+      WHERE d >= COALESCE((SELECT MIN(day) FROM (
+              SELECT MIN(date(created_at)) day FROM users
+              UNION ALL SELECT MIN(date(started_at)) FROM scan_runs WHERE status='ok')), d)
+      ORDER BY d`, DAYS - 1)).map((x) => x.d);
   // Порожній день тягне значення попереднього: скан, що не записав рядок, не
   // означає, що кеш спорожнів. Малювати там нуль було б неправдою.
-  const carry = (get: (d: string) => number | undefined) => {
-    let prev = 0;
+  const carry = (get: (d: string) => number | undefined, start = 0) => {
+    let prev = start;
     return axis.map((d) => ({ d, v: (prev = get(d) ?? prev) }));
   };
   const growth = {
-    jobs: carry((d) => scanDays.find((x) => x.d === d)?.jobs),
-    companies: carry((d) => scanDays.find((x) => x.d === d)?.companies),
+    jobs: carry((d) => scanDays.find((x) => x.d === d)?.jobs, beforeScan?.jobs ?? 0),
+    companies: carry((d) => scanDays.find((x) => x.d === d)?.companies, beforeScan?.companies ?? 0),
     // Накопичення рахується від рівня на початок вікна: людей не меншає.
     people: axis.map((d) => ({
       d,
-      v: before + signups.filter((x) => x.d >= axis[0] && x.d <= d).reduce((a, x) => a + x.n, 0),
+      v: before + signups.filter((x) => x.d >= axis[0]! && x.d <= d).reduce((a, x) => a + x.n, 0),
     })),
   };
 
@@ -278,7 +351,6 @@ export default async function Admin() {
             SUM(CASE WHEN reaction='not_relevant' THEN 1 ELSE 0 END) nope
        FROM feedback GROUP BY d`);
 
-  const peak = Math.max(1, ...sources.map((x) => x.jobs_last_run));
   // Три групи за тим, що з цим МОЖНА зробити, а не за кодом помилки.
   // Окремий запит без ліміту: список джерел обрізаний до 120, і рахувати
   // групи з нього означало б показувати неправдиві числа.
@@ -344,6 +416,51 @@ export default async function Admin() {
         </div>
 
         <div className="mt-12 flex flex-col gap-12">
+          <Block id="people" title={`Люди · ${funnel?.registered ?? 0}`}
+                 lede="Де вони застрягли. Кожен щабель, який людина не пройшла, — це наша недоробка, а не її неуважність.">
+            <div className="grid gap-6 lg:grid-cols-[minmax(0,22rem)_1fr]">
+              <Funnel steps={[
+                { label: "Зареєструвались", n: funnel?.registered ?? 0, note: "почали з сайту або з бота" },
+                { label: "Заповнили анкету", n: funnel?.profiled ?? 0, note: "є рядок у profiles" },
+                { label: "Прив'язали Telegram", n: funnel?.connected ?? 0, note: "без цього добірку нікуди слати" },
+                { label: "Отримали добірку", n: funnel?.delivered ?? 0, note: "хоч одна доставлена" },
+                { label: "Відповіли на неї", n: funnel?.reacted ?? 0, note: "«ще п'ять» або «не те»" },
+              ]} />
+              <div className="card overflow-x-auto">
+                <table className="board">
+                  <thead>
+                    <tr><th>людина</th><th>прийшла</th><th>анкета</th><th>TG</th>
+                        <th className="num">добірок</th><th>реакції</th><th>остання дія</th></tr>
+                  </thead>
+                  <tbody>
+                    {people.map((x) => (
+                      <tr key={x.id} className="stripe"
+                          style={{ "--c": x.sent > 0 ? "var(--ok)" : "var(--warn)" } as React.CSSProperties}>
+                        <td className="mono text-xs">{x.id.slice(0, 8)}</td>
+                        <td className="mono text-xs" style={{ color: "var(--muted)" }}>
+                          {x.created_at?.slice(0, 10) ?? "—"}
+                        </td>
+                        <td className="text-xs">
+                          {sphereCount(x.spheres) > 0
+                            ? `${sphereCount(x.spheres)} сфер · ${x.country ?? x.locale}`
+                            : <span className="tag tag-warn">немає</span>}
+                        </td>
+                        <td className="text-xs">{x.tg ? "✓" : <span className="tag tag-warn">ні</span>}</td>
+                        <td className="num text-xs">{x.sent}</td>
+                        <td className="mono text-xs" style={{ color: "var(--muted)" }}>
+                          {x.more + x.nope === 0 ? "—" : `+${x.more} / −${x.nope}`}
+                        </td>
+                        <td className="mono text-xs" style={{ color: "var(--muted)" }}>
+                          {x.last_seen?.slice(0, 16).replace("T", " ") ?? "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </Block>
+
           <Block id="growth" title="Як ми ростемо"
                  lede={`Останні ${DAYS} днів. Наведи на стовпчик — покаже день і число.`}>
             <div className="grid gap-3 sm:grid-cols-3">
@@ -665,26 +782,6 @@ export default async function Admin() {
           </Block>
 
           <div className="grid gap-12 lg:grid-cols-2">
-            <Block id="keys" title="Ключі доступу"
-                   lede="Ключ зберігається, але жодне з цих джерел ще не під'єднане до сканера: під кожне потрібен свій розбирач.">
-              <div className="ruled card">
-                {KEYED.map((k) => (
-                  <form key={k.id} action={saveSourceKey} className="flex items-center gap-3 px-5 py-4">
-                    <input type="hidden" name="source" value={k.id} />
-                    <div className="w-28 shrink-0">
-                      <div className="mono text-xs">{k.id}</div>
-                      {keys.has(k.id)
-                        ? <span className="tag tag-warn mt-1 inline-block">ключ є, джерела нема</span>
-                        : <span className="tag tag-flat mt-1 inline-block">{k.where}</span>}
-                    </div>
-                    <input name="key" className="field mono flex-1 text-xs"
-                      placeholder={keys.has(k.id) ? "замінити" : k.opens} />
-                    <button className="btn btn-quiet shrink-0 px-3 py-2 text-xs">ok</button>
-                  </form>
-                ))}
-              </div>
-            </Block>
-
             <Block id="company" title="Додати компанію"
                    lede="Слаг у її ATS. Провайдера можна не вказувати — скан визначить сам.">
               <form action={addCompany} className="card flex flex-col gap-3 px-5 py-5">
@@ -701,7 +798,7 @@ export default async function Admin() {
           </div>
 
           <Block id="releases" title="Історія версій"
-                 lede="Що змінилося в продукті й коли. Збирається з комітів — окремого списку, який можна забути оновити, тут немає.">
+                 lede="Що змінилося для людей. Збирається з комітів, службові — мерджі, документація, перегенерації — відсіяні.">
             <div className="ruled card">
               {RELEASES.slice(0, 7).map((r, i) => (
                 <details key={r.date} className="px-6 py-4" open={i === 0}>
@@ -710,62 +807,42 @@ export default async function Admin() {
                     <span className="text-sm">{r.changes.length} змін</span>
                     <span className="text-sm" style={{ color: "var(--muted)" }}>{r.changes[0].subject}</span>
                   </summary>
+                  {/* Довгий день згортаємо до шести рядків: історія версій —
+                      це «що змінилось для людей», а не журнал роботи. Решта
+                      лишається на відстані одного кліку. */}
                   <ul className="mt-3 flex flex-col gap-1">
-                    {r.changes.map((c) => (
+                    {r.changes.slice(0, KEY_CHANGES).map((c) => (
                       <li key={c.hash} className="flex gap-3 text-sm">
                         <span className="mono text-xs" style={{ color: "var(--muted)" }}>{c.hash}</span>
                         <span style={{ color: "var(--ink-2)" }}>{c.subject}</span>
                       </li>
                     ))}
                   </ul>
+                  {r.changes.length > KEY_CHANGES && (
+                    <details className="mt-3">
+                      <summary className="mono cursor-pointer text-xs" style={{ color: "var(--ember)" }}>
+                        ще {r.changes.length - KEY_CHANGES}
+                      </summary>
+                      <ul className="mt-2 flex flex-col gap-1">
+                        {r.changes.slice(KEY_CHANGES).map((c) => (
+                          <li key={c.hash} className="flex gap-3 text-sm">
+                            <span className="mono text-xs" style={{ color: "var(--muted)" }}>{c.hash}</span>
+                            <span style={{ color: "var(--ink-2)" }}>{c.subject}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+                  {r.chores > 0 && (
+                    <p className="mono mt-3 text-xs" style={{ color: "var(--faint)" }}>
+                      і ще {r.chores} службових: мерджі, документація, перегенерація цього списку
+                    </p>
+                  )}
                 </details>
               ))}
             </div>
           </Block>
 
-          <Block id="sources" title={`Усі джерела · ${sources.length}`}
-                 lede="Довідник, а не панель: сюди заглядають, коли треба знайти конкретне джерело.">
-            <details className="card px-6 py-5">
-              <summary className="flex cursor-pointer items-baseline justify-between gap-3">
-                <span className="font-medium">Показати таблицю</span>
-                <span className="mono text-xs" style={{ color: "var(--ember)" }}>
-                  {s?.liveSources ?? 0} живих · {s?.broken ?? 0} зламаних
-                </span>
-              </summary>
-              <div className="mt-4 overflow-x-auto">
-                <table className="board">
-                  <thead>
-                    <tr><th>джерело</th><th>стан</th><th className="num">дало</th><th>обсяг</th><th>остання вдала</th></tr>
-                  </thead>
-                  <tbody>
-                    {sources.map((x) => {
-                      const st = STATE[x.status as keyof typeof STATE] ?? STATE.ok;
-                      return (
-                        <tr key={x.source_name} className="stripe" style={{ "--c": st.c } as React.CSSProperties}>
-                          <td className="mono text-xs">{x.source_name}</td>
-                          <td><span className={`tag ${st.tag}`}>{st.text}</span></td>
-                          <td className="num text-xs">{x.jobs_last_run}</td>
-                          <td style={{ width: "34%" }}>
-                            {/* Смужка обсягу: видно внесок джерела, не читаючи цифру */}
-                            <div style={{ height: 6, background: "var(--surface-2)" }}>
-                              <div style={{
-                                height: 6,
-                                width: `${Math.round((x.jobs_last_run / peak) * 100)}%`,
-                                background: x.jobs_last_run > 0 ? "var(--ember)" : "transparent",
-                              }} />
-                            </div>
-                          </td>
-                          <td className="mono text-xs" style={{ color: "var(--muted)" }}>
-                            {x.last_ok_at?.slice(0, 16).replace("T", " ") ?? "—"}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </details>
-          </Block>
         </div>
       </main>
     </>

@@ -186,6 +186,34 @@ describe("verifyEvidence", () => {
   });
 });
 
+describe("слова людини з резюме", () => {
+  const local = parseLocally("technical recruiter");
+
+  it("своя роль лишається навіть тоді, коли сфера вже стоїть", () => {
+    const merged = mergeParsed(
+      { spheres: ["partnerships"], customRole: "ecosystem lead" }, local, "ecosystem lead at a L1");
+    expect(merged.spheres).toEqual(["partnerships"]);
+    expect(merged.customRole).toBe("ecosystem lead");
+  });
+
+  it("свій рівень стоїть лише замість щабля зі списку", () => {
+    expect(mergeParsed({ seniority: "senior", customSeniority: "head of BD" }, local, "x").customSeniority)
+      .toBeNull();
+    expect(mergeParsed({ customSeniority: "head of BD" }, local, "x").customSeniority)
+      .toBe("head of BD");
+  });
+
+  it("витяг із резюме обрізається до 300 символів", () => {
+    const long = "Solana ".repeat(80);
+    expect(mergeParsed({ cvHighlights: long }, local, "x").cvHighlights!.length).toBe(300);
+  });
+
+  it("розбір без моделі своїх слів не вигадує", () => {
+    expect(local.customRole).toBeNull();
+    expect(local.cvHighlights).toBeNull();
+  });
+});
+
 describe("mergeParsed", () => {
   const local = parseLocally("product manager");
 

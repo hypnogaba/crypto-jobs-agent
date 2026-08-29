@@ -15,6 +15,10 @@ export interface ProfilePre {
   /** Своя роль і своя індустрія: те, чого немає в кнопках. Бот питає це з першого дня. */
   customRole: string | null;
   customIndustry: string | null;
+  /** Рівень своїми словами, коли жоден із чотирьох щаблів не про людину. */
+  customSeniority: string | null;
+  /** Стек, роки, мови з резюме. Заповнює розбір, правити може людина. */
+  cvHighlights: string | null;
   industries: string[];
   seniority: string | null;
   remoteMode: string | null;
@@ -206,6 +210,11 @@ export default function ProfileForm({ locale, pre, back, error, quote, evidence 
               </label>
             ))}
           </div>
+          {/* Рівень теж має «свій варіант» — у боті він був з першого дня,
+              а на сайті людину замикали в чотири щаблі. «Head of BD» — це не
+              lead і не senior, і тепер ці слова шукаються в назві вакансії. */}
+          <OwnWords name="customSeniority" locale={locale} value={pre.customSeniority}
+            placeholder={t(locale, "onboarding.seniorityPlaceholder")} />
           <Reasons items={kept([
             why("seniority", SENIORITY.find((x) => x.id === pre.seniority)
               ? label(SENIORITY.find((x) => x.id === pre.seniority)!, locale) : ""),
@@ -258,9 +267,18 @@ export default function ProfileForm({ locale, pre, back, error, quote, evidence 
           ])} />
         </Question>
 
+        {/* Витяг із резюме. Досі текст CV розбирали на галочки й забували:
+            стек, роки й мови не ловить жодна кнопка, а саме за ними
+            відрізняються дві людини з однаковими галочками. Поле видиме й
+            редаговане — це слова людини, а не наш висновок про неї. */}
+        <Question n={5} title={t(locale, "onboarding.fromCv")} hint={t(locale, "onboarding.fromCvHint")}>
+          <textarea name="cvHighlights" className="field" rows={2} maxLength={300}
+            defaultValue={pre.cvHighlights ?? ""} placeholder={t(locale, "onboarding.fromCvPlaceholder")} />
+        </Question>
+
         {/* Побажання: те, чого немає в кнопках. Той самий стовпець, у який
             бот дописує вільний текст, — тут його можна прочитати й підправити. */}
-        <Question n={5} title={t(locale, "onboarding.wishes")} hint={t(locale, "onboarding.wishesHint")}>
+        <Question n={6} title={t(locale, "onboarding.wishes")} hint={t(locale, "onboarding.wishesHint")}>
           <textarea name="wishes" className="field" rows={3} maxLength={2000}
             defaultValue={pre.wishes ?? ""} placeholder={t(locale, "onboarding.wishesPlaceholder")} />
         </Question>

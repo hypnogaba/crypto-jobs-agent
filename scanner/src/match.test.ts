@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { explainLocally, explainSystem, linksToAggregator, pickTop, scoreJob, wishBonus, type CandidateJob, type Profile } from "./match.js";
+import { customIndustryBonus, explainLocally, explainSystem, linksToAggregator, pickTop, scoreJob, wishBonus, type CandidateJob, type Profile } from "./match.js";
 
 const p: Profile = {
   userId: "u1", spheres: ["partnerships", "devrel"], industries: ["web3"],
@@ -34,6 +34,44 @@ describe("scoreJob", () => {
     const fresh = new Date().toISOString();
     expect(scoreJob(job({ postedAt: fresh }), p).score)
       .toBeGreaterThan(scoreJob(job(), p).score);
+  });
+});
+
+describe("слова людини", () => {
+  it("своя індустрія додає за збіг у тегах, назві компанії й описі", () => {
+    const own = { ...p, industries: [], customIndustry: "climate tech" };
+    const climate = job({ company: "Climate Works", summary: "Building tech for carbon markets" });
+    expect(scoreJob(climate, own).score).toBeGreaterThan(scoreJob(climate, { ...p, industries: [] }).score);
+  });
+
+  it("своя індустрія має стелю: довгий рядок не переважує сферу", () => {
+    const long = "climate tech carbon markets energy transition renewable";
+    expect(customIndustryBonus(
+      job({ company: "Climate Carbon Energy", title: "Renewable markets lead", summary: "transition" }),
+      long)).toBeLessThanOrEqual(4);
+  });
+
+  it("своя індустрія без збігу нічого не карає", () => {
+    const own = { ...p, industries: [], customIndustry: "esports" };
+    expect(scoreJob(job(), own).score).toBe(scoreJob(job(), { ...p, industries: [] }).score);
+  });
+
+  it("свій рівень працює замість щабля, коли щабля немає", () => {
+    const own: Profile = { ...p, seniority: null, customSeniority: "head of partnerships" };
+    const hit = job({ title: "Head of Partnerships", tags: ["partnerships", "web3"] });
+    expect(scoreJob(hit, own).score).toBeGreaterThan(scoreJob(hit, { ...p, seniority: null }).score);
+    expect(scoreJob(hit, own).facts.some((f) => f.k === "level")).toBe(true);
+  });
+
+  it("свій рівень не додається, коли обрано щабель зі списку", () => {
+    const both: Profile = { ...p, customSeniority: "head of partnerships" };
+    const hit = job({ title: "Head of Partnerships", tags: ["partnerships", "web3", "senior"] });
+    expect(scoreJob(hit, both).score).toBe(scoreJob(hit, p).score);
+  });
+
+  it("витяг із резюме не впливає на бали — лише на пояснення", () => {
+    const withCv: Profile = { ...p, cvHighlights: "8 років BD, Solana, EN/FR/UA" };
+    expect(scoreJob(job(), withCv).score).toBe(scoreJob(job(), p).score);
   });
 });
 

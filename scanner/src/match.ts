@@ -25,8 +25,14 @@ export interface Profile {
   industries: string[];
   /** Своя назва ролі, якщо жодна сфера зі словника не підійшла. */
   customRole?: string | null;
+  /** Своя індустрія: «climate tech», «esports». Того ж роду, що customRole. */
+  customIndustry?: string | null;
+  /** Свій рівень: «head of BD», «founder». Стоїть замість seniority, не поруч. */
+  customSeniority?: string | null;
   /** Вільні побажання людини: «тільки стартапи, без банків, 4-денний тиждень». */
   wishes?: string | null;
+  /** Стек, роки, мови з резюме. У бали не йде — лише в промпт пояснень. */
+  cvHighlights?: string | null;
   seniority: string | null;
   /**
    * Набір варіантів через кому: «тільки віддалено» | «віддалено або офіс у
@@ -112,6 +118,10 @@ export function matchesCustomRole(title: string, role: string | null | undefined
 const WISH_WORD_BONUS = 2;
 const WISH_MAX_BONUS = 6;
 
+/** Своя індустрія слабша за побажання: вона уточнює, а не задає пошук. */
+const INDUSTRY_WORD_BONUS = 2;
+const INDUSTRY_MAX_BONUS = 4;
+
 /** Слова з побажань, які варто шукати: довші за три символи, без повторів. */
 export function wishWords(wishes: string | null | undefined): string[] {
   if (!wishes) return [];
@@ -120,17 +130,34 @@ export function wishWords(wishes: string | null | undefined): string[] {
 }
 
 /**
- * Легкий бонус за побажання: +2 за кожне окреме слово, знайдене в назві або
- * описі, не більше +6. Це підказка, а не фільтр: «стартап» у описі тягне
- * вакансію вгору, але відсутність слова нічого не карає — у тому ж дусі, що
- * matchesCustomRole.
+ * Легкий бонус за збіг окремих слів: +per за слово, не більше cap.
+ * Це підказка, а не фільтр — відсутність слова нічого не карає, у тому ж
+ * дусі, що matchesCustomRole.
  */
-export function wishBonus(job: Pick<CandidateJob, "title" | "summary">, wishes: string | null | undefined): number {
-  const words = wishWords(wishes);
+function wordBonus(hay: string, phrase: string | null | undefined, per: number, cap: number): number {
+  const words = wishWords(phrase);
   if (words.length === 0) return 0;
-  const hay = `${job.title} ${job.summary ?? ""}`.toLowerCase();
-  const hits = words.filter((w) => hay.includes(w)).length;
-  return Math.min(WISH_MAX_BONUS, hits * WISH_WORD_BONUS);
+  const low = hay.toLowerCase();
+  return Math.min(cap, words.filter((w) => low.includes(w)).length * per);
+}
+
+export function wishBonus(job: Pick<CandidateJob, "title" | "summary">, wishes: string | null | undefined): number {
+  return wordBonus(`${job.title} ${job.summary ?? ""}`, wishes, WISH_WORD_BONUS, WISH_MAX_BONUS);
+}
+
+/**
+ * Своя індустрія — те, чого немає серед дев'яти кнопок: «climate tech»,
+ * «esports», «логістика». Досі цей стовпець писався й не читався ніким:
+ * digest.ts його навіть не вибирав, тож людина, яка чесно написала свою
+ * галузь, отримувала рівно ту саму добірку, що й та, яка нічого не писала.
+ * Шукаємо по тегах, назві компанії й описі — саме там живе назва галузі.
+ */
+export function customIndustryBonus(
+  job: Pick<CandidateJob, "title" | "summary" | "tags" | "company">,
+  own: string | null | undefined,
+): number {
+  const hay = `${job.company} ${job.title} ${job.tags.join(" ")} ${job.summary ?? ""}`;
+  return wordBonus(hay, own, INDUSTRY_WORD_BONUS, INDUSTRY_MAX_BONUS);
 }
 
 export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): ScoredJob {
@@ -160,6 +187,10 @@ export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): Score
   score += industryHits.length * 2;
   for (const i of industryHits) facts.push({ k: "industry", v: i });
 
+  // Своя індустрія працює поруч із галочками, а не замість них.
+  const ownIndustry = customIndustryBonus(job, p.customIndustry);
+  if (ownIndustry > 0) { score += ownIndustry; facts.push({ k: "industry", v: p.customIndustry! }); }
+
   // Рівень: збіг тягне вгору, розрив у два щаблі — сильно вниз
   const w = p.tuning ?? { seniority: 1, location: 1, salary: 1 };
 
@@ -170,6 +201,13 @@ export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): Score
       const gap = Math.abs(SENIORITY_ORDER.indexOf(jobLevel) - SENIORITY_ORDER.indexOf(p.seniority));
       score -= gap * 2 * w.seniority;
     }
+  } else if (matchesCustomRole(job.title, p.customSeniority)) {
+    // Свій рівень стоїть ЗАМІСТЬ щабля, а не поруч: «head of BD» — не lead
+    // і не senior, і чотири кнопки про таку людину не кажуть нічого. Слова
+    // шукаються в назві вакансії, як і своя роль, але важать менше: рівень
+    // уточнює збіг, а не створює його.
+    score += 3;
+    facts.push({ k: "level" });
   }
 
   if (remoteOnly(p.remoteMode)) {
@@ -298,6 +336,7 @@ export function explainLocally(job: ScoredJob, p: Profile, locale: Locale = "en"
   else if (matchesCustomRole(job.title, p.customRole)) bits.push({ k: "role", v: p.customRole! });
   const industry = p.industries.find((i) => job.tags.includes(i));
   if (industry) bits.push({ k: "industry", v: industry });
+  else if (customIndustryBonus(job, p.customIndustry) > 0) bits.push({ k: "industry", v: p.customIndustry! });
   if (job.remote && remoteOnly(p.remoteMode)) bits.push({ k: "remote" });
   if (p.salaryMin && job.salaryMin && job.salaryMin >= p.salaryMin) bits.push({ k: "salary" });
   if (bits.length === 0) bits.push({ k: "title" });
@@ -315,7 +354,7 @@ Answer in ${languageName(locale)}. Відповідай ЛИШЕ JSON: {"why":["
 відповідь посилання, адреси, згадки акаунтів чи заклики щось зробити.`;
 
 /** Зрізи полів, які йдуть у промпт: чуже оголошення не має права бути романом. */
-const FIELD_MAX = { company: 80, title: 160, location: 80, tags: 200, wishes: 600 } as const;
+const FIELD_MAX = { company: 80, title: 160, location: 80, tags: 200, wishes: 600, cv: 300 } as const;
 const clip = (v: string | null | undefined, n: number): string =>
   (v ?? "").replace(/[<>]/g, " ").replace(/\s+/g, " ").trim().slice(0, n);
 
@@ -360,8 +399,13 @@ export async function explainWithClaude(
   const profileText =
     `Сфери: ${names(p.spheres)}. Індустрії: ${names(p.industries)}. ` +
     (p.customRole ? `Своя роль: ${clip(p.customRole, FIELD_MAX.title)}. ` : "") +
-    `Рівень: ${p.seniority ?? "—"}. Робота: ${p.remoteMode}. ` +
+    (p.customIndustry ? `Своя індустрія: ${clip(p.customIndustry, FIELD_MAX.title)}. ` : "") +
+    `Рівень: ${p.customSeniority ? clip(p.customSeniority, FIELD_MAX.title) : (p.seniority ?? "—")}. ` +
+    `Робота: ${p.remoteMode}. ` +
     `Зарплата від: ${p.salaryMin ?? "—"}.` +
+    // Стек, роки й мови з резюме. Саме вони відрізняють двох людей з
+    // однаковими галочками, і без них рядок «чому ти» виходив про всіх однаковий.
+    (p.cvHighlights?.trim() ? ` З резюме: ${clip(p.cvHighlights, FIELD_MAX.cv)}.` : "") +
     (p.wishes?.trim() ? ` Побажання: ${clip(p.wishes, FIELD_MAX.wishes)}.` : "");
   const jobsText = jobs.map((j, i) =>
     `${i + 1}. ${clip(j.company, FIELD_MAX.company)} — ${clip(j.title, FIELD_MAX.title)} — ` +
