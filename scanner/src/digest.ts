@@ -15,6 +15,7 @@ import { D1Client } from "./d1.js";
 import { explainWithClaude, pickTop, type CandidateJob, type Profile } from "./match.js";
 import { asLocale, salaryLine, say, thin, type Locale } from "./digest-copy.js";
 import { summarize } from "./summary.js";
+import { costUsd } from "./pricing.js";
 import { extractSalary, type Salary } from "./salary.js";
 import { applyTranslations, d1Store, translateJobs } from "./translate.js";
 
@@ -406,8 +407,9 @@ async function logUsage(
   try {
     await d1.execute(
       `INSERT OR IGNORE INTO api_usage (id,service,operation,model,input_tokens,output_tokens,cost_usd,ok)
-       VALUES (?,'anthropic',?,?,?,?,0,?)`,
-      [crypto.randomUUID(), operation, u.model, u.inputTokens, u.outputTokens, u.ok ? 1 : 0]);
+       VALUES (?,'anthropic',?,?,?,?,?,?)`,
+      [crypto.randomUUID(), operation, u.model, u.inputTokens, u.outputTokens,
+       costUsd(u.model, u.inputTokens, u.outputTokens), u.ok ? 1 : 0]);
   } catch { /* журнал не важливіший за доставку */ }
 }
 
