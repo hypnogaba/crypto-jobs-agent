@@ -336,6 +336,51 @@ describe("safeWhy — рядок від моделі перед показом �
     expect(safeWhy(undefined)).toBeNull();
     expect(safeWhy("а".repeat(241))).toBeNull();
   });
+
+  /**
+   * Рядки нижче — не вигадані. Це дослівні відповіді моделі з живого прогону
+   * 30.08: картка показувала вакансію серед пʼяти найкращих, а підпис під нею
+   * пояснював, чому брати її не варто.
+   */
+  it.each([
+    "Senior engineering role at a crypto trading platform aligns with your Web3 expertise, though the NYC/Miami office options may not match your remote-only requirement.",
+    "Senior QA engineering position offers remote work and seniority match, but healthcare industry is outside your Web3 and crypto specialization.",
+    "Your engineering background fits, but this role prioritizes Mandarin fluency over pure engineering.",
+    "Хоча позиція senior-рівня в інженерії, компанія фокусується на healthtech, а не на Web3.",
+    "Позиція вимагає senior-рівня, але потребує вільного володіння мандарином, що не збігається з твоїм профілем.",
+    "Senior позиция в Web3, но требует свободного мандарина.",
+    "Senior инженер, однако компания в healthcare, что не совпадает с предпочтением Web3.",
+    "C'est un rôle senior en ingénierie, mais le secteur santé n'est pas ta spécialité Web3.",
+    "Ton profil correspond, cependant la localisation ne correspond pas à tes attentes.",
+  ])("відкидає відмову замість поради: «%s»", (s) => expect(safeWhy(s)).toBeNull());
+
+  /**
+   * Зворотний бік: перевірка не має зʼїдати звичайні схвальні рядки. Кожен
+   * із них — те, що людина й має прочитати під карткою.
+   */
+  /**
+   * Захист від інʼєкцій не має різати живу мову. «Expérience confirmée» —
+   * найзвичайніша похвала у французькому резюме, і саме нею словник називає
+   * рівень Middle; голе стебло «confirm» її зʼїдало.
+   */
+  it("не плутає французьке «confirmée» із закликом підтвердити", () => {
+    expect(safeWhy("Expérience confirmée en design de produit, exactement ce que demande ce poste."))
+      .not.toBeNull();
+  });
+  it.each([
+    "Confirm your password to keep receiving jobs",
+    "Please confirm your account to continue",
+    "Confirmation required: verify your login",
+  ])("але заклик підтвердити далі відкидає: «%s»", (s) => expect(safeWhy(s)).toBeNull());
+
+  it.each([
+    "Senior engineering role at a crypto trading platform — your Web3 expertise and remote-first preference in one place.",
+    "Це «Інженерія», одна з твоїх сфер, і повністю віддалено.",
+    "Твій стек Solana збігається з тим, що вони шукають.",
+    "Это «Инженерия», одна из твоих сфер, полностью удалённо.",
+    "Ingénierie, un de vos domaines, secteur Web3 et crypto, entièrement à distance.",
+    "Your eight years in BD and the Solana ecosystem are exactly what they ask for.",
+  ])("пускає схвальний рядок: «%s»", (s) => expect(safeWhy(s)).not.toBeNull());
 });
 
 // ── Порожній профіль ──────────────────────────────────────────
