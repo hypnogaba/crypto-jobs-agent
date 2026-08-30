@@ -345,3 +345,43 @@ describe("safeWhy — рядок від моделі перед показом �
     expect(safeWhy("а".repeat(241))).toBeNull();
   });
 });
+
+// ── Порожній профіль ──────────────────────────────────────────
+import { hasSearchSignal } from "./match.js";
+
+describe("hasSearchSignal", () => {
+  it("сфера або своя роль — і є що шукати", () => {
+    expect(hasSearchSignal({ spheres: ["engineering"], customRole: null })).toBe(true);
+    expect(hasSearchSignal({ spheres: [], customRole: "solidity auditor" })).toBe(true);
+  });
+
+  it("порожньо — і шукати нема за чим", () => {
+    expect(hasSearchSignal({ spheres: [], customRole: null })).toBe(false);
+    expect(hasSearchSignal({ spheres: [], customRole: "  " })).toBe(false);
+    // Слово з двох літер матчер ігнорує, тож і пошуком воно не є.
+    expect(hasSearchSignal({ spheres: [], customRole: "ai" })).toBe(false);
+  });
+});
+
+describe("pickTop з порожнім профілем", () => {
+  const job = (id: string, title: string): CandidateJob => ({
+    id, company: `Co${id}`, companyKey: `co${id}`, title, location: null, remote: true,
+    url: `https://co${id}.test/1`, tags: ["remote"], postedAt: null,
+    salaryMin: null, salaryCurrency: null,
+  });
+
+  it("не вигадує добірку з нічого", () => {
+    // До цієї перевірки кожна віддалена вакансія набирала +5 (віддалено +3,
+    // свіжість +2) без жодного збігу, бо штраф −8 стоїть під умовою «людина
+    // щось назвала». Людина отримувала юриста, HR-партнера й дата-саєнтиста
+    // з упевненим поясненням під кожним.
+    const jobs = [job("1", "Senior commercial counsel"), job("2", "People Business Partner")];
+    const empty = {
+      userId: "u", spheres: [], industries: [], seniority: null,
+      remoteMode: "remote_only", location: null, salaryMin: null, customRole: null,
+    };
+    expect(pickTop(jobs, empty, 5)).toEqual([]);
+    // Та сама людина, що назвала свою роль, добірку отримує.
+    expect(pickTop(jobs, { ...empty, customRole: "commercial counsel" }, 5).length).toBe(1);
+  });
+});

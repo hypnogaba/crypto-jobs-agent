@@ -106,9 +106,13 @@ const SENIORITY_ORDER = ["junior", "middle", "senior", "lead"];
  * не збігається з «Recruiter» випадково, а «solidity audit» знаходить
  * «Solidity Auditor». Коротких слів не беремо — «ai» ловило б усе підряд.
  */
+export function roleWords(role: string | null | undefined): string[] {
+  if (!role) return [];
+  return role.toLowerCase().split(/[^\p{L}\p{N}+#]+/u).filter((w) => w.length > 2);
+}
+
 export function matchesCustomRole(title: string, role: string | null | undefined): boolean {
-  if (!role) return false;
-  const words = role.toLowerCase().split(/[^\p{L}\p{N}+#]+/u).filter((w) => w.length > 2);
+  const words = roleWords(role);
   if (words.length === 0) return false;
   const t = title.toLowerCase();
   return words.every((w) => t.includes(w));
@@ -290,7 +294,26 @@ export function fitsCountry(job: CandidateJob, p: Profile): boolean {
  * Сортування за балом лишається всередині кожного кола, тож різноманітність
  * не купується ціною доречності: з кожної сфери береться її найкраще.
  */
+/**
+ * Чи є в профілі хоч що-небудь, за чим шукати роботу.
+ *
+ * Дві осі, які визначають добірку: сфера і своя назва роль. Без обох ми не
+ * знаємо про людину нічого — і scoreJob це мовчки пробачає, бо штраф −8
+ * стоїть під умовою «людина щось назвала». Тому кожна віддалена вакансія
+ * набирала +5 з нічого, і порожній профіль отримував п'ять випадкових
+ * вакансій із упевненим поясненням під кожною. Краще не слати нічого.
+ *
+ * Індустрія й рівень сюди не рахуються: «senior у фінтеху» — це не пошук,
+ * це два прикметники без іменника.
+ */
+export function hasSearchSignal(p: Pick<Profile, "spheres" | "customRole">): boolean {
+  return p.spheres.length > 0 || roleWords(p.customRole).length > 0;
+}
+
 export function pickTop(jobs: CandidateJob[], p: Profile, limit = 5, now = new Date()): ScoredJob[] {
+  // Порожній профіль — не «нічого не знайшлось», а «нема чого шукати».
+  if (!hasSearchSignal(p)) return [];
+
   const scored = jobs
     .filter((j) => !linksToAggregator(j.url))
     .filter((j) => fitsCountry(j, p))

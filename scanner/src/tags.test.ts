@@ -21,6 +21,19 @@ describe("deriveTags — маршрутизація за нішами", () => {
     expect(deriveTags(j({ title: "Head of Product" }))).toContain("lead");
     expect(deriveTags(j({ title: "Junior QA Engineer" }))).toContain("junior");
   });
+  it("VP лишається VP, хоч із комою, хоч без", () => {
+    // Правило було /\b(...|vp |...)\b/: пробіл усередині групи, обрамленої
+    // \b, не збігався ніде. «VP, Growth Marketing» лишався без тегу рівня —
+    // і йшов junior-ові без жодного штрафу. У свіжому кеші таких 55.
+    for (const title of ["VP, Growth Marketing", "VP: Sales", "SVP Engineering",
+                         "EVP Partnerships", "VP of Product", "Regional VP"]) {
+      expect(deriveTags(j({ title }))).toContain("lead");
+    }
+  });
+  it("схожі слова рівнем не стають", () => {
+    expect(deriveTags(j({ title: "VPN Infrastructure Engineer" }))).not.toContain("lead");
+    expect(deriveTags(j({ title: "DevOps Engineer" }))).not.toContain("lead");
+  });
   it("успадковує теги від джерела", () => {
     expect(deriveTags(j({ source: "getro:858" }))).toContain("web3");
     expect(deriveTags(j({ source: "aggregator:remoteok" }))).toContain("remote");

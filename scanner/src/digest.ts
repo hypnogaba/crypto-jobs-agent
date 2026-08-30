@@ -12,7 +12,8 @@
  */
 import { loadConfig } from "./config.js";
 import { D1Client } from "./d1.js";
-import { explainWithClaude, pickTop, type CandidateJob, type Profile } from "./match.js";
+import { explainWithClaude, hasSearchSignal, pickTop, roleWords,
+         type CandidateJob, type Profile } from "./match.js";
 import { asLocale, formatWhen, nextDelivery, salaryLine, say, thin, type Locale } from "./digest-copy.js";
 import { summarize } from "./summary.js";
 import { costUsd } from "./pricing.js";
@@ -525,16 +526,107 @@ async function closeRequests(d1: D1Client, userId: string): Promise<void> {
     [userId]);
 }
 
+/** Скільки слів своєї ролі беремо в запит. Довша назва — це вже речення. */
+const ROLE_WORDS_IN_SQL = 5;
+
+/**
+ * Умова «цей рядок узагалі про цю людину», якою вікно кандидатів
+ * упорядковується перед зрізом.
+ *
+ * Беремо рівно ті дві осі, що вирішують у scoreJob: сферу (±6, а без жодного
+ * збігу −8) і свою роль (+6). Індустрії сюди не йдуть навмисно — вони важать
+ * 2 бали й лишаються справою оцінювача, а тут лише роздули б «своє» до
+ * половини кеша й повернули б ту саму втрату вузьких сфер.
+ *
+ * Порожньо, коли шукати нема за чим: тоді вікно поводиться точно як раніше.
+ */
+export function onTopicSql(p: Pick<Profile, "spheres" | "customRole">): {
+  sql: string; params: unknown[];
+} {
+  const clauses: string[] = [];
+  const params: unknown[] = [];
+
+  for (const s of p.spheres) {
+    // Теги лежать JSON-масивом, тож шукаємо з лапками: інакше «qa» збігалось
+    // би зі «security» всередині іншого слова.
+    clauses.push("j.tags LIKE ?");
+    params.push(`%"${s}"%`);
+  }
+
+  // Своя роль — ті самі слова й те саме правило «всі разом», що в
+  // matchesCustomRole. Одне джерело правди: roleWords.
+  const words = roleWords(p.customRole).slice(0, ROLE_WORDS_IN_SQL);
+  if (words.length > 0) {
+    clauses.push(`(${words.map(() => "LOWER(j.title) LIKE ?").join(" AND ")})`);
+    params.push(...words.map((w) => `%${w}%`));
+  }
+
+  if (clauses.length === 0) return { sql: "0", params: [] };
+  return { sql: `(CASE WHEN ${clauses.join(" OR ")} THEN 1 ELSE 0 END)`, params };
+}
+
 export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
   const { d1, cfg, now, botToken, force } = ctx;
   const onRequest = ctx.requested.has(u.id);
   const locale = asLocale(u.locale);
   const canSend = Boolean(botToken && u.telegram_chat_id);
+  /**
+   * Людина без жодного каналу доставки: зареєструвалась на сайті й Telegram
+   * не підключила. Для неї кабінет І Є каналом, тому «доставлено» означає
+   * «записано в sent».
+   *
+   * Це не те саме, що `!canSend`: без токена бота в сканера канал у людини
+   * все одно є, просто ми зараз ним не володіємо — і тоді добірка чесно
+   * лишається pending до наступного прогону.
+   */
+  const cabinetOnly = !u.telegram_chat_id;
   // Людина заблокувала бота: слати нікуди, підбирати нове — марно палити вакансії.
   const pauseBlocked = async () => {
     await d1.execute("UPDATE users SET status='paused', paused_reason='blocked' WHERE id=?", [u.id]);
     console.log(`  ${u.id.slice(0, 8)}: бот заблокований (403), пауза`);
   };
+
+  /**
+   * Спадок: добірки, записані як pending людині, якій нікуди слати.
+   *
+   * Досі такий рядок лишався pending назавжди — його ніщо не переводило в
+   * sent, а гілка «відкладена вже лежить у кабінеті» щогодини виходила з
+   * функції. Тобто людина з сайту отримувала добірку РІВНО ОДИН РАЗ, а
+   * обіцянка «п'ять вакансій щоранку» для неї не працювала взагалі.
+   *
+   * Позначаємо доставленими часом їхнього створення: у кабінеті вони саме
+   * тоді й з'явились. Іде до запиту `recent`, щоб розклад і денна стеля
+   * рахувались уже за виправленими даними.
+   */
+  if (cabinetOnly) {
+    const stuck = await d1.query<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM sent WHERE user_id=? AND status='pending'", [u.id]);
+    if ((stuck[0]?.n ?? 0) > 0) {
+      await d1.execute(
+        `UPDATE sent SET status='sent', sent_at=created_at
+          WHERE user_id=? AND status='pending'`, [u.id]);
+      console.log(`  ${u.id.slice(0, 8)}: ${stuck[0]!.n} рядків у кабінеті позначено доставленими`);
+    }
+  }
+
+  /**
+   * Профіль без жодної осі пошуку. Підбирати нема за чим — і мовчки
+   * пропустити не можна: людина чекає добірку.
+   *
+   * Раз на добу, і лише в її годину. Спиратись на звичайний розклад тут не
+   * можна: він рахує «сьогодні вже було» по рядках у sent, а їх у цієї
+   * людини не з'явиться жодного — тож нагадування пішло б щогодини.
+   */
+  if (!hasSearchSignal({ spheres: list(u.spheres), customRole: u.custom_role })) {
+    const itsTime = hourIn(u.timezone, now) === u.delivery_hour && isWeekdayIn(u.timezone, now);
+    if (onRequest) await closeRequests(d1, u.id);
+    if (canSend && (onRequest || force || itsTime)) {
+      await sendTelegram(botToken!, u.telegram_chat_id!,
+        escapeHtml(say(locale, "noProfileYet")), "noprofile", locale);
+    }
+    console.log(`  ${u.id.slice(0, 8)}: профіль без сфери й без своєї ролі, підбирати нема за чим`);
+    return;
+  }
 
   // Що вже було за останні дві доби: і для розкладу, і для денної стелі.
   const recent = await d1.query<{ created_at: string; sent_at: string | null; status: string }>(
@@ -592,13 +684,15 @@ export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
     if (onRequest) await closeRequests(d1, u.id);
     return;
   }
-  if (pending.length > 0 && !canSend && !onRequest) {
-    // Немає куди дотискати (без Telegram або без токена), а добірка вже
-    // лежить у кабінеті. Нову щогодини не підбираємо — інакше кабінет
-    // заповнювався б відкладеними добірками, доки не скінчаться вакансії.
-    // На явне «Ще п'ять» із сайту нова добірка все ж підбирається (нижче):
-    // кабінет і є її каналом доставки, а стеля 20/день тримає обсяг.
-    console.log(`  ${u.id.slice(0, 8)}: відкладена добірка вже лежить у кабінеті, нової не підбираю`);
+  if (pending.length > 0 && !canSend && !cabinetOnly && !onRequest) {
+    // Канал у людини є (Telegram прив'язаний), але сканер зараз без токена
+    // бота. Добірка справді не доставлена — чекаємо на прогін із токеном і
+    // нової не підбираємо, щоб не палити вакансії наосліп.
+    //
+    // Людини без Telegram ця гілка більше не стосується: її добірка вже
+    // позначена доставленою вище, тож далі до неї застосовується звичайний
+    // розклад — одна планова на робочий день, як і всім.
+    console.log(`  ${u.id.slice(0, 8)}: відкладена добірка чекає на токен бота, нової не підбираю`);
     return;
   }
 
@@ -662,6 +756,9 @@ export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
     country: u.country,
   };
 
+  // Що з цього вікна взагалі про цю людину. Див. onTopicSql нижче.
+  const topic = onTopicSql(profile);
+
   // Шортліст: свіже, ще не надіслане цій людині
   const rows = await d1.query<{
     id: string; company: string; company_key: string; title: string; location: string | null;
@@ -690,10 +787,19 @@ export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
     //    posted_at, вони заповнили б вікно з 1200 і випали б аж на підборі,
     //    лишивши людину з іншої країни майже без кандидатів. Це та сама
     //    пастка, що колись із lever:jobgether, тільки з іншого боку.
+    // 6. СПЕРШУ те, що про цю людину, і лише потім найсвіжіше. Без цього
+    //    вікно було зрізом «останні 1200 за датою» з 5032 придатних — тобто
+    //    76% кеша не доходило навіть до оцінювання, і зникали саме вузькі
+    //    сфери: devrel 6 рядків у пулі → 0 у вікні, design 96 → 18,
+    //    web3 180 → 35, junior 142 → 39. Людина, що обрала «DevRel і
+    //    спільнота», не могла отримати жодної DevRel-вакансії в принципі.
+    //    Тепер свої рядки заходять у вікно всі, а рештою місць його добиває
+    //    та сама свіжість, що й раніше.
     `SELECT * FROM (
        SELECT j.*, ROW_NUMBER() OVER (
          PARTITION BY j.company_key ORDER BY j.posted_at DESC, j.fetched_at DESC
-       ) AS rn
+       ) AS rn,
+       ${topic.sql} AS on_topic
        FROM jobs_cache j
        WHERE j.id NOT IN (SELECT job_id FROM sent WHERE user_id = ?)
          AND j.dedupe_key NOT IN (
@@ -702,8 +808,8 @@ export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
          AND (j.country IS NULL OR j.country = ?)
      )
      WHERE rn <= 3
-     ORDER BY posted_at DESC, fetched_at DESC
-     LIMIT 1200`, [u.id, u.id, u.country]);
+     ORDER BY on_topic DESC, posted_at DESC, fetched_at DESC
+     LIMIT 1200`, [...topic.params, u.id, u.id, u.country]);
 
   // Ключ змісту не входить у CandidateJob — тримаємо збоку до запису в sent.
   const dedupeById = new Map(rows.map((r) => [r.id, r.dedupe_key ?? null]));
@@ -776,13 +882,20 @@ export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
   // Спершу pending, і лише після 200 OK від Telegram — sent. Раніше рядки
   // писались одразу як sent, і якщо процес падав між записом і відправкою,
   // база казала «доставлено» про добірку, якої людина не бачила.
+  //
+  // Для того, у кого каналом є сам кабінет, «доставлено» настає рівно тут:
+  // запис у sent і Є появою добірки на /dashboard, чекати нема на що. Саме
+  // тому такий рядок пишеться одразу як sent — інакше він лишався б pending
+  // назавжди й глушив усі наступні добірки цієї людини.
+  const bornSent = cabinetOnly;
   await d1.batch(withWhy.map((j) => ({
     // OR IGNORE: D1 повторює запити, і таймаут після коміту дав би конфлікт
     // ключа на другій спробі.
     sql: `INSERT OR IGNORE INTO sent (id,user_id,job_id,digest_id,why_fits,match_facts,status,sent_at,dedupe_key)
-          VALUES (?,?,?,?,?,?,'pending',NULL,?)
+          VALUES (?,?,?,?,?,?,?,?,?)
           ON CONFLICT(user_id,job_id) DO NOTHING`,
     params: [j.sentId, u.id, j.id, digestId, j.why, JSON.stringify(j.facts),
+             bornSent ? "sent" : "pending", bornSent ? now.toISOString() : null,
              dedupeById.get(j.id) ?? null],
   })));
 
@@ -801,12 +914,15 @@ export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
     if (onRequest) await closeRequests(d1, u.id);
     console.log(`  ${u.id.slice(0, 8)}: надіслано ${withWhy.length}${onRequest ? " (на запит)" : ""}`);
   } else {
-    // Немає куди слати — добірка вже в кабінеті як pending. Запит «ще» треба
-    // закрити й тут: інакше він лишався відкритим і щогодини породжував нову
-    // добірку для людини без Telegram — доти, доки не закінчились вакансії.
+    // Запит «ще» треба закрити й тут: інакше він лишався відкритим і
+    // щогодини породжував нову добірку — доти, доки не закінчились вакансії.
     if (onRequest) await closeRequests(d1, u.id);
+    // Кабінет — теж доставка, тож вона рахується в підсумку прогону нарівні
+    // з Telegram. Раніше такий прогін звітував «доставлено 0», хоча людина
+    // добірку бачила.
+    if (bornSent) ctx.delivered++;
     console.log(`  ${u.id.slice(0, 8)}: підібрано ${withWhy.length}, ${
-      u.telegram_chat_id ? "доставка чекає на токен бота" : "лежить у кабінеті"}${onRequest ? " (на запит)" : ""}`);
+      bornSent ? "лежить у кабінеті" : "доставка чекає на токен бота"}${onRequest ? " (на запит)" : ""}`);
     if (process.env.PRINT_DIGEST) console.log("\n" + text + "\n");
   }
 }

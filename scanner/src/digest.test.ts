@@ -368,19 +368,26 @@ import { deliverTo, type RunContext, type UserRow } from "./digest.js";
 /** Мінімальна підробка D1: відповідає за фрагментом SQL, пам'ятає execute. */
 function fakeD1(answers: Array<[RegExp, unknown[]]>) {
   const executed: Array<{ sql: string; params: unknown[] }> = [];
+  // Записи в sent ідуть через batch, тож без цього не видно найголовнішого —
+  // з яким статусом народжується рядок добірки.
+  const batched: Array<{ sql: string; params: unknown[] }> = [];
   return {
     executed,
+    batched,
     d1: {
       query: async (sql: string) => answers.find(([re]) => re.test(sql))?.[1] ?? [],
       execute: async (sql: string, params: unknown[] = []) => { executed.push({ sql, params }); },
-      batch: async () => {},
+      batch: async (st: Array<{ sql: string; params: unknown[] }>) => { batched.push(...st); },
     },
   };
 }
 
 const user = (o: Partial<UserRow> = {}): UserRow => ({
   id: "user-1", telegram_chat_id: "123456789", locale: "en", timezone: "Europe/Paris", delivery_hour: 9,
-  status: "active", last_interaction_at: null, spheres: "[]", industries: "[]", seniority: null,
+  // Сфера тут не декорація: без неї (і без своєї ролі) deliverTo виходить
+  // одразу — підбирати нема за чим. Порожній профіль перевіряється окремим
+  // тестом нижче, а решті потрібна людина, яка щось про себе сказала.
+  status: "active", last_interaction_at: null, spheres: "[\"engineering\"]", industries: "[]", seniority: null,
   remote_mode: "any", location: null, salary_min: null, country: null, custom_role: null, wishes: null,
   seniority_weight: null, location_weight: null, salary_weight: null, ...o });
 
@@ -430,14 +437,99 @@ describe("deliverTo", () => {
     expect(executed.some((e) => /INSERT/.test(e.sql))).toBe(false);
   });
 
-  it("без Telegram pending — кінцевий стан, і «сьогодні вже було» не породжує нову", async () => {
+  it("без Telegram залежаний pending лікується: кабінет і є доставкою", async () => {
+    // Це той самий глухий кут, через який людина з сайту отримувала добірку
+    // РІВНО ОДИН РАЗ. Рядок лишався pending назавжди (перевести його в sent
+    // не було кому), і гілка «відкладена вже лежить у кабінеті» щогодини
+    // виходила з функції — назавжди.
     const f = vi.spyOn(globalThis, "fetch");
     vi.spyOn(console, "log").mockImplementation(() => {});
-    const { d1, executed } = fakeD1(pendingRows);
+    const { d1, executed } = fakeD1([
+      // Специфічне правило мусить стояти перед загальним /status='pending'/.
+      [/COUNT\(\*\) AS n FROM sent WHERE user_id=\? AND status='pending'/, [{ n: 5 }]],
+      ...pendingRows,
+    ]);
+    await deliverTo(user({ telegram_chat_id: null }), ctxOf(d1));
+    expect(f).not.toHaveBeenCalled();
+    const heal = executed.find((e) => /SET status='sent', sent_at=created_at/.test(e.sql));
+    expect(heal?.params).toEqual(["user-1"]);
+  });
+
+  it("без Telegram нова добірка народжується одразу як sent", async () => {
+    // Кабінет — це і є канал доставки. Народжений pending рядок глушив би
+    // усі наступні добірки цієї людини.
+    const f = vi.spyOn(globalThis, "fetch");
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const { d1, batched } = fakeD1([
+      [/FROM jobs_cache j/, [{
+        id: "j1", company: "Acme", company_key: "acme", title: "Backend Engineer",
+        location: null, remote: 1, url: "https://acme.test/1", tags: '["engineering"]',
+        posted_at: "2026-08-28T06:00:00.000Z", salary_min: null, salary_max: null,
+        salary_currency: null, dedupe_key: "acme|backend", summary: "A job.",
+        source: "ashby:acme", country: null,
+      }]],
+    ]);
     const ctx = ctxOf(d1);
     await deliverTo(user({ telegram_chat_id: null }), ctx);
     expect(f).not.toHaveBeenCalled();
+    const insert = batched.find((b) => /INSERT OR IGNORE INTO sent/.test(b.sql));
+    expect(insert).toBeDefined();
+    // ...,status,sent_at,dedupe_key — статус сьомий параметр, час восьмий.
+    expect(insert!.params[6]).toBe("sent");
+    expect(insert!.params[7]).not.toBeNull();
+    // Доставка в кабінет рахується прогоном нарівні з Telegram.
+    expect(ctx.delivered).toBe(1);
+  });
+
+  it("з Telegram добірка й далі народжується pending — до 200 OK", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const { d1, batched } = fakeD1([
+      [/FROM jobs_cache j/, [{
+        id: "j1", company: "Acme", company_key: "acme", title: "Backend Engineer",
+        location: null, remote: 1, url: "https://acme.test/1", tags: '["engineering"]',
+        posted_at: "2026-08-28T06:00:00.000Z", salary_min: null, salary_max: null,
+        salary_currency: null, dedupe_key: "acme|backend", summary: "A job.",
+        source: "ashby:acme", country: null,
+      }]],
+    ]);
+    await deliverTo(user(), ctxOf(d1));
+    const insert = batched.find((b) => /INSERT OR IGNORE INTO sent/.test(b.sql));
+    expect(insert!.params[6]).toBe("pending");
+    expect(insert!.params[7]).toBeNull();
+  });
+
+  it("профіль без сфери й без своєї ролі: нічого не пишемо, кажемо чому", async () => {
+    // Раніше scoreJob не карав нікого (штраф −8 стоїть під умовою «людина
+    // щось назвала»), тож кожна віддалена вакансія набирала +5 з нічого — і
+    // людина отримувала п'ять випадкових вакансій із упевненим поясненням.
+    const f = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const { d1, executed, batched } = fakeD1([]);
+    // 10:05 UTC — це 12:05 у Парижі, тобто НЕ година доставки: нагадування
+    // не має ходити щогодини.
+    await deliverTo(user({ spheres: "[]", custom_role: null }), ctxOf(d1));
+    expect(batched).toEqual([]);
     expect(executed).toEqual([]);
+    expect(f).not.toHaveBeenCalled();
+
+    // А в її годину — рівно одне нагадування.
+    await deliverTo(user({ spheres: "[]", custom_role: null }),
+      ctxOf(d1, { now: new Date("2026-08-28T07:05:00Z") }));
+    const body = JSON.parse((f.mock.calls[0]![1] as { body: string }).body) as { text: string };
+    expect(body.text).toMatch(/profile/i);
+    expect(batched).toEqual([]);
+  });
+
+  it("своя роль без жодної галочки — це теж пошук", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const { d1 } = fakeD1([]);
+    const ctx = ctxOf(d1);
+    await deliverTo(user({ spheres: "[]", custom_role: "solidity auditor" }), ctx);
+    // Кандидатів фейк не дав, тож добірки немає — але й виходу «нема за чим
+    // шукати» теж: далі пішов звичайний шлях.
+    expect(ctx.delivered).toBe(0);
   });
 
   it("у вихідний планова добірка не йде, а запит «ще» — йде", async () => {
@@ -499,5 +591,37 @@ describe("футер першої добірки", () => {
   });
   it("звичайна — без нього", () => {
     expect(formatDigest(five, "uk")).not.toContain("Ось так працює бот");
+  });
+});
+
+// ── Вікно кандидатів: спершу своє, потім свіже ────────────────
+import { onTopicSql } from "./digest.js";
+
+describe("onTopicSql", () => {
+  it("сфери шукаються з лапками, щоб не збігатись частиною чужого тега", () => {
+    const r = onTopicSql({ spheres: ["qa", "design"], customRole: null });
+    expect(r.sql).toBe("(CASE WHEN j.tags LIKE ? OR j.tags LIKE ? THEN 1 ELSE 0 END)");
+    expect(r.params).toEqual(['%"qa"%', '%"design"%']);
+  });
+
+  it("своя роль — усі слова разом, як у matchesCustomRole", () => {
+    const r = onTopicSql({ spheres: [], customRole: "solidity auditor" });
+    expect(r.sql).toBe("(CASE WHEN (LOWER(j.title) LIKE ? AND LOWER(j.title) LIKE ?) THEN 1 ELSE 0 END)");
+    expect(r.params).toEqual(["%solidity%", "%auditor%"]);
+  });
+
+  it("короткі слова відкидаються так само, як у матчері", () => {
+    // «ai» ловило б усе підряд — roleWords лишає слова довші за два символи.
+    expect(onTopicSql({ spheres: [], customRole: "ai" })).toEqual({ sql: "0", params: [] });
+  });
+
+  it("нема за чим сортувати — вікно поводиться як раніше", () => {
+    expect(onTopicSql({ spheres: [], customRole: null })).toEqual({ sql: "0", params: [] });
+  });
+
+  it("сфери й роль разом — це АБО, а не І", () => {
+    const r = onTopicSql({ spheres: ["devrel"], customRole: "community lead" });
+    expect(r.sql).toMatch(/j\.tags LIKE \? OR \(LOWER/);
+    expect(r.params).toEqual(['%"devrel"%', "%community%", "%lead%"]);
   });
 });

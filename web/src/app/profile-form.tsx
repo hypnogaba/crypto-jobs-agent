@@ -164,7 +164,18 @@ export default function ProfileForm({ locale, pre, back, error, quote, evidence 
 
       <div className="ruled card">
         <Question n={1} title={t(locale, "onboarding.spheres")}>
-          <div className="flex flex-wrap gap-2">
+          {/* Це єдине питання, без якого підбір не працює: сфера важить ±6
+              балів, а штраф за «жодного збігу» діє лише тоді, коли людина
+              щось назвала. Порожня анкета проходила мовчки й давала п'ять
+              випадкових вакансій. Тепер сервер її не приймає — а тут стоїть
+              підпис, щоб це не було сюрпризом уже після натискання. */}
+          <p className="text-xs" style={{ color: "var(--muted)" }}>
+            {t(locale, "onboarding.spheresNeeded")}
+          </p>
+          {error === "sphere" && (
+            <p className="tag tag-warn mt-3 inline-block">{t(locale, "err.sphere")}</p>
+          )}
+          <div className="mt-4 flex flex-wrap gap-2">
             {SPHERES.map((s) => (
               <label key={s.id} className="chip">
                 <input type="checkbox" name="spheres" value={s.id} defaultChecked={spheres.has(s.id)} />
