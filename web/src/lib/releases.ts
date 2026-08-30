@@ -13,6 +13,14 @@ export const RELEASES: Release[] = [
     "date": "2026-08-30",
     "changes": [
       {
+        "hash": "e4eebd8",
+        "subject": "Окремий блок про користувачів: крок день, тиждень або місяць"
+      },
+      {
+        "hash": "13b7513",
+        "subject": "П'ятнадцять правок зроблено — беклог скорочено до того, що лишилось"
+      },
+      {
         "hash": "d13e1c3",
         "subject": "Панель: активність у боті, і сотні колекцій Getro не роблять із неї стіни"
       },
@@ -217,7 +225,7 @@ export const RELEASES: Release[] = [
         "subject": "Чотири блокери запуску: кабінет як канал, порожній профіль, мова, вікно кандидатів"
       }
     ],
-    "chores": 10
+    "chores": 11
   },
   {
     "date": "2026-08-29",
@@ -789,4 +797,4 @@ export const RELEASES: Release[] = [
   }
 ];
 
-export const GENERATED_AT = "2026-08-30 16:12";
+export const GENERATED_AT = "2026-08-30 16:17";
