@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import Nav from "@/app/nav";
 import { detectLocale } from "@/app/actions";
-import { addCompany, reviveSource, replyToFeedback, dismissFeedback, purgeNeverWorked, recheckSome, applyProposal, dismissProposal, applyAllProposals, addBoard, toggleBoard, toggleBoardGroup, addSources, forgetIntake, retryIntake, refreshTelegramNames } from "./actions";
+import { addCompany, reviveSource, replyToFeedback, dismissFeedback, purgeNeverWorked, recheckSome, applyProposal, dismissProposal, applyAllProposals, addBoard, toggleBoard, toggleBoardGroup, addSources, forgetIntake, retryIntake, recountCountries, refreshTelegramNames } from "./actions";
 import { currentUser } from "@/lib/auth";
 import { all, one } from "@/lib/db";
 import { RELEASES } from "@/lib/releases";
@@ -1118,18 +1118,33 @@ export default async function Admin() {
               <Tile n={spend?.localJobs ?? 0} label="з країною в кеші" />
             </div>
 
-            {gaps.length > 0 && (
-              <div className="card mt-3 px-5 py-4">
-                <p className="eyebrow">країни, де є люди, а дошок немає</p>
-                <p className="mt-2 text-xs" style={{ color: "var(--ink-2)" }}>
-                  {gaps.map((g) => `${g.country} · ${g.people}`).join("   ")}
-                </p>
+            <div className="card mt-3 px-5 py-4">
+              <p className="eyebrow">країни, де є люди, а дошок немає</p>
+              {gaps.length > 0 ? (
+                <>
+                  <p className="mt-2 text-xs" style={{ color: "var(--ink-2)" }}>
+                    {gaps.map((g) => `${g.country} · ${g.people}`).join("   ")}
+                  </p>
+                  <p className="mt-2 max-w-prose text-xs" style={{ color: "var(--muted)" }}>
+                    Три перші з цього списку стають запитами до твіттера щонеділі: розвідка
+                    шукає дошку саме для них і приносить її сюди пропозицією з високою вагою.
+                    Чекати не обов'язково — стрічку можна додати посиланням будь-коли.
+                  </p>
+                </>
+              ) : (
                 <p className="mt-2 text-xs" style={{ color: "var(--muted)" }}>
-                  Дошки не знаходяться самі: щотижневий пошук збирає компанії на ATS,
-                  а не національні дошки. Фід для країни треба знайти й додати нижче.
+                  Порожньо. Кожна країна, з якої в нас є людина, має свою дошку.
                 </p>
-              </div>
-            )}
+              )}
+              {/* Країна виводиться з написаного міста один раз, при збереженні
+                  профілю. Словник місць росте — і кожен, хто написав місто
+                  раніше, лишається без країни, поки його не перерахують. */}
+              <form action={recountCountries} className="mt-3">
+                <button className="btn btn-quiet px-3 py-2 text-xs">
+                  Перерахувати країни з написаних міст
+                </button>
+              </form>
+            </div>
 
             {boardGroups.length > 0 && (
               <div className="card mt-3 overflow-x-auto">

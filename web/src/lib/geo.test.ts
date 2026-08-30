@@ -137,3 +137,55 @@ describe("toLatin", () => {
     expect(toLatin("Київ, Poland")).toBe("Kyiv, Poland");
   });
 });
+
+/**
+ * Розширення словника з 12 країн до 75.
+ *
+ * Приклад, з якого все почалось: «Антверпен» не давав нічого, бо Бельгії в
+ * списку не було взагалі, — а без країни людина не бачить локальних вакансій
+ * і навіть не потрапляє в перелік країн, для яких треба шукати дошку.
+ */
+describe("countryFromLocation — розширений словник", () => {
+  it("знає Бельгію, з якої почалась ця робота", () => {
+    expect(countryFromLocation("Антверпен")).toBe("BE");
+    expect(countryFromLocation("Antwerp")).toBe("BE");
+    expect(countryFromLocation("Antwerpen, Belgium")).toBe("BE");
+    expect(countryFromLocation("Brussels")).toBe("BE");
+    expect(countryFromLocation("Гент")).toBe("BE");
+  });
+
+  it("знає країни трьома мовами", () => {
+    expect(countryFromLocation("Тбілісі")).toBe("GE");
+    expect(countryFromLocation("Vilnius")).toBe("LT");
+    expect(countryFromLocation("Бангалор")).toBe("IN");
+    expect(countryFromLocation("São Paulo")).toBe("BR");
+    expect(countryFromLocation("Кейптаун")).toBe("ZA");
+    expect(countryFromLocation("Торонто")).toBe("CA");
+    expect(countryFromLocation("Nairobi")).toBe("KE");
+  });
+
+  /**
+   * Пастки, які створює сам порядок списку: перший збіг перемагає, тож
+   * омонім, поставлений вище, мовчки забирає чужі міста.
+   */
+  it("не плутає штат Джорджія з країною Грузія", () => {
+    // «georgia» голим словом із GE прибрано саме через це.
+    expect(countryFromLocation("Atlanta, Georgia")).toBe("US");
+    // Країна лишається впізнаваною за столицею й за назвою іншими мовами.
+    expect(countryFromLocation("Грузія")).toBe("GE");
+    expect(countryFromLocation("Tbilisi, Georgia")).toBe("GE");
+  });
+
+  it("не бачить міста всередині довшого слова", () => {
+    // «Cali» всередині «California» — не колумбійське Калі.
+    expect(countryFromLocation("California")).not.toBe("CO");
+    // «Zug» усередині німецького слова — не швейцарський Цуг.
+    expect(countryFromLocation("Flugzeugbau")).not.toBe("CH");
+  });
+
+  it("мовчить там, де місця немає", () => {
+    expect(countryFromLocation("будь-де")).toBeNull();
+    expect(countryFromLocation("remote")).toBeNull();
+    expect(countryFromLocation("")).toBeNull();
+  });
+});

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isKnown, rankHosts, type Tweet } from "./twitter.js";
+import { isKnown, queriesForCountry, rankHosts, tldOf, type Tweet } from "./twitter.js";
 
 const tweet = (id: string, author: string, text: string): Tweet =>
   ({ id, userScreenName: author, text });
@@ -81,5 +81,64 @@ describe("rankHosts", () => {
       tweet("1", "anna", "jobs https://t.co/aaa and https://t.co/bbb"),
     ], expanded, new Set());
     expect(rows[0]).toMatchObject({ host: "germantechjobs.de", authors: 1, tweets: 1 });
+  });
+});
+
+describe("країни, яких нам бракує", () => {
+  it("складає запит під країну, яку знає", () => {
+    const q = queriesForCountry("BE");
+    expect(q.length).toBeGreaterThan(0);
+    expect(q[0]).toContain("Belgium");
+    // Місцеве слово теж: бельгійська дошка називає себе «vacatures».
+    expect(q.join(" ")).toMatch(/vacatures|emploi/i);
+  });
+
+  // Вигаданий запит «job board XX hiring» витратив би виклик і не дав нічого.
+  it("мовчить про країну, якої не знає", () => {
+    expect(queriesForCountry("ZZ")).toEqual([]);
+  });
+
+  it("знає, що домен Британії — uk, а не gb", () => {
+    expect(tldOf("GB")).toBe("uk");
+    expect(tldOf("BE")).toBe("be");
+    expect(tldOf("de")).toBe("de");
+  });
+});
+
+describe("rankHosts із потрібними країнами", () => {
+  const expanded = new Map([
+    ["https://t.co/be1", "https://stepstone.be/vacatures/1"],
+    ["https://t.co/gl1", "https://someremotejobs.com/1"],
+  ]);
+  const t = (id: string, author: string, text: string): Tweet =>
+    ({ id, userScreenName: author, text });
+
+  /**
+   * Головне, заради чого це робилось: у назві бельгійської дошки немає ні
+   * «job», ні «career», і за загальним правилом вона б відпала.
+   */
+  it("бере домен потрібної країни навіть без слова про роботу в назві", () => {
+    const rows = rankHosts([t("1", "anna", "hiring https://t.co/be1")],
+                           expanded, new Set(), new Set(["be"]));
+    expect(rows.map((r) => r.host)).toContain("stepstone.be");
+    expect(rows[0]?.wantedTld).toBe("be");
+  });
+
+  it("без потрібних країн той самий домен відпадає", () => {
+    const rows = rankHosts([t("1", "anna", "hiring https://t.co/be1")],
+                           expanded, new Set());
+    expect(rows).toHaveLength(0);
+  });
+
+  // Одна дошка для країни з живими людьми вартніша за десяту глобальну.
+  it("ставить потрібну країну поперед популярнішого глобального", () => {
+    const rows = rankHosts([
+      t("1", "anna", "hiring https://t.co/be1"),
+      t("2", "borys", "hiring https://t.co/gl1"),
+      t("3", "clara", "hiring https://t.co/gl1"),
+      t("4", "dmytro", "hiring https://t.co/gl1"),
+    ], expanded, new Set(), new Set(["be"]));
+    expect(rows[0]?.host).toBe("stepstone.be");
+    expect(rows[0]!.authors).toBeLessThan(rows[1]!.authors);
   });
 });
