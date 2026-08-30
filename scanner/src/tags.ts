@@ -48,7 +48,9 @@ const SENIORITY_RULES: Array<[string, RegExp]> = [
 
 /** Джерело саме по собі несе інформацію про нішу. */
 const SOURCE_TAGS: Array<[string, string[]]> = [
-  ["getro:", ["web3"]],
+  // «getro:» тут більше немає. Getro — це хостинг бордів, а не ніша: серед
+  // його колекцій є і Solana, і ізраїльська дошка з Teva. Тепер нішу диктує
+  // конкретна колекція через inheritedTags (див. runR3).
   ["aggregator:remoteok", ["remote"]],
   ["aggregator:remotive", ["remote"]],
   ["aggregator:wwr", ["remote"]],

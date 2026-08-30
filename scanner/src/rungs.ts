@@ -50,9 +50,21 @@ export async function runR2(skip: Set<string> = new Set()): Promise<RungRun> {
 }
 
 // ── R3: колекції Getro ───────────────────────────────────────
-export async function runR3(collectionIds: number[], skip: Set<string> = new Set()): Promise<RungRun> {
-  const active = collectionIds.filter((id) => !skip.has(`getro:${id}`));
-  const results = await mapLimit(active, 4, (id) => runSource(`getro:${id}`, () => fetchGetro(id)));
+/**
+ * Ніша береться з колекції, а не з того, що це Getro.
+ *
+ * Раніше «web3» вішало правило SOURCE_TAGS на префікс `getro:` — тобто на
+ * будь-який борд, який Getro хостить. Серед них ізраїльська дошка з Elbit і
+ * Teva, і всі 412 її вакансій були в кеші як крипта.
+ */
+export async function runR3(
+  collections: Array<{ id: number; tags: string[] }>, skip: Set<string> = new Set()
+): Promise<RungRun> {
+  const active = collections.filter((c) => !skip.has(`getro:${c.id}`));
+  const results = await mapLimit(active, 4, (c) => runSource(`getro:${c.id}`, async () => {
+    const jobs = await fetchGetro(c.id);
+    return c.tags.length ? jobs.map((j) => ({ ...j, inheritedTags: c.tags })) : jobs;
+  }));
   return { jobs: results.flatMap((r) => r.jobs), results };
 }
 

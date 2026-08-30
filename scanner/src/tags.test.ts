@@ -34,8 +34,14 @@ describe("deriveTags — маршрутизація за нішами", () => {
     expect(deriveTags(j({ title: "VPN Infrastructure Engineer" }))).not.toContain("lead");
     expect(deriveTags(j({ title: "DevOps Engineer" }))).not.toContain("lead");
   });
+  it("Getro сам по собі більше не означає web3", () => {
+    // Колекція 1200 — ізраїльська дошка з Teva й NVIDIA. Нішу тепер диктує
+    // конкретна колекція через inheritedTags, а не префікс джерела.
+    expect(deriveTags(j({ source: "getro:1200" }))).not.toContain("web3");
+    expect(deriveTags(j({ source: "getro:858", inheritedTags: ["web3"] }))).toContain("web3");
+  });
+
   it("успадковує теги від джерела", () => {
-    expect(deriveTags(j({ source: "getro:858" }))).toContain("web3");
     expect(deriveTags(j({ source: "aggregator:remoteok" }))).toContain("remote");
   });
   it("ніколи не лишає порожній список", () => {

@@ -17,6 +17,9 @@ const parseTags = (raw: string | null): string[] => {
   try { const v = JSON.parse(raw ?? "[]"); return Array.isArray(v) ? v : []; } catch { return []; }
 };
 
+/** Колекція Getro з нішею, яку вона диктує своїм вакансіям. */
+export interface GetroCollection { id: number; tags: string[] }
+
 export class Repo {
   constructor(private readonly d1: D1Client) {}
 
@@ -36,11 +39,14 @@ export class Repo {
   /**
    * Колекції Getro. Теж рядки, з тієї ж причини: борд екосистеми фонду
    * додається з адмінки посиланням, а не правкою масиву в scan.ts.
+   *
+   * Ніша належить конкретному борду, а не Getro загалом: колекція 858 — це
+   * Solana, а 1200 — ізраїльська дошка з Teva й NVIDIA.
    */
-  async listGetroCollections(): Promise<number[]> {
-    const rows = await this.d1.query<{ collection_id: number }>(
-      "SELECT collection_id FROM getro_collections WHERE enabled=1 ORDER BY collection_id");
-    return rows.map((r) => r.collection_id);
+  async listGetroCollections(): Promise<GetroCollection[]> {
+    const rows = await this.d1.query<{ collection_id: number; tags: string | null }>(
+      "SELECT collection_id, tags FROM getro_collections WHERE enabled=1 ORDER BY collection_id");
+    return rows.map((r) => ({ id: r.collection_id, tags: parseTags(r.tags) }));
   }
 
   // ── вакансії ───────────────────────────────────────────────

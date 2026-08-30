@@ -34,7 +34,8 @@ async function main(): Promise<void> {
   // Порожня таблиця означає «міграцію ще не накотили», а не «колекцій немає»:
   // мовчки прочитати нуль колекцій означало б втратити головне джерело нових
   // компаній і не сказати про це нікому.
-  let getroCollections = GETRO_FALLBACK;
+  let getroCollections: Array<{ id: number; tags: string[] }> =
+    GETRO_FALLBACK.map((id) => ({ id, tags: [] }));
   try {
     const fromDb = await repo.listGetroCollections();
     if (fromDb.length) getroCollections = fromDb;
@@ -72,7 +73,7 @@ async function main(): Promise<void> {
       for (const c of harvested) {
         await repo.upsertCompany({
           slug: c.slug, name: c.name, provider: c.provider, atsSlug: c.slug,
-          tags: ["web3"], discoveredVia: "getro",
+          tags: c.tags, discoveredVia: "getro",
         });
       }
       if (harvested.length) console.log(`   R3 забрав ${harvested.length} компаній із ATS-лінків`);
@@ -141,10 +142,15 @@ async function main(): Promise<void> {
     // вистачило. Різниця лише в тому, що дошка дає країну, а Getro — нішу.
     const getroResults: SourceResult[] = [];
     try {
-      const active = getroCollections.filter((id) => !skip.has(`getro:${id}`));
+      const active = getroCollections.filter((c) => !skip.has(`getro:${c.id}`));
       if (active.length) {
+        // Ніша успадковується від конкретної колекції, а не від того, що це
+        // Getro: серед його бордів є і Solana, і дошка з Teva та NVIDIA.
         const runs = await mapLimit(active, 4,
-          (id) => runSource(`getro:${id}`, () => fetchGetro(id)));
+          (c) => runSource(`getro:${c.id}`, async () => {
+            const jobs = await fetchGetro(c.id);
+            return c.tags.length ? jobs.map((j) => ({ ...j, inheritedTags: c.tags })) : jobs;
+          }));
         getroResults.push(...runs);
         const raw = runs.flatMap((r) => r.jobs);
         const jobs = prepare(raw, cfg.freshnessDays, now);
