@@ -276,6 +276,7 @@ export async function fetchBoard(board: Board, o: FetchOptions = {}): Promise<Ra
   const country = board.country === "*" ? null : board.country;
 
   if (board.kind === "jsonld") return fetchJsonLd(board, country, o);
+  if (board.kind === "nextjs") return fetchNextBoard(board, country, o);
 
   if (board.kind !== "rss") throw new Error(`формат «${board.kind}» ще не вміємо: ${board.name}`);
 
@@ -493,4 +494,153 @@ export function jobLinks(html: string, base: string): string[] {
     out.add(u.toString());
   }
   return [...out];
+}
+
+/**
+ * Дошка на Next.js, яка кладе записи вакансій у власний потік.
+ *
+ * Такий сайт виглядає порожнім: у HTML немає ні стрічки, ні розмітки, ні
+ * посилань на ATS, і легко вирішити, що вакансії домальовує браузер. Це
+ * майже правда — але дані для малювання сервер уже надіслав, у викликах
+ * `self.__next_f.push([1,"…"])`. Там лежить готовий запис: назва, компанія,
+ * її сайт, місто, країна, дата.
+ *
+ * Так читається jobstash.xyz — 7698 вакансій, які ми чесно вважали
+ * недосяжними. Десять записів на один запит, тобто вдесятеро дешевше за
+ * дошку з розміткою, де кожна вакансія коштує окрему сторінку.
+ */
+export function parseNextPayload(html: string, source: string, country: string | null,
+                                 base: string): RawJob[] {
+  const out: RawJob[] = [];
+  const seen = new Set<string>();
+
+  for (const node of nextObjects(unpackNextStream(html))) {
+    const title = str(node.title);
+    const href = str(node.href) || str(node.url);
+    if (!title || !href) continue;
+
+    let url: string;
+    try { url = new URL(href, base).toString(); } catch { continue; }
+    if (seen.has(url)) continue;
+
+    const org = node.organization ?? node.company;
+    const company = str(typeof org === "object" && org !== null
+      ? (org as Record<string, unknown>).name : org);
+    // Без компанії вакансія непридатна: підбір і дедуплікація тримаються
+    // на парі «компанія + роль».
+    if (!company) continue;
+    seen.add(url);
+
+    const addr = Array.isArray(node.addresses) ? node.addresses[0] : null;
+    const a = addr && typeof addr === "object" ? addr as Record<string, unknown> : {};
+    const location = str(node.location)
+      || [str(a.locality), str(a.country)].filter(Boolean).join(", ") || null;
+
+    out.push({
+      url, company, title, location,
+      remote: a.isRemote === true || str(node.locationType).toUpperCase() === "REMOTE"
+              || REMOTE_ANYWHERE.test(location ?? ""),
+      postedAt: iso(str(node.datePosted)),
+      source, country,
+      description: str(node.summary) || null,
+    });
+  }
+  return out;
+}
+
+/**
+ * Потік Next.js як суцільний текст.
+ *
+ * Сервер шле сторінку шматками, кожен — рядок JS із екранованим вмістом.
+ * Склеюємо їх і знімаємо екранування: окремий шматок може обірватись
+ * посеред запису, тож розбирати їх поодинці не можна.
+ */
+function unpackNextStream(html: string): string {
+  const chunks = [...html.matchAll(/self\.__next_f\.push\(\[\d+,\s*"((?:[^"\\]|\\.)*)"\]\)/g)]
+    .map((m) => m[1]!);
+  if (chunks.length === 0) return "";
+  return chunks.join("").replace(/\\"/g, '"').replace(/\\\\/g, "\\")
+    .replace(/\\n/g, "\n").replace(/\\u([0-9a-fA-F]{4})/g,
+      (_, h: string) => String.fromCharCode(parseInt(h, 16)));
+}
+
+/** Скільки вглиб шукаємо дужку, що закриває запис. */
+const OBJECT_MAX = 12_000;
+
+/**
+ * Об'єкти, схожі на вакансію.
+ *
+ * Ознака — форма, а не назва поля: є `title` і посилання. Прив'язатись до
+ * ключа `"job":` було б прив'язкою до одного сайту, а форма запису однакова
+ * скрізь, бо її диктує те, що дошка малює на екрані.
+ */
+function* nextObjects(blob: string): Generator<Record<string, unknown>> {
+  for (const m of blob.matchAll(/\{"(?:id|title|slug|jobId)"/g)) {
+    const start = m.index!;
+    let depth = 0;
+    for (let i = start; i < Math.min(start + OBJECT_MAX, blob.length); i++) {
+      const c = blob[i];
+      if (c === '"') {                      // рядок пропускаємо цілком:
+        i++;                                // дужка в тексті вакансії не рахується
+        while (i < blob.length && blob[i] !== '"') i += blob[i] === "\\" ? 2 : 1;
+        continue;
+      }
+      if (c === "{") depth++;
+      else if (c === "}") {
+        depth--;
+        if (depth === 0) {
+          try {
+            const o: unknown = JSON.parse(blob.slice(start, i + 1));
+            if (o && typeof o === "object" && !Array.isArray(o)) yield o as Record<string, unknown>;
+          } catch { /* обрізаний шматок — не запис */ }
+          break;
+        }
+      }
+    }
+  }
+}
+
+
+/** Скільки сторінок такої дошки гортаємо за прогін. */
+const NEXT_PAGES = 40;
+
+/**
+ * Дошка, чиї записи лежать у потоці Next.js.
+ *
+ * Гортається тим самим `?page=N`, що й дошка з розміткою, але коштує на
+ * порядок менше: сторінка віддає десяток ГОТОВИХ записів, і ходити по
+ * окремих вакансіях не треба взагалі. Сорок сторінок — це близько чотирьохсот
+ * найновіших вакансій за сорок запитів.
+ *
+ * Спиняємось, щойно сторінка не додала нічого нового: так поводиться і дошка,
+ * яка про параметр не знає, і кінець списку — розрізняти їх нема потреби.
+ */
+async function fetchNextBoard(board: Board, country: string | null,
+                              o: FetchOptions): Promise<RawJob[]> {
+  const out: RawJob[] = [];
+  const seen = new Set<string>();
+
+  for (let page = 1; page <= NEXT_PAGES; page++) {
+    let url = board.feedUrl;
+    if (page > 1) {
+      try {
+        const u = new URL(board.feedUrl);
+        u.searchParams.set("page", String(page));
+        url = u.toString();
+      } catch { break; }
+    }
+
+    let batch: RawJob[];
+    try { batch = parseNextPayload(await fetchXml(url, {}, o), board.name, country, board.feedUrl); }
+    catch { break; }
+
+    const before = seen.size;
+    for (const j of batch) {
+      if (seen.has(j.url)) continue;
+      seen.add(j.url);
+      out.push(j);
+    }
+    if (seen.size === before) break;
+  }
+  return out;
 }

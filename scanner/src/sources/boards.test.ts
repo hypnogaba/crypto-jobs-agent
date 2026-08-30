@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { cleanUrl, fetchBoard, isJunk, jobLinks, parseBoardTitle, parseJobPostings } from "./boards.js";
+import { cleanUrl, fetchBoard, isJunk, jobLinks, parseBoardTitle, parseJobPostings, parseNextPayload } from "./boards.js";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -255,5 +255,67 @@ describe("jobLinks", () => {
       <a href="https://twitter.com/other-board/12345">чужий</a>`;
     expect(jobLinks(html, "https://web3.career/")).toEqual(
       ["https://web3.career/office-manager-ellipsislabs/153443"]);
+  });
+});
+
+describe("parseNextPayload", () => {
+  /** Так шле сторінку Next.js: рядки JS із екранованим вмістом. */
+  const stream = (...objs: unknown[]) => objs
+    .map((o) => `self.__next_f.push([1,"${JSON.stringify(JSON.stringify(o)).slice(1, -1)}"])`)
+    .join("\n");
+
+  /** Справжня форма запису jobstash.xyz, скорочена. */
+  const job = {
+    id: "ZhNDJw", title: "Software Engineer C++",
+    href: "/software-engineer-c-akuna-capital/ZhNDJw",
+    location: "Sydney", locationType: "ONSITE",
+    addresses: [{ country: "Australia", countryCode: "AU", isRemote: false, locality: "Sydney" }],
+    organization: { name: "Akuna Capital", websiteUrl: "https://akunacapital.com/" },
+    summary: "Design and build complex trading systems.", datePosted: "2026-08-30T09:00:00Z",
+  };
+
+  it("витягує вакансію з потоку й робить адресу повною", () => {
+    const jobs = parseNextPayload(stream(job), "board:x", null, "https://jobstash.xyz/");
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]).toMatchObject({
+      url: "https://jobstash.xyz/software-engineer-c-akuna-capital/ZhNDJw",
+      company: "Akuna Capital", title: "Software Engineer C++",
+      location: "Sydney", remote: false,
+    });
+  });
+
+  it("вірить прапорцю isRemote у самій адресі", () => {
+    const remote = { ...job, addresses: [{ country: "Germany", isRemote: true, locality: "" }],
+                     location: "Remote, Germany" };
+    expect(parseNextPayload(stream(remote), "board:x", null, "https://x/")[0]!.remote).toBe(true);
+  });
+
+  /**
+   * Запис без компанії пропускаємо: підбір і дедуплікація тримаються на парі
+   * «компанія + роль», тож половина запису гірша за його відсутність.
+   */
+  it("не бере запис без компанії", () => {
+    const { organization: _drop, ...bare } = job;
+    expect(parseNextPayload(stream(bare), "board:x", null, "https://x/")).toHaveLength(0);
+  });
+
+  it("один і той самий запис двічі не подвоюється", () => {
+    expect(parseNextPayload(stream(job, job), "board:x", null, "https://x/")).toHaveLength(1);
+  });
+
+  /**
+   * Дужка всередині тексту вакансії не має обривати запис — саме тому пошук
+   * закривної дужки пропускає рядки цілком.
+   */
+  it("дужка в тексті опису не ламає розбір", () => {
+    const tricky = { ...job, summary: "Ми шукаємо { того, хто } любить C++ }{" };
+    const jobs = parseNextPayload(stream(tricky), "board:x", null, "https://x/");
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]!.description).toContain("любить C++");
+  });
+
+  it("сторінка без потоку Next.js дає порожній список, а не помилку", () => {
+    expect(parseNextPayload("<html><body>нічого</body></html>", "board:x", null, "https://x/"))
+      .toEqual([]);
   });
 });
