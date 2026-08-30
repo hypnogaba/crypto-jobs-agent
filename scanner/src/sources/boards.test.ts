@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { cleanUrl, fetchBoard, parseBoardTitle } from "./boards.js";
+import { cleanUrl, fetchBoard, jobLinks, parseBoardTitle, parseJobPostings } from "./boards.js";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -133,5 +133,67 @@ describe("fetchBoard", () => {
     const jobs = await fetchBoard(
       { name: "board:global-remoteok", label: "RemoteOK", country: "*", feedUrl: "https://remoteok.com/f", kind: "rss" });
     expect(jobs[0]!.country).toBeNull();
+  });
+});
+
+describe("parseJobPostings", () => {
+  const wrap = (obj: unknown) =>
+    `<script type="application/ld+json">${JSON.stringify(obj)}</script>`;
+  const posting = (extra: Record<string, unknown> = {}) => ({
+    "@type": "JobPosting", title: "Office Manager",
+    hiringOrganization: { "@type": "Organization", name: "Ellipsis Labs" },
+    datePosted: "2026-08-29", ...extra,
+  });
+
+  /**
+   * Справжня розмітка з web3.career: свого `url` у JobPosting немає ЖОДНОГО
+   * разу — ні на восьми перевірених дошках, ні на сторінці окремої вакансії.
+   * Там адреса відома інакше: вакансія і є ця сторінка.
+   */
+  it("бере адресу сторінки, коли розмітка своєї не має", () => {
+    const jobs = parseJobPostings(wrap(posting()), "board:x", null,
+      "https://web3.career/office-manager-ellipsislabs/153443");
+    expect(jobs[0]!.url).toBe("https://web3.career/office-manager-ellipsislabs/153443");
+    expect(jobs[0]!.company).toBe("Ellipsis Labs");
+  });
+
+  /**
+   * Жива суперечність: web3.career ставить TELECOMMUTE геть усьому, разом із
+   * конкретною адресою в Нью-Йорку.
+   */
+  it("вірить конкретному місту, а не прапорцю TELECOMMUTE", () => {
+    const jobs = parseJobPostings(wrap(posting({
+      jobLocationType: "TELECOMMUTE",
+      jobLocation: { address: { addressLocality: "New York", addressRegion: "NY",
+                                addressCountry: "United States" } },
+    })), "board:x", null, "https://x/1");
+    expect(jobs[0]!.location).toBe("New York, NY, United States");
+    expect(jobs[0]!.remote).toBe(false);
+  });
+
+  it("без міста прапорець лишається єдиним свідченням", () => {
+    expect(parseJobPostings(wrap(posting({ jobLocationType: "TELECOMMUTE" })),
+      "board:x", null, "https://x/1")[0]!.remote).toBe(true);
+  });
+
+  it("один зіпсований блок не валить решту сторінки", () => {
+    const html = `<script type="application/ld+json">{зіпсовано,}</script>` + wrap(posting());
+    expect(parseJobPostings(html, "board:x", null, "https://x/1")).toHaveLength(1);
+  });
+
+  it("вакансію без адреси взагалі не бере — людину нікуди вести", () => {
+    expect(parseJobPostings(wrap(posting()), "board:x", null)).toHaveLength(0);
+  });
+});
+
+describe("jobLinks", () => {
+  it("бере лише свій домен і числовий хвіст", () => {
+    const html = `
+      <a href="/office-manager-ellipsislabs/153443">a</a>
+      <a href="/about">про нас</a>
+      <a href="/pricing">ціни</a>
+      <a href="https://twitter.com/other-board/12345">чужий</a>`;
+    expect(jobLinks(html, "https://web3.career/")).toEqual(
+      ["https://web3.career/office-manager-ellipsislabs/153443"]);
   });
 });

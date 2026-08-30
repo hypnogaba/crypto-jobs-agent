@@ -33,6 +33,16 @@ export class Repo {
     }));
   }
 
+  /**
+   * Колекції Getro. Теж рядки, з тієї ж причини: борд екосистеми фонду
+   * додається з адмінки посиланням, а не правкою масиву в scan.ts.
+   */
+  async listGetroCollections(): Promise<number[]> {
+    const rows = await this.d1.query<{ collection_id: number }>(
+      "SELECT collection_id FROM getro_collections WHERE enabled=1 ORDER BY collection_id");
+    return rows.map((r) => r.collection_id);
+  }
+
   // ── вакансії ───────────────────────────────────────────────
   async upsertJobs(jobs: NormalizedJob[]): Promise<void> {
     if (jobs.length === 0) return;

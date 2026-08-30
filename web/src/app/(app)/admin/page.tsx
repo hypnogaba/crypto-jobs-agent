@@ -39,7 +39,7 @@ const FAMILIES = [
   { key: "ats", label: "компанії на ATS", note: "прямо з дошки роботодавця — найточніше, що є" },
   { key: "aggregator", label: "агрегатори", note: "єдине джерело компаній, яких ми ще не знаємо" },
   { key: "board", label: "національні дошки", note: "вакансія, якої більше ніде немає" },
-  { key: "getro", label: "колекції Getro", note: "списки портфельних компаній фондів" },
+  { key: "getro", label: "колекції Getro", note: "борди екосистем фондів — і найбільше нових компаній" },
 ] as const;
 
 /** Чим скінчилась спроба додати посилання. */
@@ -350,8 +350,17 @@ export default async function Admin() {
      GROUP BY j.source ORDER BY jobs DESC`);
 
   const intake = await all<{ id: string; url: string; at: string; verdict: string;
-    kind: string | null; target: string | null; note: string | null; found: number }>(
+    kind: string | null; target: string | null; note: string | null; found: number;
+    fix: string | null }>(
     "SELECT * FROM source_intake ORDER BY at DESC LIMIT 12");
+
+  // Колекції Getro — борди екосистем фондів. Головний постачальник компаній,
+  // яких ми ще не знаємо, і досі його не було видно в панелі взагалі.
+  const getro = await all<{ collection_id: number; label: string; url: string | null;
+    enabled: number; jobs: number }>(
+    `SELECT g.collection_id, g.label, g.url, g.enabled,
+            (SELECT COUNT(*) FROM jobs_cache j WHERE j.source = 'getro:' || g.collection_id) jobs
+       FROM getro_collections g ORDER BY jobs DESC, g.collection_id`);
 
   // Кнопку «підтягнути ніки» показуємо лише тоді, коли є кого підтягувати.
   const nameless = (await one<{ n: number }>(
@@ -856,24 +865,71 @@ export default async function Admin() {
               </div>
             </form>
 
+            {getro.length > 0 && (
+              <details className="card mt-3 px-6 py-5">
+                <summary className="flex cursor-pointer flex-wrap items-baseline justify-between gap-3">
+                  <span className="font-medium">Колекції Getro · {getro.length}</span>
+                  <span className="mono text-xs" style={{ color: "var(--ember)" }}>показати</span>
+                </summary>
+                <p className="mt-2 max-w-prose text-sm" style={{ color: "var(--ink-2)" }}>
+                  Борди екосистем фондів: jobs.solana.com, jobs.avax.network і подібні. Це
+                  головне джерело компаній, яких ми ще не знаємо — 80% посилань там ведуть
+                  просто в ATS роботодавця. Новий борд додається сюди звичайним посиланням.
+                </p>
+                <div className="mt-3 overflow-x-auto">
+                  <table className="board">
+                    <thead>
+                      <tr><th>колекція</th><th>№</th><th className="num">вакансій у кеші</th></tr>
+                    </thead>
+                    <tbody>
+                      {getro.map((x) => (
+                        <tr key={x.collection_id} className="stripe"
+                            style={{ "--c": x.jobs > 0 ? "var(--ok)" : "var(--warn)" } as React.CSSProperties}>
+                          <td className="text-xs">
+                            {x.url
+                              ? <a href={x.url} target="_blank" rel="noreferrer"
+                                   className="hover:underline" style={{ color: "var(--ember)" }}>{x.label}</a>
+                              : x.label}
+                          </td>
+                          <td className="mono text-xs" style={{ color: "var(--muted)" }}>{x.collection_id}</td>
+                          <td className="num text-xs">{x.jobs || "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            )}
+
             {intake.length > 0 && (
               <div className="ruled card mt-3">
                 {intake.map((x) => {
                   const v = VERDICT[x.verdict] ?? { tag: "tag-flat", text: x.verdict };
                   return (
-                    <div key={x.id} className="flex flex-wrap items-baseline gap-x-4 gap-y-1 px-6 py-3">
-                      <span className="mono text-xs" style={{ color: "var(--muted)" }}>
-                        {x.at.slice(5, 16).replace("T", " ")}
-                      </span>
-                      <span className={`tag ${v.tag}`}>{v.text}</span>
-                      <span className="mono min-w-0 flex-1 truncate text-xs" title={x.url}>{x.url}</span>
-                      <span className="text-xs" style={{ color: "var(--ink-2)" }}>{x.note}</span>
-                      <form action={forgetIntake}>
-                        <input type="hidden" name="id" value={x.id} />
-                        <button className="mono text-xs hover:underline" style={{ color: "var(--ember)" }}>
-                          прибрати
-                        </button>
-                      </form>
+                    <div key={x.id} className="px-6 py-4">
+                      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+                        <span className="mono text-xs" style={{ color: "var(--muted)" }}>
+                          {x.at.slice(5, 16).replace("T", " ")}
+                        </span>
+                        <span className={`tag ${v.tag}`}>{v.text}</span>
+                        <span className="mono min-w-0 flex-1 truncate text-xs" title={x.url}>{x.url}</span>
+                        <form action={forgetIntake}>
+                          <button className="mono text-xs hover:underline" style={{ color: "var(--ember)" }}>
+                            прибрати
+                          </button>
+                          <input type="hidden" name="id" value={x.id} />
+                        </form>
+                      </div>
+                      {x.note && (
+                        <p className="mt-1 text-sm" style={{ color: "var(--ink-2)" }}>{x.note}</p>
+                      )}
+                      {/* Причина без наступного кроку — це та сама відмова,
+                          лише довшими словами. */}
+                      {x.fix && (
+                        <p className="mt-1 text-sm" style={{ color: "var(--ink)" }}>
+                          <span className="eyebrow mr-2">що робити</span>{x.fix}
+                        </p>
+                      )}
                     </div>
                   );
                 })}
