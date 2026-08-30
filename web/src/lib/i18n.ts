@@ -166,6 +166,7 @@ const en: Dict = {
   "onboarding.title": "Check what we understood",
   "onboarding.lede": "We filled this in from what you wrote. Fix anything that is off.",
   "onboarding.spheres": "Which fields?",
+  "onboarding.spheresNeeded": "At least one — or write your own role below.",
   "onboarding.industries": "Industries you care about (optional)",
   "onboarding.seniority": "Your level",
   "onboarding.remote": "Where do you want to work?",
@@ -180,6 +181,9 @@ const en: Dict = {
   "onboarding.fromCvPlaceholder": "8 years in BD, Solana ecosystem, EN/FR/UA\u2026",
   "onboarding.remoteHint": "Pick as many as fit.",
   "err.city": "Name your city. The options you picked are about a place, so we need one.",
+  "warn.noTelegramTitle": "Telegram not connected",
+  "warn.noTelegram": "Until you connect Telegram, this account exists only in this browser. There is no other way to sign in — another device, cleared cookies, or thirty days, and the profile is out of reach. Connecting also turns on the morning delivery.",
+  "err.sphere": "Pick at least one field — or write your role in your own words. Without it we have nothing to search by.",
   "onboarding.salary": "Salary from (optional)",
   "onboarding.salaryHint": "A soft preference, not a hard filter. Most postings publish no range.",
   "onboarding.save": "Looks right",
@@ -405,6 +409,7 @@ const uk: Dict = {
   "onboarding.title": "Перевір, що ми зрозуміли",
   "onboarding.lede": "Ми заповнили це з того, що ти написав. Виправ те, що не так.",
   "onboarding.spheres": "У яких сферах?",
+  "onboarding.spheresNeeded": "Хоча б одна — або напиши свою роль нижче.",
   "onboarding.industries": "Індустрії, які цікавлять (необов'язково)",
   "onboarding.seniority": "Твій рівень",
   "onboarding.remote": "Де хочеш працювати?",
@@ -419,6 +424,9 @@ const uk: Dict = {
   "onboarding.fromCvPlaceholder": "8 років у BD, екосистема Solana, EN/FR/UA\u2026",
   "onboarding.remoteHint": "Можна обрати кілька.",
   "err.city": "Назви місто. Вибрані варіанти прив'язані до місця, тож без нього не обійтись.",
+  "warn.noTelegramTitle": "Telegram не підключено",
+  "warn.noTelegram": "Поки Telegram не підключено, цей акаунт існує лише в цьому браузері. Іншого способу увійти немає — інший пристрій, очищені куки або тридцять днів, і профіль стане недосяжним. Підключення заодно вмикає ранкову доставку.",
+  "err.sphere": "Познач хоча б одну сферу — або напиши свою роль словами. Без цього нема за чим шукати.",
   "onboarding.salary": "Зарплата від (необов'язково)",
   "onboarding.salaryHint": "М'який пріоритет, не жорсткий фільтр. Більшість вакансій вилку не вказує.",
   "onboarding.save": "Усе вірно",
@@ -644,6 +652,7 @@ const fr: Dict = {
   "onboarding.title": "Vérifiez ce que nous avons compris",
   "onboarding.lede": "Nous avons prérempli à partir de votre texte. Corrigez ce qui ne va pas.",
   "onboarding.spheres": "Dans quels domaines ?",
+  "onboarding.spheresNeeded": "Au moins un — ou écrivez votre poste ci-dessous.",
   "onboarding.industries": "Secteurs qui vous intéressent (facultatif)",
   "onboarding.seniority": "Votre niveau",
   "onboarding.remote": "Où voulez-vous travailler ?",
@@ -658,6 +667,9 @@ const fr: Dict = {
   "onboarding.fromCvPlaceholder": "8 ans en BD, écosystème Solana, EN/FR/UA\u2026",
   "onboarding.remoteHint": "Plusieurs choix possibles.",
   "err.city": "Indiquez votre ville. Les options choisies dépendent d'un lieu.",
+  "warn.noTelegramTitle": "Telegram non connecté",
+  "warn.noTelegram": "Tant que Telegram n'est pas connecté, ce compte n'existe que dans ce navigateur. Il n'y a aucun autre moyen de se connecter — un autre appareil, des cookies effacés ou trente jours, et le profil devient inaccessible. La connexion active aussi la livraison du matin.",
+  "err.sphere": "Choisissez au moins un domaine — ou écrivez votre poste avec vos mots. Sans cela, nous n'avons rien pour chercher.",
   "onboarding.salary": "Salaire à partir de (facultatif)",
   "onboarding.salaryHint": "Une préférence, pas un filtre strict. La plupart des offres ne publient pas de fourchette.",
   "onboarding.save": "C'est correct",
@@ -883,6 +895,7 @@ const ru: Dict = {
   "onboarding.title": "Проверь, что мы поняли",
   "onboarding.lede": "Мы заполнили это из твоего текста. Поправь то, что не так.",
   "onboarding.spheres": "В каких сферах?",
+  "onboarding.spheresNeeded": "Хотя бы одна — или напиши свою роль ниже.",
   "onboarding.industries": "Интересные индустрии (необязательно)",
   "onboarding.seniority": "Твой уровень",
   "onboarding.remote": "Где хочешь работать?",
@@ -897,6 +910,9 @@ const ru: Dict = {
   "onboarding.fromCvPlaceholder": "8 лет в BD, экосистема Solana, EN/FR/UA\u2026",
   "onboarding.remoteHint": "Можно выбрать несколько.",
   "err.city": "Назови город. Выбранные варианты привязаны к месту.",
+  "warn.noTelegramTitle": "Telegram не подключён",
+  "warn.noTelegram": "Пока Telegram не подключён, этот аккаунт существует только в этом браузере. Другого способа войти нет — другое устройство, очищенные куки или тридцать дней, и профиль станет недоступен. Подключение заодно включает утреннюю доставку.",
+  "err.sphere": "Отметь хотя бы одну сферу — или напиши свою роль словами. Без этого не по чему искать.",
   "onboarding.salary": "Зарплата от (необязательно)",
   "onboarding.salaryHint": "Мягкий приоритет, не жёсткий фильтр. Большинство вакансий вилку не указывает.",
   "onboarding.save": "Всё верно",
@@ -965,6 +981,15 @@ const ru: Dict = {
 };
 
 const DICTS: Record<Locale, Dict> = { en, uk, fr, ru };
+
+/**
+ * Словники як дані — щоб тест міг звірити їх між собою.
+ *
+ * `t()` мовчки падає на англійську, коли ключа немає: це правильно в проді
+ * (людина побачить англійський рядок, а не «err.sphere»), але через це
+ * забутий переклад ніде не проявляється. Звірку робить i18n.test.ts.
+ */
+export const DICTIONARIES: Readonly<Record<Locale, Readonly<Dict>>> = DICTS;
 
 /**
  * `id` — код мови (ISO 639-1), яким живе вся система: кука, стовпець

@@ -155,6 +155,13 @@ export default async function HomeBody({
             {/* Єдина дія на сторінці — написати одне речення. Тому це рядок,
                 а не анкета: скріпка і стрілка всередині, решта нижче й тихо. */}
             <form action={startOnboarding} className="rise rise-4 mt-10 max-w-2xl">
+              {/* Мова цієї сторінки їде з формою далі.
+                  Публічні сторінки знають свою мову з адреси (/uk, /fr), а
+                  анкета й кабінет читають її з куки — якої тут ніхто не
+                  ставив. Через це людина з /uk писала українською й з кроку 2
+                  бачила англійську, а в базі їй лишалось locale='en', тобто й
+                  добірки в Telegram приходили англійською. */}
+              <input type="hidden" name="locale" value={locale} />
               <div className="composer">
                 <label htmlFor="input" className="sr-only">{t(locale, "home.field")}</label>
                 <textarea

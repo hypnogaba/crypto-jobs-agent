@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import Shell from "@/app/shell";
+import NoTelegramNote from "../no-telegram-note";
 import { deleteAccount, detectLocale, saveSettings, togglePause } from "@/app/actions";
 import { currentUser } from "@/lib/auth";
 import { one } from "@/lib/db";
@@ -36,6 +37,11 @@ export default async function Settings({ searchParams }: { searchParams: Promise
   return (
     <Shell locale={locale} title={t(locale, "settings.title")}>
       {saved && <p className="tag tag-ok mb-5 inline-block">{t(locale, "settings.saved")}</p>}
+
+      {/* Друге місце, де це видно: сюди людина заходить міняти годину
+          доставки — і саме тут має дізнатись, що доставки поки не буде
+          взагалі, бо каналу немає. */}
+      {!user.telegramChatId && <NoTelegramNote locale={locale} />}
 
       <form action={saveSettings}>
         <div className="ruled card">

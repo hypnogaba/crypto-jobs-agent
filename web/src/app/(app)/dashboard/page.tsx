@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import Shell from "@/app/shell";
 import ApplyButton from "./apply-button";
+import NoTelegramNote from "../no-telegram-note";
 import { detectLocale, hideMatch, listMatches, recordFeedback, requestFirstFive, undoApplied, unhideMatch } from "@/app/actions";
 import { currentUser } from "@/lib/auth";
 import { one } from "@/lib/db";
@@ -59,6 +60,11 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   return (
     <Shell locale={locale} title={t(locale, "dash.title")} width="roomy">
       {queued && <p className="tag tag-ok mb-6 inline-block">{t(locale, "dash.queued")}</p>}
+
+      {/* Стоїть над списком, а не лише в порожньому стані: людина з добіркою
+          на екрані впевнена, що все гаразд, — а насправді її акаунт тримає
+          сама лише кука цього браузера. */}
+      {!user.telegramChatId && <NoTelegramNote locale={locale} />}
 
       {matches.length === 0 ? (
         <FirstRun locale={locale} hour={me?.delivery_hour ?? 9} tz={me?.timezone ?? "UTC"}

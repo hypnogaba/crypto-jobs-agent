@@ -36,7 +36,12 @@ const INDUSTRY_RULES: Array<[string, RegExp]> = [
 ];
 
 const SENIORITY_RULES: Array<[string, RegExp]> = [
-  ["lead",   /\b(head of|director|vp |vice president|chief|principal|staff|lead)\b/i],
+  // «vp » з пробілом усередині групи, обрамленої \b...\b, не працює: пробіл
+  // не є символом слова, тож межа після нього не збігається ніде, крім
+  // «vp  x». Через це «VP, Growth Marketing» лишався БЕЗ тегу рівня — і
+  // потрапляв до junior-а без жодного штрафу. Таких свіжих рядків 55.
+  // Тепер це \bvp\b, який ловить і «VP,», і «VP:», і «VP» в кінці назви.
+  ["lead",   /\b(head of|director|[sve]?vp|vice president|chief|principal|staff|lead)\b/i],
   ["senior", /\b(senior|sr\.?|expert)\b/i],
   ["junior", /\b(junior|jr\.?|intern|graduate|entry[- ]level|working student|trainee)\b/i],
 ];

@@ -12,6 +12,7 @@ import { safeTimezone } from "@/lib/digest-time";
 import { FEEDBACK_LIMITS, ONBOARD_LIMITS, checkRate, recordFailure } from "@/lib/ratelimit";
 import { INDUSTRIES, SENIORITY, SPHERES, needsCity, parseModes, serializeModes, type Locale } from "@/lib/vocab";
 import { persistCountry } from "@/lib/profile-country";
+import { pathFor } from "@/lib/seo";
 import { sendText } from "@/lib/telegram-send";
 
 const DRAFT_COOKIE = "nr_draft";
@@ -40,12 +41,19 @@ const allowed = (values: string[], vocab: ReadonlyArray<{ id: string }>): string
 async function guardOnboarding(): Promise<void> {
   const ip = (await headers()).get("cf-connecting-ip") ?? "unknown";
   const key = `onboard:${ip}`;
-  if (!(await checkRate(key)).allowed) redirect("/?error=tooMany");
+  if (!(await checkRate(key)).allowed) redirect(`${await homePath()}?error=tooMany`);
   await recordFailure(key, ONBOARD_LIMITS);
 }
 
 const env = async (): Promise<Record<string, string | undefined>> =>
   getCloudflareContext().env as unknown as Record<string, string | undefined>;
+
+/**
+ * Головна мовою людини. Кожен redirect з помилкою веде саме сюди: голе "/"
+ * викидало людину з /uk на англійську сторінку — і вона там ще й лишалась,
+ * бо мова живе в куці, а кука після цього казала «англійська».
+ */
+const homePath = async (): Promise<string> => pathFor(await detectLocale(), "/");
 
 export async function detectLocale(): Promise<Locale> {
   const jar = await cookies();
@@ -56,8 +64,34 @@ export async function detectLocale(): Promise<Locale> {
   return DEFAULT_LOCALE;
 }
 
+/**
+ * Запам'ятати мову сторінки, з якої людина щойно пішла в анкету.
+ *
+ * Публічні сторінки беруть мову з адреси (/uk, /fr), а `detectLocale` —
+ * з куки. Куку ж не ставив ніхто, крім перемикача в навігації. Через це
+ * людина, що прийшла на /uk і написала про себе українською, з кроку 2 і
+ * далі бачила англійську, а в базі їй записувалось locale='en' — тобто й
+ * добірки в Telegram приходили англійською назавжди. Те саме ставалось із
+ * заходом із пошуку на /fr чи /ru.
+ *
+ * Виграє мова СТОРІНКИ, а не стара кука: людина щойно читала саме її.
+ * Перемикач на публічних сторінках і так веде на адресу тієї ж мови, тож
+ * розбіжності між ними не буває.
+ */
+async function rememberLocale(formData: FormData): Promise<Locale> {
+  const fromPage = String(formData.get("locale") ?? "");
+  if (!isLocale(fromPage)) return detectLocale();
+  (await cookies()).set("nr_locale", fromPage, {
+    path: "/", maxAge: 31_536_000, sameSite: "lax",
+  });
+  return fromPage;
+}
+
 /** Крок 1: вільний текст або резюме. Розбір іде в куку-чернетку до реєстрації. */
 export async function startOnboarding(formData: FormData): Promise<void> {
+  // Мову ставимо ДО будь-якого redirect: і помилка розбору, і відмова за
+  // лімітом мають лишити людину вдома, а не викинути на англійську головну.
+  const home = pathFor(await rememberLocale(formData), "/");
   await guardOnboarding();
   let text = String(formData.get("input") ?? "").trim();
   // Резюме це чи тези — знає лише ця сторінка. Далі вгадувати нема за чим:
@@ -71,11 +105,11 @@ export async function startOnboarding(formData: FormData): Promise<void> {
     try {
       text = await extractCvText(file);
     } catch (e) {
-      redirect(`/?error=${e instanceof CvError ? e.message : "unreadable"}`);
+      redirect(`${home}?error=${e instanceof CvError ? e.message : "unreadable"}`);
     }
   }
 
-  if (text.length < 3) redirect("/?error=empty");
+  if (text.length < 3) redirect(`${home}?error=empty`);
 
   const { ANTHROPIC_API_KEY } = await env();
   const parsed = await parseProfile(text, ANTHROPIC_API_KEY ?? null);
@@ -195,13 +229,29 @@ export async function saveProfile(formData: FormData): Promise<void> {
   // до Telegram. Значення з форми обмежене двома варіантами, не адресою.
   const back = String(formData.get("back") ?? "") === "profile" ? "/profile?saved=1" : "/telegram";
 
+  // Куди повертати з помилкою. Той самий вибір, що й у `back`, лише без
+  // «збережено»: людина ще нічого не зберегла.
+  const wrong = (code: string): never =>
+    redirect(String(formData.get("back") ?? "") === "profile"
+      ? `/profile?error=${code}` : `/onboarding?error=${code}`);
+
+  /**
+   * Хоча б одна сфера — або своя назва ролі.
+   *
+   * Без цього підбір не має за чим шукати: сфера важить ±6 балів, і штраф
+   * за «жодного збігу» стоїть під умовою «людина щось назвала». Порожня
+   * анкета проходила мовчки, і людина отримувала п'ять випадкових
+   * віддалених вакансій — юриста, HR-партнера, дата-саєнтиста — з упевненим
+   * поясненням під кожною. Бот таке не пропускав із першого дня (canFinish
+   * у bot-onboarding.ts); сайт пропускав.
+   */
+  if (profile.spheres.length === 0 && !profile.customRole) wrong("sphere");
+
   // Місто — не прикраса: з нього виводиться країна, а з країни — національні
   // дошки вакансій. Хто обрав офіс у своєму місті чи переїзд, а міста не
   // назвав, лишався б з самою лише глобальною стрічкою й ніколи б не дізнався
   // чому. Форма це вимагає сама; тут — межа довіри, бо форму можна обійти.
-  if (needsCity(modes) && !profile.location) {
-    redirect(String(formData.get("back") ?? "") === "profile" ? "/profile?error=city" : "/onboarding?error=city");
-  }
+  if (needsCity(modes) && !profile.location) wrong("city");
 
   if (!user) {
     await guardOnboarding();

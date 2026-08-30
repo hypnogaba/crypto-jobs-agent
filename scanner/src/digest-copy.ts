@@ -89,6 +89,15 @@ const P = {
     fr: "Rien de nouveau pour votre profil pour l'instant. La prochaine sélection arrive demain matin.",
     ru: "Пока больше ничего нового под твой профиль. Следующая подборка — утром.",
   },
+  // Профіль без жодної сфери й без своєї ролі. Мовчати тут не можна: людина
+  // чекає добірку і не знає, що анкета лишилась порожньою. Раніше замість
+  // цього рядка їй приходили п'ять випадкових вакансій.
+  noProfileYet: {
+    en: "I cannot pick jobs yet: your profile has no field of work. Send /profile and tick at least one — or write the role in your own words.",
+    uk: "Поки не можу підібрати вакансії: у профілі не вказано жодної сфери. Надішли /profile і познач хоча б одну — або напиши свою роль словами.",
+    fr: "Je ne peux pas encore sélectionner d'offres : votre profil n'indique aucun domaine. Envoyez /profile et cochez-en au moins un — ou écrivez votre poste avec vos mots.",
+    ru: "Пока не могу подобрать вакансии: в профиле не указана ни одна сфера. Отправь /profile и отметь хотя бы одну — или напиши свою роль словами.",
+  },
 } satisfies Record<string, Phrase>;
 
 export const say = (locale: Locale, key: keyof typeof P): string =>
