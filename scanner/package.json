@@ -9,7 +9,8 @@
     "scan": "node dist/scan.js",
     "watchdog": "node dist/watchdog.js",
     "discover": "node dist/discover.js",
-    "retag": "node dist/retag.js"
+    "retag": "node dist/retag.js",
+    "replay": "node dist/replay.js"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",

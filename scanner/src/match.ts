@@ -92,9 +92,20 @@ export type MatchFact =
   | { k: "salary" }
   | { k: "fresh" };
 
+/**
+ * Розкладка бала: правило -> скільки воно дало.
+ *
+ * Потрібна не для краси. Поки бал був одним числом, ніхто не міг сказати,
+ * чому вакансія з Іллінойсу стоїть вище за вакансію в потрібній індустрії, -
+ * і саме тому чотири вакансії в одній добірці мовчки стояли в нічию по 13
+ * балів, а порядок між ними вирішувала дата публікації.
+ */
+export interface ScorePart { k: string; v: number }
+
 export interface ScoredJob extends CandidateJob {
   score: number;
   facts: MatchFact[];
+  parts: ScorePart[];
 }
 
 const SENIORITY_ORDER = ["junior", "middle", "senior", "lead"];
@@ -167,86 +178,89 @@ export function customIndustryBonus(
 export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): ScoredJob {
   let score = 0;
   const facts: MatchFact[] = [];
+  const parts: ScorePart[] = [];
   const tags = new Set(job.tags);
+  /** Єдиний шлях змінити бал: інакше розкладка розійдеться з сумою. */
+  const add = (k: string, v: number): void => { if (v !== 0) { score += v; parts.push({ k, v }); } };
 
   // Сфера — головне. Індустрія лише підсилює збіг, але не замінює його:
   // маркетолог у потрібній індустрії це не те, що просила людина зі сфери
   // «партнерства». Тому робота без жодного збігу за сферою сильно штрафується
   // і спливає тільки тоді, коли нічого кращого немає.
   const sphereHits = p.spheres.filter((s) => tags.has(s));
-  score += sphereHits.length * 6;
+  add("sphere", sphereHits.length * 6);
   for (const s of sphereHits) facts.push({ k: "sphere", v: s });
 
   // Своя назва ролі шукається в НАЗВІ вакансії, бо тегів під неї не існує.
   // Це і є те, що робить кнопку «мій варіант» справжньою, а не декоративною.
   const roleHit = matchesCustomRole(job.title, p.customRole);
-  if (roleHit) { score += 6; facts.push({ k: "role", v: p.customRole! }); }
+  if (roleHit) { add("role", 6); facts.push({ k: "role", v: p.customRole! }); }
 
   // Штраф лише тоді, коли людина щось назвала й нічого не збіглося.
-  if (!sphereHits.length && !roleHit && (p.spheres.length > 0 || p.customRole)) score -= 8;
+  if (!sphereHits.length && !roleHit && (p.spheres.length > 0 || p.customRole)) add("offTopic", -8);
 
-  score += wishBonus(job, p.wishes);
+  add("wishes", wishBonus(job, p.wishes));
 
   const industryHits = p.industries.filter((i) => tags.has(i));
-  score += industryHits.length * 2;
+  add("industry", industryHits.length * 2);
   for (const i of industryHits) facts.push({ k: "industry", v: i });
 
   // Своя індустрія працює поруч із галочками, а не замість них.
   const ownIndustry = customIndustryBonus(job, p.customIndustry);
-  if (ownIndustry > 0) { score += ownIndustry; facts.push({ k: "industry", v: p.customIndustry! }); }
+  if (ownIndustry > 0) { add("ownIndustry", ownIndustry); facts.push({ k: "industry", v: p.customIndustry! }); }
 
   // Рівень: збіг тягне вгору, розрив у два щаблі — сильно вниз
   const w = p.tuning ?? { seniority: 1, location: 1, salary: 1 };
 
   if (p.seniority) {
     const jobLevel = SENIORITY_ORDER.find((l) => tags.has(l));
-    if (jobLevel === p.seniority) { score += 3; facts.push({ k: "level" }); }
+    if (jobLevel === p.seniority) { add("level", 3); facts.push({ k: "level" }); }
     else if (jobLevel) {
       const gap = Math.abs(SENIORITY_ORDER.indexOf(jobLevel) - SENIORITY_ORDER.indexOf(p.seniority));
-      score -= gap * 2 * w.seniority;
+      add("levelGap", -gap * 2 * w.seniority);
     }
   } else if (matchesCustomRole(job.title, p.customSeniority)) {
     // Свій рівень стоїть ЗАМІСТЬ щабля, а не поруч: «head of BD» — не lead
     // і не senior, і чотири кнопки про таку людину не кажуть нічого. Слова
     // шукаються в назві вакансії, як і своя роль, але важать менше: рівень
     // уточнює збіг, а не створює його.
-    score += 3;
+    add("level", 3);
     facts.push({ k: "level" });
   }
 
   if (remoteOnly(p.remoteMode)) {
-    if (job.remote) { score += 3; facts.push({ k: "remote" }); }
-    else score -= 6;                       // майже завжди відсікає onsite
+    if (job.remote) { add("remote", 3); facts.push({ k: "remote" }); }
+    else add("onsite", -6);                       // майже завжди відсікає onsite
   } else if (job.remote) {
-    score += 1;
+    add("remote", 1);
   }
 
   if (p.location) {
     const hit = job.location?.toLowerCase().includes(p.location.toLowerCase()) ?? false;
-    if (hit) { score += 3; facts.push({ k: "place", v: p.location }); }
+    if (hit) { add("place", 3); facts.push({ k: "place", v: p.location }); }
     // Скарга на локацію робить невідповідність дорогою. Без скарг вага 1,
     // і поведінка така сама, як була: просто немає бонусу.
-    else if (w.location > 1) score -= 3 * (w.location - 1);
+    else if (w.location > 1) add("placeMiss", -3 * (w.location - 1));
   }
 
   // Зарплата — м'який пріоритет: вакансія без вилки НЕ карається
   if (p.salaryMin && job.salaryMin) {
-    if (job.salaryMin >= p.salaryMin) { score += 2; facts.push({ k: "salary" }); }
-    else score -= 2 * w.salary;
+    if (job.salaryMin >= p.salaryMin) { add("salary", 2); facts.push({ k: "salary" }); }
+    else add("salaryLow", -2 * w.salary);
   }
 
   if (job.postedAt) {
     const days = (now.getTime() - new Date(job.postedAt).getTime()) / 86_400_000;
-    if (days <= 3) { score += 2; facts.push({ k: "fresh" }); }
-    else if (days <= 7) score += 1;
+    if (days <= 3) { add("fresh", 2); facts.push({ k: "fresh" }); }
+    else if (days <= 7) add("fresh", 1);
   }
 
   // Дошка програє прямому посиланню на роботодавця — але лише в нічию.
   // Одиниця на шкалі, де сфера коштує шість: сильний збіг на DOU не має
   // поступатися посередньому на Greenhouse тільки через домен.
-  if (job.source?.startsWith("board:")) score -= 1;
+  if (job.source?.startsWith("board:")) add("board", -1);
 
-  return { ...job, score, facts };
+  return { ...job, score, facts, parts };
 }
 
 /**

@@ -565,6 +565,111 @@ export function onTopicSql(p: Pick<Profile, "spheres" | "customRole">): {
   return { sql: `(CASE WHEN ${clauses.join(" OR ")} THEN 1 ELSE 0 END)`, params };
 }
 
+/** Рядок бази -> профіль для оцінювання. Спільний з прогоном (replay.ts). */
+export function profileOf(u: UserRow): Profile {
+  return {
+    userId: u.id, spheres: list(u.spheres), industries: list(u.industries),
+    customRole: u.custom_role,
+    customIndustry: u.custom_industry,
+    customSeniority: u.custom_seniority,
+    cvHighlights: u.cv_highlights,
+    wishes: u.wishes,
+    // Вивчене зі скарг. Немає рядка — усі ваги одиничні, поведінка як була.
+    tuning: {
+      seniority: u.seniority_weight ?? 1,
+      location: u.location_weight ?? 1,
+      salary: u.salary_weight ?? 1,
+    },
+    seniority: u.seniority, remoteMode: u.remote_mode, location: u.location, salaryMin: u.salary_min,
+    country: u.country,
+  };
+}
+
+/** Стовпці профілю, які читає підбір. Один список на digest і replay. */
+export const PROFILE_COLUMNS =
+  `u.*, p.spheres,p.industries,p.seniority,p.remote_mode,p.location,p.salary_min,p.custom_role,p.country,
+        p.wishes,p.custom_industry,p.custom_seniority,p.cv_highlights,
+        t.seniority_weight,t.location_weight,t.salary_weight
+   FROM users u JOIN profiles p ON p.user_id = u.id
+   LEFT JOIN user_tuning t ON t.user_id = u.id`;
+
+/** Рядок вікна кандидатів. dedupe_key живе тільки тут: у CandidateJob його немає. */
+export interface CandidateRow {
+  id: string; company: string; company_key: string; title: string; location: string | null;
+  remote: number; url: string; tags: string; posted_at: string | null;
+  salary_min: number | null; salary_max: number | null; salary_currency: string | null; dedupe_key: string | null;
+  summary: string | null;
+  source: string; country: string | null;
+}
+
+/** Скільки рядків заходить у вікно. Причини розміру — у коментарі нижче. */
+export const CANDIDATE_WINDOW = 1200;
+
+/**
+ * Шортліст: свіже, ще не надіслане цій людині.
+ *
+ * Винесено з deliverTo, щоб прогін (replay.ts) брав рівно ті самі рядки, що й
+ * доставка. Інакше будь-яке «стало краще» вимірювалось би на іншому вікні.
+ */
+export async function fetchCandidateRows(
+  d1: D1Client, profile: Profile, userId: string, limit = CANDIDATE_WINDOW,
+): Promise<CandidateRow[]> {
+  const topic = onTopicSql(profile);
+  return d1.query<CandidateRow>(
+    // Вікно кандидатів. Чотири правила, кожне з реального прогону:
+    //
+    // 1. Сортуємо за posted_at, а не fetched_at. Скан пише тисячі рядків за
+    //    одну хвилину, тож fetched_at у них однаковий — «найсвіжіші 600» це
+    //    не свіжість, а довільний зріз.
+    // 2. Не більше трьох вакансій на компанію. Без цього одна фірма з великою
+    //    дошкою забирає все вікно: lever:jobgether дав 582 рядки з 600, і
+    //    правило «одна роль на компанію» лишало від добірки одну вакансію.
+    // 3. Не слати те саме за ЗМІСТОМ, а не лише за рядком у базі. Компанія,
+    //    що перевиставила вакансію під новим URL, створює новий id — і людина
+    //    отримувала б її вдруге. Таких груп у кеші 398.
+    // 4. Тільки те, що ми бачили на дошці нещодавно. Кеш нічого не видаляє
+    //    (це зламало б каскад sent.job_id і дозволило б повторно надіслати
+    //    вакансію), тому мертві просто не потрапляють у вікно. Три доби —
+    //    запас на випадок, якщо скан упав на день.
+    // 5. Чужу країну відсікаємо ТУТ, а не після відбору. Національні дошки
+    //    дають близько шестисот свіжих вакансій на день; відсортовані за
+    //    posted_at, вони заповнили б вікно з 1200 і випали б аж на підборі,
+    //    лишивши людину з іншої країни майже без кандидатів. Це та сама
+    //    пастка, що колись із lever:jobgether, тільки з іншого боку.
+    // 6. СПЕРШУ те, що про цю людину, і лише потім найсвіжіше. Без цього
+    //    вікно було зрізом «останні 1200 за датою» з 5032 придатних — тобто
+    //    76% кеша не доходило навіть до оцінювання, і зникали саме вузькі
+    //    сфери: devrel 6 рядків у пулі → 0 у вікні, design 96 → 18,
+    //    web3 180 → 35, junior 142 → 39. Людина, що обрала «DevRel і
+    //    спільнота», не могла отримати жодної DevRel-вакансії в принципі.
+    //    Тепер свої рядки заходять у вікно всі, а рештою місць його добиває
+    //    та сама свіжість, що й раніше.
+    `SELECT * FROM (
+       SELECT j.*, ROW_NUMBER() OVER (
+         PARTITION BY j.company_key ORDER BY j.posted_at DESC, j.fetched_at DESC
+       ) AS rn,
+       ${topic.sql} AS on_topic
+       FROM jobs_cache j
+       WHERE j.id NOT IN (SELECT job_id FROM sent WHERE user_id = ?)
+         AND j.dedupe_key NOT IN (
+           SELECT dedupe_key FROM sent WHERE user_id = ? AND dedupe_key IS NOT NULL)
+         AND j.fetched_at >= datetime('now', '-3 day')
+         AND (j.country IS NULL OR j.country = ?)
+     )
+     WHERE rn <= 3
+     ORDER BY on_topic DESC, posted_at DESC, fetched_at DESC
+     LIMIT ${limit}`, [...topic.params, userId, userId, profile.country ?? null]);
+}
+
+/** Рядок бази → кандидат для оцінювання. */
+export const toCandidates = (rows: CandidateRow[]): CandidateJob[] => rows.map((r) => ({
+  id: r.id, company: r.company, companyKey: r.company_key, title: r.title,
+  location: r.location, remote: r.remote === 1, url: r.url, tags: list(r.tags),
+  postedAt: r.posted_at, salaryMin: r.salary_min, salaryMax: r.salary_max, salaryCurrency: r.salary_currency,
+  summary: r.summary,
+  source: r.source, country: r.country,
+}));
+
 export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
   const { d1, cfg, now, botToken, force } = ctx;
   const onRequest = ctx.requested.has(u.id);
@@ -739,88 +844,16 @@ export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
     console.log(`  ${u.id.slice(0, 8)}: відкладена добірка ${pending[0]!.digest_id.slice(0, 8)} не доставлена за ${PENDING_MAX_DAYS} дні, позначено failed`);
   }
 
-  const profile: Profile = {
-    userId: u.id, spheres: list(u.spheres), industries: list(u.industries),
-    customRole: u.custom_role,
-    customIndustry: u.custom_industry,
-    customSeniority: u.custom_seniority,
-    cvHighlights: u.cv_highlights,
-    wishes: u.wishes,
-    // Вивчене зі скарг. Немає рядка — усі ваги одиничні, поведінка як була.
-    tuning: {
-      seniority: u.seniority_weight ?? 1,
-      location: u.location_weight ?? 1,
-      salary: u.salary_weight ?? 1,
-    },
-    seniority: u.seniority, remoteMode: u.remote_mode, location: u.location, salaryMin: u.salary_min,
-    country: u.country,
-  };
+  const profile = profileOf(u);
 
-  // Що з цього вікна взагалі про цю людину. Див. onTopicSql нижче.
-  const topic = onTopicSql(profile);
-
-  // Шортліст: свіже, ще не надіслане цій людині
-  const rows = await d1.query<{
-    id: string; company: string; company_key: string; title: string; location: string | null;
-    remote: number; url: string; tags: string; posted_at: string | null;
-    salary_min: number | null; salary_max: number | null; salary_currency: string | null; dedupe_key: string | null;
-    summary: string | null;
-    source: string; country: string | null;
-  }>(
-    // Вікно кандидатів. Чотири правила, кожне з реального прогону:
-    //
-    // 1. Сортуємо за posted_at, а не fetched_at. Скан пише тисячі рядків за
-    //    одну хвилину, тож fetched_at у них однаковий — «найсвіжіші 600» це
-    //    не свіжість, а довільний зріз.
-    // 2. Не більше трьох вакансій на компанію. Без цього одна фірма з великою
-    //    дошкою забирає все вікно: lever:jobgether дав 582 рядки з 600, і
-    //    правило «одна роль на компанію» лишало від добірки одну вакансію.
-    // 3. Не слати те саме за ЗМІСТОМ, а не лише за рядком у базі. Компанія,
-    //    що перевиставила вакансію під новим URL, створює новий id — і людина
-    //    отримувала б її вдруге. Таких груп у кеші 398.
-    // 4. Тільки те, що ми бачили на дошці нещодавно. Кеш нічого не видаляє
-    //    (це зламало б каскад sent.job_id і дозволило б повторно надіслати
-    //    вакансію), тому мертві просто не потрапляють у вікно. Три доби —
-    //    запас на випадок, якщо скан упав на день.
-    // 5. Чужу країну відсікаємо ТУТ, а не після відбору. Національні дошки
-    //    дають близько шестисот свіжих вакансій на день; відсортовані за
-    //    posted_at, вони заповнили б вікно з 1200 і випали б аж на підборі,
-    //    лишивши людину з іншої країни майже без кандидатів. Це та сама
-    //    пастка, що колись із lever:jobgether, тільки з іншого боку.
-    // 6. СПЕРШУ те, що про цю людину, і лише потім найсвіжіше. Без цього
-    //    вікно було зрізом «останні 1200 за датою» з 5032 придатних — тобто
-    //    76% кеша не доходило навіть до оцінювання, і зникали саме вузькі
-    //    сфери: devrel 6 рядків у пулі → 0 у вікні, design 96 → 18,
-    //    web3 180 → 35, junior 142 → 39. Людина, що обрала «DevRel і
-    //    спільнота», не могла отримати жодної DevRel-вакансії в принципі.
-    //    Тепер свої рядки заходять у вікно всі, а рештою місць його добиває
-    //    та сама свіжість, що й раніше.
-    `SELECT * FROM (
-       SELECT j.*, ROW_NUMBER() OVER (
-         PARTITION BY j.company_key ORDER BY j.posted_at DESC, j.fetched_at DESC
-       ) AS rn,
-       ${topic.sql} AS on_topic
-       FROM jobs_cache j
-       WHERE j.id NOT IN (SELECT job_id FROM sent WHERE user_id = ?)
-         AND j.dedupe_key NOT IN (
-           SELECT dedupe_key FROM sent WHERE user_id = ? AND dedupe_key IS NOT NULL)
-         AND j.fetched_at >= datetime('now', '-3 day')
-         AND (j.country IS NULL OR j.country = ?)
-     )
-     WHERE rn <= 3
-     ORDER BY on_topic DESC, posted_at DESC, fetched_at DESC
-     LIMIT 1200`, [...topic.params, u.id, u.id, u.country]);
+  // Вікно кандидатів. Спільне з прогоном (replay.ts): міряти треба рівно те,
+  // що доставляємо, інакше «було/стало» нічого не доводить.
+  const rows = await fetchCandidateRows(d1, profile, u.id);
 
   // Ключ змісту не входить у CandidateJob — тримаємо збоку до запису в sent.
   const dedupeById = new Map(rows.map((r) => [r.id, r.dedupe_key ?? null]));
 
-  const candidates: CandidateJob[] = rows.map((r) => ({
-    id: r.id, company: r.company, companyKey: r.company_key, title: r.title,
-    location: r.location, remote: r.remote === 1, url: r.url, tags: list(r.tags),
-    postedAt: r.posted_at, salaryMin: r.salary_min, salaryMax: r.salary_max, salaryCurrency: r.salary_currency,
-    summary: r.summary,
-    source: r.source, country: r.country,
-  }));
+  const candidates: CandidateJob[] = toCandidates(rows);
 
   // На запит — не більше, ніж лишилось до денної стелі.
   const top = pickTop(candidates, profile, Math.min(DIGEST_SIZE, allowance), now);
@@ -952,12 +985,7 @@ async function main(): Promise<void> {
     params.push(...requested);
   }
   const users = await d1.query<UserRow>(
-    `SELECT u.*, p.spheres,p.industries,p.seniority,p.remote_mode,p.location,p.salary_min,p.custom_role,p.country,
-            p.wishes,p.custom_industry,p.custom_seniority,p.cv_highlights,
-            t.seniority_weight,t.location_weight,t.salary_weight
-     FROM users u JOIN profiles p ON p.user_id = u.id
-     LEFT JOIN user_tuning t ON t.user_id = u.id
-     WHERE ${where.join(" AND ")}`, params);
+    `SELECT ${PROFILE_COLUMNS} WHERE ${where.join(" AND ")}`, params);
 
   const ctx: RunContext = { d1, cfg, now, botToken, force, requested, delivered: 0 };
   for (const u of users) {
