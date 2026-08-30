@@ -46,11 +46,35 @@ export function normalizeJob(job: RawJob, now = new Date()): NormalizedJob {
   };
 }
 
+/**
+ * Наскільки повний запис про вакансію.
+ *
+ * Потрібно рівно для дедуплікації: коли дві дошки описують ту саму пару
+ * «компанія + роль», лишитись має та, що знає більше. Досі вигравала та, що
+ * стояла раніше в пласкому списку, тобто порядок вирішував алфавіт назв дошок:
+ * web3.career віддавав 435 свіжих вакансій, а в кеш сідало 94, бо
+ * `board:global-jobstash` стоїть перед `board:global-web3career`. Втрати
+ * вакансій не було — людина побачила б ту саму, — але виграв довільніший
+ * запис, а не багатший: у web3.career зарплата є в 93% вакансій.
+ *
+ * Зарплата важить найбільше, бо саме за нею підбір відсіює найчастіше й саме
+ * її людина бачить у картці першою.
+ */
+function richness(j: RawJob): number {
+  return (j.salaryMin != null || j.salaryMax != null ? 4 : 0)
+       + (j.description?.trim() ? 2 : 0)
+       + (j.postedAt ? 1 : 0)
+       + (j.location?.trim() ? 1 : 0);
+}
+
 /** Усі центральні правила за один прохід: живий URL → свіжість → дедуп. */
 export function prepare(jobs: RawJob[], freshnessDays: number, now = new Date()): NormalizedJob[] {
   const seen = new Set<string>();
   const out: NormalizedJob[] = [];
-  for (const job of jobs) {
+  // Сортування стійке (Array.prototype.sort у V8), тож рівні за повнотою
+  // лишаються в тому порядку, у якому прийшли, — а не тасуються щопрогону.
+  const ordered = jobs.length > 1 ? [...jobs].sort((a, b) => richness(b) - richness(a)) : jobs;
+  for (const job of ordered) {
     if (!hasLiveUrl(job)) continue;
     if (!job.title?.trim() || !job.company?.trim()) continue;
     if (!isFresh(job.postedAt, freshnessDays, now)) continue;

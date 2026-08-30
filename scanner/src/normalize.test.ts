@@ -63,3 +63,37 @@ describe("prepare", () => {
     expect(job!.tags).not.toContain("senior");
   });
 });
+
+describe("дедуплікація за повнотою", () => {
+  const job = (source: string, extra: Partial<RawJob> = {}): RawJob => ({
+    url: `https://${source}/1`, company: "Ondo Finance", title: "Strategic Finance Lead",
+    location: null, remote: true, postedAt: "2026-08-29T00:00:00Z", source, ...extra,
+  });
+
+  /**
+   * Живий випадок: web3.career віддавав 435 свіжих вакансій, а в кеш сідало 94.
+   * Вигравала не багатша дошка, а та, що стоїть раніше за алфавітом
+   * (`board:global-jobstash` перед `board:global-web3career`).
+   */
+  it("лишає запис із зарплатою, а не той, що прийшов першим", () => {
+    const bare = job("board:global-jobstash");
+    const rich = job("board:global-web3career", { salaryMin: 135050, salaryMax: 300000 });
+    const kept = prepare([bare, rich], 14, new Date("2026-08-30T00:00:00Z"));
+    expect(kept).toHaveLength(1);
+    expect(kept[0]!.source).toBe("board:global-web3career");
+    expect(kept[0]!.salaryMin).toBe(135050);
+  });
+
+  it("за рівної повноти порядок надходження зберігається", () => {
+    const a = job("board:a");
+    const b = job("board:b");
+    expect(prepare([a, b], 14, new Date("2026-08-30T00:00:00Z"))[0]!.source).toBe("board:a");
+  });
+
+  it("опис важить менше за зарплату", () => {
+    const withText = job("board:text", { description: "Довгий опис ролі." });
+    const withPay = job("board:pay", { salaryMin: 90000 });
+    expect(prepare([withText, withPay], 14, new Date("2026-08-30T00:00:00Z"))[0]!.source)
+      .toBe("board:pay");
+  });
+});

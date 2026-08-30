@@ -541,6 +541,13 @@ body::before {
    «більшає чи ні» не потребує ні осей, ні легенди. Число дня показує
    рідний підказник браузера, тому JS тут не потрібен. */
 .spark { display: flex; align-items: flex-end; gap: 2px; height: 3rem; }
+/* Розгорнутий вигляд того самого графіка: у три сантиметри різниця між 900 і
+   950 не видно, а питання «як ми ростемо» саме про неї. */
+.spark-tall { height: 11rem; gap: 3px; }
+/* Трикутник підсумку прибираємо: підсумок тут — сам графік, і стрілка збоку
+   від нього виглядала б як окремий елемент керування. */
+details > summary.list-none::-webkit-details-marker { display: none; }
+details > summary.list-none { list-style: none; }
 .spark-bar {
   flex: 1; min-width: 2px;
   background: var(--ember); opacity: .75;

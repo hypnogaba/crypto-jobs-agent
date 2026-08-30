@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import Nav from "@/app/nav";
 import { detectLocale } from "@/app/actions";
 import { reviveSource, replyToFeedback, dismissFeedback, purgeNeverWorked, recheckSome, applyProposal, dismissProposal, applyAllProposals, addBoard, toggleBoard, toggleBoardGroup, addSources, forgetIntake, retryIntake, recountCountries, refreshTelegramNames } from "./actions";
@@ -56,7 +57,20 @@ const VERDICT: Record<string, { tag: string; text: string }> = {
   unknown:     { tag: "tag-bad",  text: "не розпізнано" },
 };
 
-const DAYS = 14;
+/**
+ * Вікно графіків зростання.
+ *
+ * Було сталою на два тижні. Продукт житиме роками, і питання «як ми ростемо»
+ * на двох тижнях відповіді не має — за пів року видно тенденцію, за два тижні
+ * лише шум. Вибір лишається в адресі, щоб його можна було зберегти.
+ */
+const RANGES = [
+  { id: "14", days: 14, label: "два тижні" },
+  { id: "30", days: 30, label: "місяць" },
+  { id: "90", days: 90, label: "квартал" },
+  { id: "365", days: 365, label: "рік" },
+] as const;
+const DEFAULT_DAYS = 14;
 /** Скільки змін показуємо в дні одразу; решта — під «ще N». */
 const KEY_CHANGES = 6;
 const num = (n: number) => n.toLocaleString("uk-UA");
@@ -202,6 +216,16 @@ function Spark({ points, label }: { points: Array<{ d: string; v: number }>; lab
   // не два тижні, а три дні.
   const base = points[0]?.v ?? 0;
   const delta = last - base;
+  const low = Math.min(...points.map((p) => p.v));
+  const bars = (tall: boolean) => (
+    <div className={tall ? "spark spark-tall" : "spark"}>
+      {points.map((p) => (
+        <div key={p.d} className="spark-bar" title={`${p.d} · ${num(p.v)}`}
+             style={{ height: `${Math.max(3, Math.round((p.v / peak) * 100))}%` }} />
+      ))}
+    </div>
+  );
+
   return (
     <div className="card px-5 py-4">
       <div className="flex items-baseline justify-between gap-3">
@@ -211,12 +235,21 @@ function Spark({ points, label }: { points: Array<{ d: string; v: number }>; lab
         </div>
       </div>
       <div className="eyebrow mt-2">{label}</div>
-      <div className="spark mt-3">
-        {points.map((p) => (
-          <div key={p.d} className="spark-bar" title={`${p.d} · ${num(p.v)}`}
-               style={{ height: `${Math.max(3, Math.round((p.v / peak) * 100))}%` }} />
-        ))}
-      </div>
+
+      {/* Стовпчики на три сантиметри показують напрямок, але не величину:
+          різниця між 900 і 950 у них не видно взагалі. Тому те саме
+          розгортається вище і з підписами — на місці, без окремої сторінки. */}
+      <details className="mt-3">
+        <summary className="list-none" style={{ cursor: "pointer" }}>{bars(false)}</summary>
+        <div className="mt-3">
+          {bars(true)}
+          <div className="mono mt-2 flex justify-between text-xs" style={{ color: "var(--muted)" }}>
+            <span>{points[0]?.d.slice(5) ?? ""}</span>
+            <span>найменше {num(Number.isFinite(low) ? low : 0)} · найбільше {num(peak)}</span>
+            <span>{points.at(-1)?.d.slice(5) ?? ""}</span>
+          </div>
+        </div>
+      </details>
     </div>
   );
 }
@@ -298,7 +331,11 @@ function SourceTable({ rows, total }: {
   );
 }
 
-export default async function Admin() {
+export default async function Admin({ searchParams }: {
+  searchParams: Promise<{ range?: string }>;
+}) {
+  const { range } = await searchParams;
+  const DAYS = RANGES.find((r) => r.id === range)?.days ?? DEFAULT_DAYS;
   const locale = await detectLocale();
   const user = await currentUser();
   if (!user) redirect("/login");
@@ -757,7 +794,20 @@ export default async function Admin() {
           </Block>
 
           <Block id="growth" title="Як ми ростемо"
-                 lede={`Останні ${DAYS} днів. Наведи на стовпчик — покаже день і число.`}>
+                 lede={`Останні ${DAYS} днів. Наведи на стовпчик — покаже день і число.`}
+                 right={
+                   <div className="flex flex-wrap items-center gap-3">
+                     {RANGES.map((r) => (
+                       <Link key={r.id}
+                             href={r.days === DEFAULT_DAYS ? "/admin#growth" : `/admin?range=${r.id}#growth`}
+                             className="mono text-xs"
+                             style={{ color: r.days === DAYS ? "var(--ember)" : "var(--muted)",
+                                      textDecoration: r.days === DAYS ? "underline" : "none" }}>
+                         {r.label}
+                       </Link>
+                     ))}
+                   </div>
+                 }>
             <div className="grid gap-3 sm:grid-cols-3">
               <Spark points={growth.jobs} label="вакансій у кеші" />
               <Spark points={growth.companies} label="компаній у скані" />
