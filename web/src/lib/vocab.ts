@@ -16,15 +16,30 @@ export const SPHERES = [
   { id: "qa",            en: "QA & Testing",          uk: "QA і тестування",        fr: "QA et tests",         ru: "QA и тестирование" },
 ] as const;
 
+/**
+ * Індустрії — за розміром у кеші, а не за нашим уявленням про важливість.
+ *
+ * Порядок тут не косметика: людина читає перші три уважно, решту гортає. На
+ * 30 серпня 2026 в кеші 6 977 вакансій з AI, 4 513 з фінтеху і лише 893 з
+ * web3 — тобто крипта, з якої продукт починався, це 3% того, що ми маємо.
+ * Тримати її першою означало б обіцяти те, чого найменше.
+ *
+ * Жодну не прибрано: у найменшої (ігри) все одно 233 вакансії, а порожня
+ * галочка гірша за незнайому — вона нічого не знайде й забере три бали в
+ * усього іншого.
+ *
+ * «Deep tech» прибрано з назви AI: це жаргон, і людина, яка його не знає,
+ * читає всю кнопку як незрозумілу. Тег під нею й так називається просто `ai`.
+ */
 export const INDUSTRIES = [
-  { id: "web3",      en: "Web3 & Crypto",  uk: "Web3 і крипта",   fr: "Web3 et crypto",  ru: "Web3 и крипта" },
-  { id: "ai",        en: "AI & Deep Tech", uk: "AI і deep-tech",  fr: "IA et deep tech", ru: "AI и deep tech" },
+  { id: "ai",        en: "AI",             uk: "AI",              fr: "IA",              ru: "AI" },
   { id: "fintech",   en: "Fintech",        uk: "Фінтех",          fr: "Fintech",         ru: "Финтех" },
   { id: "health",    en: "Health & Bio",   uk: "Здоров'я і біо",  fr: "Santé et bio",    ru: "Здоровье и био" },
-  { id: "games",     en: "Games",          uk: "Ігри",            fr: "Jeux",            ru: "Игры" },
-  { id: "ecommerce", en: "E-commerce",     uk: "E-commerce",      fr: "E-commerce",      ru: "E-commerce" },
   { id: "defence",   en: "Defence Tech",   uk: "Оборонні технології", fr: "Défense",     ru: "Оборонные технологии" },
-  { id: "nonprofit", en: "Non-profit",     uk: "Некомерційний сектор", fr: "Associatif", ru: "Некоммерческий сектор" },
+  { id: "ecommerce", en: "E-commerce",     uk: "E-commerce",      fr: "E-commerce",      ru: "E-commerce" },
+  { id: "web3",      en: "Web3 & Crypto",  uk: "Web3 і крипта",   fr: "Web3 et crypto",  ru: "Web3 и крипта" },
+  { id: "games",     en: "Games",          uk: "Ігри",            fr: "Jeux",            ru: "Игры" },
+  { id: "nonprofit", en: "Non-profit",     uk: "Громадські організації", fr: "Associatif", ru: "Общественные организации" },
 ] as const;
 
 /**

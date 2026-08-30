@@ -214,6 +214,13 @@ export default function ProfileForm({ locale, pre, back, error, quote, evidence,
             placeholder={t(locale, "onboarding.rolePlaceholder")} />
           <div className="mt-5">
             <p className="eyebrow">{t(locale, "onboarding.industries")}</p>
+            {/* Галочка тут НЕ «мені цікаво ще й це», а фільтр: збіг дає +3, а
+                розбіжність забирає 3 в кожної вакансії з іншої галузі. Порожнє
+                поле — це ширша видача, а не пропущений крок, і людина має це
+                знати до того, як поставить галочку. */}
+            <p className="mt-1 text-xs" style={{ color: "var(--muted)" }}>
+              {t(locale, "onboarding.industriesNote")}
+            </p>
             <div className="mt-3 flex flex-wrap gap-2">
               {INDUSTRIES.map((i) => (
                 <label key={i.id}
