@@ -293,7 +293,9 @@ export default function ProfileForm({ locale, pre, back, error, quote, evidence,
 
         <Question n={3} title={t(locale, "onboarding.salary")} hint={t(locale, "onboarding.salaryHint")}>
           <div className="flex gap-3">
-            <input type="number" name="salaryMin" className="field mono" placeholder="90000"
+            {/* Підказка теж місячна: «90000» у полі, підписаному «на місяць»,
+                сама по собі казала людині, що тут чекають річну. */}
+            <input type="number" name="salaryMin" className="field mono" placeholder="4000"
               defaultValue={pre.salaryMin ?? ""} />
             <select name="salaryCurrency" className="field mono" style={{ maxWidth: "7rem" }}
               defaultValue={pre.salaryCurrency ?? "EUR"}>

@@ -58,7 +58,14 @@ async function Filled({ locale, error }: { locale: Locale; error?: string }) {
     parsed = await refineDraft(draft.id, draft.text, draft.parsed);
   }
 
-  let pre: ProfilePre | null = parsed ? { ...parsed, wishes: parsed.leftover } : null;
+  // Розбір тексту зводить зарплату до РІЧНОЇ — тієї одиниці, в якій лежить
+  // база й міряються вакансії. Поле ж підписане «на місяць», тож сюди воно має
+  // приходити місячним. Без цього переділу людина, яка написала «3000 євро»,
+  // читала в місячному полі 36 000 — і, зберігши форму, множила його на 12
+  // вдруге: у базу лягало 432 000, і не проходила жодна вакансія.
+  let pre: ProfilePre | null = parsed
+    ? { ...parsed, salaryMin: monthlyFrom(parsed.salaryMin), wishes: parsed.leftover }
+    : null;
   if (!pre && user) {
     const row = await one<{ spheres: string; industries: string;
       custom_role: string | null; custom_industry: string | null;
