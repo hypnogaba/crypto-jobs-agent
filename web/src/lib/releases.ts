@@ -10,6 +10,24 @@ export type Release = {
 
 export const RELEASES: Release[] = [
   {
+    "date": "2026-08-30",
+    "changes": [
+      {
+        "hash": "4884f12",
+        "subject": "Вільне ім'я дошки замість відмови при збігу"
+      },
+      {
+        "hash": "05ecb0a",
+        "subject": "Людина в адмінці має нік, а джерело додається посиланням"
+      },
+      {
+        "hash": "b8e7a07",
+        "subject": "Чотири блокери запуску: кабінет як канал, порожній профіль, мова, вікно кандидатів"
+      }
+    ],
+    "chores": 0
+  },
+  {
     "date": "2026-08-29",
     "changes": [
       {
@@ -229,7 +247,7 @@ export const RELEASES: Release[] = [
         "subject": "Часовий пояс знімається при реєстрації, а не лише в налаштуваннях"
       }
     ],
-    "chores": 12
+    "chores": 13
   },
   {
     "date": "2026-08-28",
@@ -576,17 +594,7 @@ export const RELEASES: Release[] = [
       }
     ],
     "chores": 0
-  },
-  {
-    "date": "2026-07-31",
-    "changes": [
-      {
-        "hash": "4116fbe",
-        "subject": "Add comprehensive project overview document for handoff"
-      }
-    ],
-    "chores": 1
   }
 ];
 
-export const GENERATED_AT = "2026-08-29 20:06";
+export const GENERATED_AT = "2026-08-30 10:17";
