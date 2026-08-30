@@ -11,7 +11,14 @@
  * показує, ЯК саме розібрався заголовок, — а розбір видно очима лише на
  * прикладах, не на числі.
  *
+ * Формат задається через `--kind`, і задавати його треба свідомо. Спершу
+ * тут стояв жорсткий `rss`, і перевірка оголосила мертвою дошку
+ * `board:global-web3career`: вона читається розміткою JobPosting, а не
+ * стрічкою, тож RSS-шлях і мав віддати нуль. Дошку через це вимкнули.
+ * «Нуль» тут означає «нуль у ЦЬОМУ форматі», не «дошка мертва».
+ *
  *   node dist/probe-board.js <адреса> [<адреса>…]
+ *   node dist/probe-board.js --kind jsonld <адреса>
  *   node dist/probe-board.js --stdin < список.txt
  */
 import { fetchBoard, type Board } from "./sources/boards.js";
@@ -24,24 +31,31 @@ interface Verdict {
   samples: string[];
 }
 
-/** Кількість <item> у сирому XML — щоб було з чим порівняти розбір. */
-async function rawItems(url: string): Promise<number> {
+/**
+ * Скільки записів у сирій відповіді — щоб було з чим порівняти розбір.
+ * Для RSS це `<item>`, для розмітки — блоки JobPosting.
+ */
+async function rawItems(url: string, kind: string): Promise<number> {
+  // fetchXml, а не fetchText: другий не експортується, а перший — це той
+  // самий текст із заголовками, якими читає сам сканер.
   const { fetchXml } = await import("./http.js");
-  const xml = await fetchXml(url, {}, { retries: 0, timeoutMs: 20_000 });
-  return (xml.match(/<item[\s>]/gi) ?? []).length;
+  const body = await fetchXml(url, {}, { retries: 0, timeoutMs: 20_000 });
+  return kind === "rss"
+    ? (body.match(/<item[\s>]/gi) ?? []).length
+    : (body.match(/"@type"\s*:\s*"JobPosting"/gi) ?? []).length;
 }
 
-async function check(url: string): Promise<Verdict> {
+async function check(url: string, kind: string): Promise<Verdict> {
   const board: Board = {
-    name: "probe", label: "probe", country: "*", feedUrl: url, kind: "rss",
+    name: "probe", label: "probe", country: "*", feedUrl: url, kind,
   };
   try {
-    const items = await rawItems(url);
+    const items = await rawItems(url, kind);
     const jobs = await fetchBoard(board, { retries: 0, timeoutMs: 20_000 });
     return {
       url, items, parsed: jobs.length,
       note: jobs.length === 0 && items > 0
-        ? "заголовки без компанії — розбір дає нуль"
+        ? "записи є, але розбір дає нуль — заголовки без компанії"
         : "",
       samples: jobs.slice(0, 3).map((j) => `${j.company} │ ${j.title} │ ${j.location ?? "—"}`),
     };
@@ -52,7 +66,11 @@ async function check(url: string): Promise<Verdict> {
 }
 
 async function main(): Promise<void> {
-  let urls = process.argv.slice(2).filter((a) => !a.startsWith("--"));
+  const kindAt = process.argv.indexOf("--kind");
+  const kind = kindAt > -1 ? process.argv[kindAt + 1] ?? "rss" : "rss";
+
+  let urls = process.argv.slice(2)
+    .filter((a, i) => !a.startsWith("--") && i !== kindAt - 1);
   if (process.argv.includes("--stdin")) {
     const chunks: Buffer[] = [];
     for await (const c of process.stdin) chunks.push(c as Buffer);
@@ -65,10 +83,12 @@ async function main(): Promise<void> {
   }
 
   const { mapLimit } = await import("./http.js");
-  const verdicts = await mapLimit(urls, 6, check);
+  const verdicts = await mapLimit(urls, 6, (u) => check(u, kind));
 
   for (const v of verdicts) {
-    const flag = v.parsed >= 3 ? "OK  " : v.items > 0 ? "ПУСТО" : "МЕРТВ";
+    // «МЕРТВ» тут — «нуль записів У ЦЬОМУ форматі». Дошка може бути жива й
+    // читатись іншим: web3.career не має RSS, але має розмітку JobPosting.
+    const flag = v.parsed >= 3 ? "OK  " : v.items > 0 ? "ПУСТО" : `0/${kind}`;
     console.log(`${flag} ${String(v.items).padStart(4)}→${String(v.parsed).padStart(4)}  ${v.url}${v.note ? `  · ${v.note}` : ""}`);
     for (const s of v.samples) console.log(`         ${s}`);
   }
