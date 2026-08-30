@@ -17,7 +17,7 @@ export interface Board {
   label: string;     // DOU
   country: string;   // UA
   feedUrl: string;
-  kind: string;      // rss | api | jsonld | nextjs
+  kind: string;      // rss | api | jsonld | nextjs | nextdata
   /**
    * За який період названа сума в заголовку: 'year' або 'month'.
    *
@@ -304,6 +304,7 @@ export async function fetchBoard(board: Board, o: FetchOptions = {},
 
   if (board.kind === "jsonld") return fetchJsonLd(board, country, o, freshDays);
   if (board.kind === "nextjs") return fetchNextBoard(board, country, o, freshDays);
+  if (board.kind === "nextdata") return fetchNextData(board, country, o, freshDays);
 
   if (board.kind !== "rss") throw new Error(`формат «${board.kind}» ще не вміємо: ${board.name}`);
 
@@ -518,18 +519,27 @@ const JSONLD_SLOW_PAGES = 5;
  * найновіше. Сто двадцять вакансій на добу при чотирнадцятиденній свіжості —
  * це щоденний зріз, а не спроба скачати сайт.
  */
+/** Нижче цієї частки свіжого на сторінці гортати далі не варто. */
+const FRESH_SHARE = 0.25;
+
 /**
- * Чи є на сторінці бодай одна вакансія, молодша за вікно свіжості.
+ * Чи варто гортати далі.
  *
- * Це і є справжня межа глибини. Стала кількість сторінок або читає замало
- * (jobstash має 7 698 вакансій, а сорок сторінок беруть 400 — і найстаріша з
- * них лише десятиденна, тобто попереду ще багато свіжого), або гортає в
- * порожнечу. Дошка сортує найновішим уперед, тож щойно ціла сторінка
- * виявилась старішою за вікно, далі буде лише старіше.
+ * Спершу тут стояло «є бодай одна свіжа» — і на живих даних це виявилось
+ * майже тим самим, що «гортай завжди». web3.career так прочитав 2 842
+ * вакансії заради 434 придатних: сортування там не строго за датою, тож
+ * серед старих раз у раз трапляється одна свіжа й умова не спрацьовує ніколи.
+ *
+ * Частка чесніша за наявність. Чверть — це межа, за якою сторінка вже
+ * здебільшого повторює те, що ми викинемо: jobstash тримає 97% свіжого й
+ * гортається далі (1 767 придатних замість 387), web3.career спиняється там,
+ * де його список закінчується насправді.
  */
-function hasFresh(jobs: RawJob[], freshDays: number): boolean {
+function worthMore(jobs: RawJob[], freshDays: number): boolean {
+  if (jobs.length === 0) return false;
   const edge = Date.now() - freshDays * 86_400_000;
-  return jobs.some((j) => !j.postedAt || new Date(j.postedAt).getTime() >= edge);
+  const fresh = jobs.filter((j) => !j.postedAt || new Date(j.postedAt).getTime() >= edge).length;
+  return fresh / jobs.length >= FRESH_SHARE;
 }
 
 async function fetchJsonLd(board: Board, country: string | null, o: FetchOptions,
@@ -556,7 +566,7 @@ async function fetchJsonLd(board: Board, country: string | null, o: FetchOptions
     // за п'ять сторінок такої ціни ми не платимо.
     if (!stitched) budget = Math.min(budget, JSONLD_SLOW_PAGES);
     // Сторінка цілком за межею свіжості означає, що далі буде лише старіше.
-    if (page > 1 && !hasFresh(batch, freshDays)) break;
+    if (page > 1 && !worthMore(batch, freshDays)) break;
     const before = seen.size;
     for (const j of batch) {
       if (seen.has(j.url)) continue;
@@ -817,7 +827,7 @@ async function fetchNextBoard(board: Board, country: string | null,
     try { batch = parseNextPayload(await fetchXml(url, {}, o), board.name, country, board.feedUrl); }
     catch { break; }
 
-    if (page > 1 && !hasFresh(batch, freshDays)) break;
+    if (page > 1 && !worthMore(batch, freshDays)) break;
 
     const before = seen.size;
     for (const j of batch) {
@@ -826,6 +836,85 @@ async function fetchNextBoard(board: Board, country: string | null,
       out.push(j);
     }
     if (seen.size === before) break;
+  }
+  return out;
+}
+
+/** Скільки сторінок такої дошки гортаємо. */
+const NEXTDATA_PAGES = 120;
+
+/**
+ * Дошка на Next.js, яка віддає дані окремим JSON.
+ *
+ * Сторінка тут теж порожня на вигляд — ні стрічки, ні розмітки, ні посилань
+ * на ATS, — але Next кладе поруч машинну копію того самого:
+ * `/_next/data/<buildId>/<маршрут>.json`. Усередині стан Apollo, а в ньому
+ * готові записи вакансій. Так читається crypto-careers.com із його 868
+ * вакансіями, які ми досі бачили як «сторінка малюється скриптом».
+ *
+ * `buildId` змінюється при КОЖНОМУ їхньому деплої, тож зашити його не можна:
+ * читаємо зі сторінки щоразу. Один зайвий запит на прогін — чесна ціна за те,
+ * щоб дошка не вмирала мовчки після чужого релізу.
+ */
+async function fetchNextData(board: Board, country: string | null,
+                             o: FetchOptions, freshDays: number): Promise<RawJob[]> {
+  const page1 = await fetchXml(board.feedUrl, {}, o);
+  const buildId = /"buildId"\s*:\s*"([^"]{4,64})"/.exec(page1)?.[1];
+  if (!buildId) throw new Error("не знайшов buildId — сторінка змінилась");
+
+  const base = new URL(board.feedUrl);
+  // `/jobs` → `/jobs.json`; корінь → `/index.json`, як це робить сам Next.
+  const route = base.pathname.replace(/\/$/, "") || "/index";
+  const out: RawJob[] = [];
+  const seen = new Set<string>();
+
+  for (let page = 1; page <= NEXTDATA_PAGES; page++) {
+    const url = `${base.origin}/_next/data/${buildId}${route}.json${page > 1 ? `?page=${page}` : ""}`;
+    let batch: RawJob[];
+    try { batch = parseApolloJobs(await fetchXml(url, {}, o), base.origin, board.name, country); }
+    catch { break; }
+
+    const before = seen.size;
+    for (const j of batch) {
+      if (seen.has(j.url)) continue;
+      seen.add(j.url);
+      out.push(j);
+    }
+    if (seen.size === before) break;                    // сторінка нічого не додала
+    if (page > 1 && !worthMore(batch, freshDays)) break; // далі лише старіше
+  }
+  return out;
+}
+
+/** Записи вакансій зі стану Apollo. */
+export function parseApolloJobs(body: string, origin: string, source: string,
+                                country: string | null): RawJob[] {
+  let root: unknown;
+  try { root = JSON.parse(body); } catch { return []; }
+  const state = (root as { pageProps?: { __APOLLO_STATE__?: Record<string, unknown> } })
+    ?.pageProps?.__APOLLO_STATE__;
+  if (!state || typeof state !== "object") return [];
+
+  const out: RawJob[] = [];
+  for (const node of Object.values(state)) {
+    if (!node || typeof node !== "object") continue;
+    const j = node as Record<string, unknown>;
+    if (j.__typename !== "Job") continue;
+
+    const path = (j.url as { path?: string } | undefined)?.path;
+    const title = str(j.title);
+    const company = str(j.organization);
+    // Без компанії або адреси запис непридатний: перше тримає дедуплікацію,
+    // друге — саме те, заради чого людина клацає.
+    if (!path || !title || !company) continue;
+
+    const where = Array.isArray(j.address) ? j.address.filter((x) => typeof x === "string") : [];
+    const location = where.join(", ") || null;
+    out.push({
+      url: new URL(path, origin).toString(), company, title, location,
+      remote: REMOTE_ANYWHERE.test(location ?? ""),
+      postedAt: iso(str(j.published)), source, country,
+    });
   }
   return out;
 }

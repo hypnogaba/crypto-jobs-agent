@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { cleanUrl, fetchBoard, isJunk, jobLinks, parseBoardTitle, parseJobPostings, parseNextPayload } from "./boards.js";
+import { cleanUrl, fetchBoard, isJunk, jobLinks, parseBoardTitle, parseApolloJobs, parseJobPostings, parseNextPayload } from "./boards.js";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -428,5 +428,38 @@ describe("період зарплати на дошці", () => {
         feedUrl: "https://x.com/f", kind: "rss", salaryPeriod: "month" },
       serve(feed("Engineer в Acme, $9000000, віддалено")));
     expect(jobs[0]!.salaryMin).toBeNull();
+  });
+});
+
+describe("parseApolloJobs", () => {
+  /** Справжня форма запису з crypto-careers.com, скорочена. */
+  const payload = JSON.stringify({ pageProps: { __APOLLO_STATE__: {
+    "Job:13250": {
+      __typename: "Job", id: 13250, title: "Solutions Architect, Integrations (AUS)",
+      organization: "SardineAI Corp.", url: { __typename: "Url",
+        path: "/job/solutions-architect-integrations-aus-13250" },
+      address: ["Australia"], published: "2026-08-12T13:34:01+01:00",
+    },
+    "OrganizationProfile:10138": { __typename: "OrganizationProfile", name: "SardineAI Corp." },
+  } } });
+
+  it("витягує вакансію й робить адресу повною", () => {
+    const jobs = parseApolloJobs(payload, "https://crypto-careers.com", "board:x", null);
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]).toMatchObject({
+      url: "https://crypto-careers.com/job/solutions-architect-integrations-aus-13250",
+      company: "SardineAI Corp.", title: "Solutions Architect, Integrations (AUS)",
+      location: "Australia",
+    });
+    expect(jobs[0]!.postedAt?.slice(0, 10)).toBe("2026-08-12");
+  });
+
+  it("бере лише вузли Job, а не всю сторінку", () => {
+    expect(parseApolloJobs(payload, "https://x.com", "b", null)).toHaveLength(1);
+  });
+
+  it("не падає на чужому JSON і на сміттю", () => {
+    expect(parseApolloJobs("{}", "https://x.com", "b", null)).toEqual([]);
+    expect(parseApolloJobs("не json", "https://x.com", "b", null)).toEqual([]);
   });
 });
