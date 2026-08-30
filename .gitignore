@@ -4,7 +4,10 @@
 *.private.md
 
 # scanner
-scanner/node_modules/
+# Без скісної риски наприкінці: у робочих гілках node_modules буває
+# СИМЛІНКОМ на головний каталог, а взірець із рискою symlink не ловить —
+# і він тричі потрапляв у коміт.
+scanner/node_modules
 scanner/dist/
 scanner/.env
 
