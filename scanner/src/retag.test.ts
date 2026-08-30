@@ -26,9 +26,8 @@ describe("planRetag", () => {
     expect(planRetag([row({ tags: '["design","product","senior"]' })])).toEqual([]);
   });
 
-  it("VP отримує рівень — той самий випадок, що йшов junior-ам", () => {
-    const plan = planRetag([row({ title: "VP, Growth Marketing", tags: '["marketing"]' })]);
-    expect(plan[0]!.added).toContain("lead");
+  it("рівня більше не додає — правил під нього немає", () => {
+    expect(planRetag([row({ title: "VP, Growth Marketing", tags: '["marketing"]' })])).toEqual([]);
   });
 
   it("«other» не приклеюється до рядка, у якого теги вже є", () => {

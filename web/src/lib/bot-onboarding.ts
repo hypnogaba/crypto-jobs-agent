@@ -12,34 +12,32 @@
  * Чисті функції зверху, робота з базою й Telegram — знизу.
  */
 import {
-  SPHERES, INDUSTRIES, SENIORITY, REMOTE_MODES, label, needsCity, parseModes,
+  SPHERES, INDUSTRIES, REMOTE_MODES, label, needsCity, parseModes,
   serializeModes, type Locale,
 } from "./vocab";
 import { timezoneFromCity, timeOptions, zoneName } from "./tz";
 import { timezoneFor } from "./geo";
 
-export type Step = "spheres" | "wishes" | "industries" | "seniority" | "where" | "city" | "tz" | "salary";
+export type Step = "spheres" | "wishes" | "industries" | "where" | "city" | "tz" | "salary";
 
 /**
  * Порядок питань. «Побажання» одразу після сфер: людина щойно побачила
  * кнопки й знає, чого в них немає. «Година» після міста: якщо місто вже
  * назвало пояс, питання не ставиться.
  */
-export const STEPS: Step[] = ["spheres", "wishes", "industries", "seniority", "where", "city", "tz", "salary"];
+export const STEPS: Step[] = ["spheres", "wishes", "industries", "where", "city", "tz", "salary"];
 
 /** Поля, які людина редагує по одному через /profile. Мова й година живуть у users, не в profiles. */
-export const EDITABLE: Step[] = ["spheres", "industries", "seniority", "where", "salary", "wishes", "tz"];
+export const EDITABLE: Step[] = ["spheres", "industries", "where", "salary", "wishes", "tz"];
 
 export interface Draft {
   spheres: string[];
   /** Своя назва ролі, коли жодна сфера не підійшла. */
   customRole?: string | null;
-  /** Своя індустрія, свій рівень, своя локація — те саме для решти питань. */
+  /** Своя індустрія і своя локація — те саме для решти питань. */
   customIndustry?: string | null;
-  customSeniority?: string | null;
   customWhere?: string | null;
   industries: string[];
-  seniority: string | null;
   /** Набір варіантів через кому: «офіс у місті» і «переїзд» сумісні. */
   remoteMode: string | null;
   /**
@@ -59,7 +57,7 @@ export interface Draft {
 
 export const emptyDraft = (): Draft => ({
   spheres: [], customRole: null, industries: [], customIndustry: null,
-  customSeniority: null, customWhere: null, seniority: null,
+  customWhere: null,
   remoteMode: null, location: null, wishes: null, timezone: null,
   salaryMin: null, salaryCurrency: null,
 });
@@ -115,28 +113,22 @@ type Phrase = { en: string; uk: string; fr: string; ru: string };
 
 const ASK: Record<Step, Phrase> = {
   spheres: {
-    en: "1 of 4 · What kind of work?\nPick everything that fits.",
-    uk: "1 з 4 · Яка робота?\nОбери все, що підходить.",
-    fr: "1 sur 4 · Quel type de poste ?\nChoisissez tout ce qui convient.",
-    ru: "1 из 4 · Какая работа?\nВыбери всё, что подходит.",
+    en: "1 of 3 · What kind of work?\nPick everything that fits.",
+    uk: "1 з 3 · Яка робота?\nОбери все, що підходить.",
+    fr: "1 sur 3 · Quel type de poste ?\nChoisissez tout ce qui convient.",
+    ru: "1 из 3 · Какая работа?\nВыбери всё, что подходит.",
   },
   industries: {
-    en: "2 of 4 · Any industry you care about?\nOptional — skip if it does not matter.",
-    uk: "2 з 4 · Якісь індустрії цікавлять?\nНеобов'язково — пропусти, якщо байдуже.",
-    fr: "2 sur 4 · Un secteur en particulier ?\nFacultatif — passez si peu importe.",
-    ru: "2 из 4 · Какие-то индустрии интересуют?\nНеобязательно — пропусти, если всё равно.",
-  },
-  seniority: {
-    en: "3 of 4 · Your level?",
-    uk: "3 з 4 · Твій рівень?",
-    fr: "3 sur 4 · Votre niveau ?",
-    ru: "3 из 4 · Твой уровень?",
+    en: "2 of 3 · Any industry you care about?\nOptional — skip if it does not matter.",
+    uk: "2 з 3 · Якісь індустрії цікавлять?\nНеобов'язково — пропусти, якщо байдуже.",
+    fr: "2 sur 3 · Un secteur en particulier ?\nFacultatif — passez si peu importe.",
+    ru: "2 из 3 · Какие-то индустрии интересуют?\nНеобязательно — пропусти, если всё равно.",
   },
   where: {
-    en: "4 of 4 · Where do you want to work?",
-    uk: "4 з 4 · Де хочеш працювати?",
-    fr: "4 sur 4 · Où voulez-vous travailler ?",
-    ru: "4 из 4 · Где хочешь работать?",
+    en: "3 of 3 · Where do you want to work?",
+    uk: "3 з 3 · Де хочеш працювати?",
+    fr: "3 sur 3 · Où voulez-vous travailler ?",
+    ru: "3 из 3 · Где хочешь работать?",
   },
   wishes: {
     en: "Anything important that is not in the buttons?\nWrite it, or skip.",
@@ -186,10 +178,10 @@ const WORD = {
     ru: "Напиши своё текущее время как ЧЧ:ММ, например 14:30",
   },
   askWishes: {
-    en: "Write what matters — one message.",
-    uk: "Напиши, що важливо, — одним повідомленням.",
-    fr: "Écrivez ce qui compte — en un message.",
-    ru: "Напиши, что важно, — одним сообщением.",
+    en: "Write what matters — one message. Your level too, if it matters: senior or above, first job, head of.",
+    uk: "Напиши, що важливо, — одним повідомленням. Рівень теж, якщо він важливий: senior і вище, перша робота, керівник напряму.",
+    fr: "Écrivez ce qui compte — en un message. Votre niveau aussi, si besoin : senior ou plus, premier emploi, responsable.",
+    ru: "Напиши, что важно, — одним сообщением. Уровень тоже, если он важен: senior и выше, первая работа, руководитель направления.",
   },
   mine: {
     en: "Not in the list",
@@ -202,12 +194,6 @@ const WORD = {
     uk: "Напиши індустрію своїми словами — наприклад: кліматтех, логістика, кіберспорт.",
     fr: "Écrivez le secteur avec vos mots, par exemple : climat, logistique, esport.",
     ru: "Напиши индустрию своими словами — например: климаттех, логистика, киберспорт.",
-  },
-  askLevel: {
-    en: "Write your level in your own words, for example: founder, head of, C-level, first job.",
-    uk: "Напиши свій рівень своїми словами — наприклад: засновник, керівник напряму, C-level, перша робота.",
-    fr: "Écrivez votre niveau avec vos mots : fondateur, responsable, C-level, premier emploi.",
-    ru: "Напиши свой уровень своими словами — например: основатель, руководитель направления, C-level, первая работа.",
   },
   askWhere: {
     en: "Write where you want to work, for example: Berlin only, EU time zones, anywhere but the US.",
@@ -238,7 +224,6 @@ const WORD = {
   // Підписи рядків у /profile — що саме редагувати.
   fSpheres:    { en: "Fields",     uk: "Сфери",      fr: "Domaines",  ru: "Сферы" },
   fIndustries: { en: "Industries", uk: "Індустрії",  fr: "Secteurs",  ru: "Индустрии" },
-  fSeniority:  { en: "Level",      uk: "Рівень",     fr: "Niveau",    ru: "Уровень" },
   fWhere:      { en: "Place",      uk: "Місце",      fr: "Lieu",      ru: "Место" },
   fSalary:     { en: "Salary",     uk: "Зарплата",   fr: "Salaire",   ru: "Зарплата" },
   fWishes:     { en: "Wishes",     uk: "Побажання",  fr: "Souhaits",  ru: "Пожелания" },
@@ -297,12 +282,6 @@ export function keyboard(step: Step, draft: Draft, locale: Locale, opts: Keyboar
 
   // «Немає в списку» стоїть під кожним питанням: жоден словник не покриває
   // всіх, а мовчазний вибір «найближчого» псує підбір гірше за порожнє поле.
-  if (step === "seniority") {
-    pair(SENIORITY.map((it) => ({ text: label(it, locale), callback_data: `${pre}:seniority:${it.id}` })));
-    rows.push([{ text: say(WORD.mine, locale), callback_data: `${pre}:seniority:__mine` }]);
-    return rows;
-  }
-
   // Побажання — вільний текст: жодного списку тут бути не може, а єдина
   // кнопка дозволяє не відповідати.
   if (step === "wishes") {
@@ -368,8 +347,8 @@ export function profileMenu(locale: Locale): Button[][] {
   const b = (p: Phrase, step: string): Button => ({ text: say(p, locale), callback_data: `ed:${step}` });
   return [
     [b(WORD.fSpheres, "spheres"), b(WORD.fIndustries, "industries")],
-    [b(WORD.fSeniority, "seniority"), b(WORD.fWhere, "where")],
-    [b(WORD.fSalary, "salary"), b(WORD.fWishes, "wishes")],
+    [b(WORD.fWhere, "where"), b(WORD.fSalary, "salary")],
+    [b(WORD.fWishes, "wishes")],
     [b(WORD.fLang, "lang"), b(WORD.fTz, "tz")],
   ];
 }
@@ -385,8 +364,6 @@ export function profileUpdateFor(step: Step, draft: Draft): { set: string; param
       return { set: "spheres=?, custom_role=?", params: [JSON.stringify(draft.spheres), draft.customRole ?? null] };
     case "industries":
       return { set: "industries=?, custom_industry=?", params: [JSON.stringify(draft.industries), draft.customIndustry ?? null] };
-    case "seniority":
-      return { set: "seniority=?, custom_seniority=?", params: [draft.seniority ?? null, draft.customSeniority ?? null] };
     case "where":
     case "city":
       return { set: "remote_mode=?, location=?",
@@ -414,7 +391,6 @@ export const askWishes = (locale: Locale): string => say(WORD.askWishes, locale)
 export const askCustomRole = (locale: Locale): string => say(WORD.askMine, locale);
 export const askCustomFor = (step: Step, locale: Locale): string => say(
   step === "industries" ? WORD.askIndustry
-  : step === "seniority" ? WORD.askLevel
   : step === "where" ? WORD.askWhere : WORD.askMine, locale);
 
 /** Що вийшло — людськими словами, а не ідентифікаторами. */
@@ -422,7 +398,6 @@ export function summary(draft: Draft, locale: Locale): string {
   const names = (ids: string[], src: readonly { id: string; en: string; uk: string; fr: string; ru: string }[]): string =>
     ids.map((id) => { const it = src.find((x) => x.id === id); return it ? label(it, locale) : id; }).join(", ") || "—";
 
-  const level = SENIORITY.find((x) => x.id === draft.seniority);
   const where = parseModes(draft.remoteMode)
     .map((id) => REMOTE_MODES.find((x) => x.id === id))
     .filter(Boolean)
@@ -438,7 +413,6 @@ export function summary(draft: Draft, locale: Locale): string {
   return [
     both(draft.spheres, SPHERES, draft.customRole) ?? "—",
     both(draft.industries, INDUSTRIES, draft.customIndustry),
-    draft.customSeniority ?? (level ? label(level, locale) : null),
     draft.customWhere ?? where,
     draft.location ?? null,
     money,

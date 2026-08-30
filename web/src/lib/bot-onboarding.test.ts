@@ -81,13 +81,13 @@ describe("клавіатура", () => {
 
 describe("тексти", () => {
   it("нумерують кроки, щоб людина бачила, скільки лишилось", () => {
-    expect(questionText("spheres", "uk")).toContain("1 з 4");
-    expect(questionText("where", "uk")).toContain("4 з 4");
+    expect(questionText("spheres", "uk")).toContain("1 з 3");
+    expect(questionText("where", "uk")).toContain("3 з 3");
   });
 
   it("підсумок читається словами, а не ідентифікаторами", () => {
     const draft = {
-      spheres: ["engineering"], industries: ["fintech"], seniority: "senior",
+      spheres: ["engineering"], industries: ["fintech"],
       remoteMode: "remote_only", salaryMin: 90_000, salaryCurrency: "EUR",
     };
     const out = summary(draft, "uk");
@@ -142,7 +142,7 @@ describe("правка по пунктах", () => {
     for (const step of EDITABLE) expect(data).toContain(`ed:${step}`);
     expect(data).toContain("ed:lang");
     expect(profileMenu("uk").flat().map((b) => b.text))
-      .toEqual(["Сфери", "Індустрії", "Рівень", "Місце", "Зарплата", "Побажання", "Мова", "Година"]);
+      .toEqual(["Сфери", "Індустрії", "Місце", "Зарплата", "Побажання", "Мова", "Година"]);
   });
 
   it("клавіатура з префіксом ed: не плутається з онбордингом", () => {
@@ -160,8 +160,6 @@ describe("правка по пунктах", () => {
     expect(profileUpdateFor("salary", draft)).toEqual({
       set: "salary_min=?, salary_currency=?", params: [90_000, "USD"] });
     expect(profileUpdateFor("wishes", draft)).toEqual({ set: "wishes=?", params: ["тільки стартапи"] });
-    expect(profileUpdateFor("seniority", { ...draft, seniority: null, customSeniority: "founder" }))
-      .toEqual({ set: "seniority=?, custom_seniority=?", params: [null, "founder"] });
     // Година живе в users, не в profiles
     expect(profileUpdateFor("tz", draft)).toBeNull();
   });

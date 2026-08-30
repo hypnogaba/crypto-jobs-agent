@@ -27,13 +27,16 @@ export interface Profile {
   customRole?: string | null;
   /** Своя індустрія: «climate tech», «esports». Того ж роду, що customRole. */
   customIndustry?: string | null;
-  /** Свій рівень: «head of BD», «founder». Стоїть замість seniority, не поруч. */
-  customSeniority?: string | null;
-  /** Вільні побажання людини: «тільки стартапи, без банків, 4-денний тиждень». */
+  /**
+   * Вільні побажання людини: «тільки стартапи, без банків, 4-денний тиждень».
+   * Сюди ж переїхали слова про рівень — «senior і вище», «перша робота»:
+   * питання про рівень прибрано, і це тепер єдине місце, де такі слова живуть.
+   * На відміну від чотирьох кнопок, тут вони справді шукаються — у назві
+   * вакансії й в описі.
+   */
   wishes?: string | null;
   /** Стек, роки, мови з резюме. У бали не йде — лише в промпт пояснень. */
   cvHighlights?: string | null;
-  seniority: string | null;
   /**
    * Набір варіантів через кому: «тільки віддалено» | «віддалено або офіс у
    * моєму місті» | «готовий переїхати». Останні два сумісні між собою, тож
@@ -49,7 +52,7 @@ export interface Profile {
    * Ваги правил, вивчені з відповідей людини. Одиниця — як у всіх.
    * Кожна скарга на цей вимір робить невідповідність дорожчою саме для неї.
    */
-  tuning?: { seniority: number; location: number; salary: number };
+  tuning?: { location: number; salary: number };
 }
 
 export interface CandidateJob {
@@ -87,7 +90,6 @@ export type MatchFact =
   | { k: "role"; v: string }
   | { k: "industry"; v: string }
   | { k: "place"; v: string }
-  | { k: "level" }
   | { k: "remote" }
   | { k: "salary" }
   | { k: "fresh" };
@@ -96,8 +98,6 @@ export interface ScoredJob extends CandidateJob {
   score: number;
   facts: MatchFact[];
 }
-
-const SENIORITY_ORDER = ["junior", "middle", "senior", "lead"];
 
 /**
  * Збіг своєї ролі з назвою вакансії.
@@ -195,24 +195,18 @@ export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): Score
   const ownIndustry = customIndustryBonus(job, p.customIndustry);
   if (ownIndustry > 0) { score += ownIndustry; facts.push({ k: "industry", v: p.customIndustry! }); }
 
-  // Рівень: збіг тягне вгору, розрив у два щаблі — сильно вниз
-  const w = p.tuning ?? { seniority: 1, location: 1, salary: 1 };
-
-  if (p.seniority) {
-    const jobLevel = SENIORITY_ORDER.find((l) => tags.has(l));
-    if (jobLevel === p.seniority) { score += 3; facts.push({ k: "level" }); }
-    else if (jobLevel) {
-      const gap = Math.abs(SENIORITY_ORDER.indexOf(jobLevel) - SENIORITY_ORDER.indexOf(p.seniority));
-      score -= gap * 2 * w.seniority;
-    }
-  } else if (matchesCustomRole(job.title, p.customSeniority)) {
-    // Свій рівень стоїть ЗАМІСТЬ щабля, а не поруч: «head of BD» — не lead
-    // і не senior, і чотири кнопки про таку людину не кажуть нічого. Слова
-    // шукаються в назві вакансії, як і своя роль, але важать менше: рівень
-    // уточнює збіг, а не створює його.
-    score += 3;
-    facts.push({ k: "level" });
-  }
+  // Рівня тут навмисно немає.
+  //
+  // Бал за рівень спирався на тег, який сканер брав із назви вакансії, а
+  // тегу не мали 14 049 рядків із 22 674 — тобто на 62% кеша відповідь
+  // людини не робила нічого. Тега `middle` не існувало взагалі, хоч кнопка
+  // на сайті була: така людина не могла отримати збіг у принципі й лише
+  // платила штраф на 7 867 вакансіях. Жодна скарга за весь час не назвала
+  // рівень причиною, і всі ваги лишились одиницями.
+  //
+  // Слова про рівень тепер приходять у customRole («senior backend
+  // engineer») і в wishes — і там вони шукаються по-справжньому.
+  const w = p.tuning ?? { location: 1, salary: 1 };
 
   if (remoteOnly(p.remoteMode)) {
     if (job.remote) { score += 3; facts.push({ k: "remote" }); }
@@ -474,7 +468,6 @@ export async function explainWithClaude(
     `Сфери: ${names(p.spheres)}. Індустрії: ${names(p.industries)}. ` +
     (p.customRole ? `Своя роль: ${clip(p.customRole, FIELD_MAX.title)}. ` : "") +
     (p.customIndustry ? `Своя індустрія: ${clip(p.customIndustry, FIELD_MAX.title)}. ` : "") +
-    `Рівень: ${p.customSeniority ? clip(p.customSeniority, FIELD_MAX.title) : (p.seniority ?? "—")}. ` +
     `Робота: ${p.remoteMode}. ` +
     `Зарплата від: ${p.salaryMin ?? "—"}.` +
     // Стек, роки й мови з резюме. Саме вони відрізняють двох людей з

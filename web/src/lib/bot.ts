@@ -148,12 +148,12 @@ export async function handleStartButton(
 
 /** Профіль із бази у вигляді чернетки — для /profile і правки по пунктах. */
 async function loadDraft(userId: string): Promise<Draft | null> {
-  const p = await one<{ spheres: string; industries: string; seniority: string | null;
+  const p = await one<{ spheres: string; industries: string;
     remote_mode: string; location: string | null; salary_min: number | null; salary_currency: string | null;
-    custom_role: string | null; custom_industry: string | null; custom_seniority: string | null;
+    custom_role: string | null; custom_industry: string | null;
     wishes: string | null }>(
-    `SELECT spheres,industries,seniority,remote_mode,location,salary_min,salary_currency,
-            custom_role,custom_industry,custom_seniority,wishes
+    `SELECT spheres,industries,remote_mode,location,salary_min,salary_currency,
+            custom_role,custom_industry,wishes
        FROM profiles WHERE user_id=?`, userId);
   if (!p) return null;
   const list = (raw: string | null): string[] => {
@@ -162,8 +162,8 @@ async function loadDraft(userId: string): Promise<Draft | null> {
   return {
     ...emptyDraft(),
     spheres: list(p.spheres), industries: list(p.industries), customRole: p.custom_role,
-    customIndustry: p.custom_industry, customSeniority: p.custom_seniority,
-    seniority: p.seniority, remoteMode: p.remote_mode, location: p.location,
+    customIndustry: p.custom_industry,
+    remoteMode: p.remote_mode, location: p.location,
     salaryMin: p.salary_min, salaryCurrency: p.salary_currency, wishes: p.wishes,
   };
 }
@@ -223,7 +223,6 @@ export async function handleOnboardingButton(
   }
 
   // Одна відповідь — або «Готово» в списку з кількома
-  if (step === "seniority") draft.seniority = value;
   if (step === "salary") {
     if (value === "__other") {
       await saveState(chatId, "salary", draft, null);
@@ -298,7 +297,6 @@ export async function handleOnboardingText(
     const draft = readDraft(row.draft);
     if (parsed.spheres.length) draft.spheres = parsed.spheres;
     if (parsed.industries.length) draft.industries = parsed.industries;
-    if (parsed.seniority) draft.seniority = parsed.seniority;
     if (parsed.remoteMode) draft.remoteMode = parsed.remoteMode;
     if (parsed.location) draft.location = parsed.location;
     if (parsed.salaryMin) { draft.salaryMin = parsed.salaryMin; draft.salaryCurrency = parsed.salaryCurrency; }
@@ -342,7 +340,6 @@ export async function handleOnboardingText(
     const own = text.slice(0, 120);
     if (back === "spheres") draft.customRole = own;
     else if (back === "industries") draft.customIndustry = own;
-    else if (back === "seniority") draft.customSeniority = own;
     else if (back === "where") {
       draft.customWhere = own;
       // Написане тут і є місцем: окремо перепитувати місто після цього
@@ -352,7 +349,7 @@ export async function handleOnboardingText(
 
     // Питання з однією відповіддю після свого варіанта йдуть далі самі:
     // вертатись до списку, з якого людина щойно відмовилась, безглуздо.
-    const single = back === "seniority" || back === "where";
+    const single = back === "where";
     const goto = single ? nextStep(back, draft) : back;
     if (!goto) { await finishOnboarding(env, chatId, draft, locale, row.message_id); return true; }
 
@@ -428,14 +425,13 @@ async function finishOnboarding(
   }
 
   await run(
-    `INSERT INTO profiles (user_id,mode,raw_input,spheres,custom_role,industries,custom_industry,seniority,custom_seniority,
+    `INSERT INTO profiles (user_id,mode,raw_input,spheres,custom_role,industries,custom_industry,
                            remote_mode,location,salary_min,salary_currency,wishes,updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
      ON CONFLICT(user_id) DO UPDATE SET
        mode=excluded.mode, raw_input=excluded.raw_input, spheres=excluded.spheres,
        custom_role=excluded.custom_role, industries=excluded.industries,
        custom_industry=excluded.custom_industry,
-       seniority=excluded.seniority, custom_seniority=excluded.custom_seniority,
        remote_mode=excluded.remote_mode, location=excluded.location,
        salary_min=excluded.salary_min, salary_currency=excluded.salary_currency,
        wishes=excluded.wishes,
@@ -443,7 +439,6 @@ async function finishOnboarding(
     userId, "bot", null,
     JSON.stringify(draft.spheres), draft.customRole ?? null,
     JSON.stringify(draft.industries), draft.customIndustry ?? null,
-    draft.seniority, draft.customSeniority ?? null,
     serializeModes(parseModes(draft.remoteMode)) || "remote_only", draft.location ?? null,
     draft.salaryMin, draft.salaryCurrency, draft.wishes?.trim() || null);
 
@@ -613,7 +608,6 @@ export async function handleEditButton(
     return true;
   }
 
-  if (step === "seniority") { draft.seniority = value; draft.customSeniority = null; }
   if (step === "salary") {
     if (value === "__other") {
       await showEdit(env, chatId, "edit:salary", draft, locale, at, askOtherAmount(locale), []);
@@ -688,7 +682,6 @@ async function handleEditText(
     const own = text.slice(0, 120);
     if (step === "spheres") draft.customRole = own;
     else if (step === "industries") draft.customIndustry = own;
-    else if (step === "seniority") { draft.customSeniority = own; draft.seniority = null; }
     else if (step === "where") { draft.customWhere = own; draft.location = own; }
     // Списки повертаються до клавіатури — можна дообрати; одиночні пишуться одразу.
     if (step === "spheres" || step === "industries") {
@@ -764,7 +757,7 @@ export async function handleLangButton(
  * чесно каже це, а не вдає, що щось підкрутив.
  */
 const TUNED: Record<string, string> = {
-  level: "seniority_weight", place: "location_weight", money: "salary_weight",
+  place: "location_weight", money: "salary_weight",
   // «Насправді не віддалено» — це та сама скарга на місце: вакансія
   // назвалась віддаленою, а нею не є.
   remote: "location_weight",
@@ -793,14 +786,13 @@ export async function handleWhyButton(
     // не можна. Зараз це безпечно лише тому, що значення береться з TUNED,
     // але одна необережна правка перетворила б це на ін'єкцію. Тому перевірка
     // явна: у запит потрапляє тільки те, що є в цьому списку.
-    const ALLOWED = ["seniority_weight", "location_weight", "salary_weight"] as const;
+    const ALLOWED = ["location_weight", "salary_weight"] as const;
     if (!ALLOWED.includes(column as (typeof ALLOWED)[number])) return true;
 
     await run(
       `UPDATE user_tuning SET ${column} = MIN(${column} + 0.5, 3.0),
                               updated_at = datetime('now') WHERE user_id=?`, user.id);
-    const told = reason === "level" ? "learnedLevel"
-      : reason === "place" ? "learnedPlace"
+    const told = reason === "place" ? "learnedPlace"
       : reason === "remote" ? "learnedRemote" : "learnedMoney";
     await send(env, chatId, say(told, locale));
     return true;
@@ -878,21 +870,21 @@ export async function handleDocument(
     // (стек, роки, мови) і побажання з тексту губились мовчки — тобто
     // людина з бота отримувала гірший підбір, ніж та сама людина з сайту.
     await run(
-      `INSERT INTO profiles (user_id,mode,cv_text,spheres,industries,seniority,remote_mode,location,salary_min,salary_currency,custom_role,custom_industry,custom_seniority,cv_highlights,wishes,updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+      `INSERT INTO profiles (user_id,mode,cv_text,spheres,industries,remote_mode,location,salary_min,salary_currency,custom_role,custom_industry,cv_highlights,wishes,updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
        ON CONFLICT(user_id) DO UPDATE SET
          mode=excluded.mode, cv_text=excluded.cv_text, spheres=excluded.spheres,
-         industries=excluded.industries, seniority=excluded.seniority,
+         industries=excluded.industries,
          remote_mode=excluded.remote_mode, location=excluded.location,
          salary_min=excluded.salary_min, salary_currency=excluded.salary_currency,
          custom_role=excluded.custom_role, custom_industry=excluded.custom_industry,
-         custom_seniority=excluded.custom_seniority, cv_highlights=excluded.cv_highlights,
+         cv_highlights=excluded.cv_highlights,
          wishes=excluded.wishes,
          updated_at=datetime('now')`,
       userId, "cv", text.slice(0, 20_000),
       JSON.stringify(parsed.spheres), JSON.stringify(parsed.industries),
-      parsed.seniority, remoteMode, parsed.location, parsed.salaryMin, parsed.salaryCurrency,
-      parsed.customRole, parsed.customIndustry, parsed.customSeniority,
+      remoteMode, parsed.location, parsed.salaryMin, parsed.salaryCurrency,
+      parsed.customRole, parsed.customIndustry,
       parsed.cvHighlights, parsed.leftover);
 
     await persistCountry(userId, parsed.location);
@@ -900,7 +892,7 @@ export async function handleDocument(
     await run("DELETE FROM bot_state WHERE chat_id=?", String(chatId));
       await send(env, chatId, `${say("cvDone", locale)}\n\n${summary({
       spheres: parsed.spheres, industries: parsed.industries, customRole: parsed.customRole,
-      seniority: parsed.seniority, remoteMode,
+      remoteMode,
       salaryMin: parsed.salaryMin, salaryCurrency: parsed.salaryCurrency,
     }, locale)}`);
     await sendFirstOffer(env, chatId, userId, locale);
@@ -962,14 +954,13 @@ export async function continueBotOnboarding(
         // Тепер питаємо, ЩО саме не так — з цього можна вчитись.
         await sendKeyboard(env, chatId, say("askWhy", locale), [
           [{ text: say("whySphere", locale),   callback_data: `wh:${digestId}:sphere` },
-           { text: say("whyLevel", locale),    callback_data: `wh:${digestId}:level` }],
-          [{ text: say("whyPlace", locale),    callback_data: `wh:${digestId}:place` },
-           { text: say("whyMoney", locale),    callback_data: `wh:${digestId}:money` }],
-          [{ text: say("whyRemote", locale),   callback_data: `wh:${digestId}:remote` },
+           { text: say("whyPlace", locale),    callback_data: `wh:${digestId}:place` }],
+          [{ text: say("whyMoney", locale),    callback_data: `wh:${digestId}:money` },
            { text: say("whyIndustry", locale), callback_data: `wh:${digestId}:industry` }],
-          [{ text: say("whyStale", locale),    callback_data: `wh:${digestId}:stale` },
-           { text: say("whySame", locale),     callback_data: `wh:${digestId}:same` }],
-          [{ text: say("whyOther", locale),    callback_data: `wh:${digestId}:other` }],
+          [{ text: say("whyRemote", locale),   callback_data: `wh:${digestId}:remote` },
+           { text: say("whyStale", locale),    callback_data: `wh:${digestId}:stale` }],
+          [{ text: say("whySame", locale),     callback_data: `wh:${digestId}:same` },
+           { text: say("whyOther", locale),    callback_data: `wh:${digestId}:other` }],
         ]);
       }
     }

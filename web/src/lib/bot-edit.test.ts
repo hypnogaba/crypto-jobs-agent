@@ -54,9 +54,9 @@ beforeEach(() => {
     if (sql.includes("FROM users WHERE telegram_chat_id")) return Promise.resolve({ id: "u1" });
     if (sql.includes("FROM bot_state")) return Promise.resolve(state);
     if (sql.includes("FROM profiles")) return Promise.resolve({
-      spheres: '["qa"]', industries: "[]", seniority: "middle", remote_mode: "remote_only",
+      spheres: '["qa"]', industries: "[]", remote_mode: "remote_only",
       location: null, salary_min: null, salary_currency: null,
-      custom_role: null, custom_industry: null, custom_seniority: null, wishes: null,
+      custom_role: null, custom_industry: null, wishes: null,
     });
     return Promise.resolve({ delivery_hour: 9 });
   });
@@ -77,9 +77,9 @@ describe("правка по пунктах живе в одному повідо
     expect(rows[rows.length - 1]).toEqual([{ text: "← Назад", callback_data: "ed:back" }]);
   });
 
-  it("лічильника «1 з 4» у правці одного поля немає", async () => {
+  it("лічильника «1 з 3» у правці одного поля немає", async () => {
     await handleEditButton(env, 1, "ed:spheres", "cb", "uk");
-    expect(sent("editMessageText")[0]!.text).not.toContain("1 з 4");
+    expect(sent("editMessageText")[0]!.text).not.toContain("1 з 3");
     expect(sent("editMessageText")[0]!.text).toContain("Яка робота?");
   });
 
@@ -95,13 +95,13 @@ describe("правка по пунктах живе в одному повідо
   });
 
   it("після запису поля меню повертається саме — без /profile", async () => {
-    state = { step: "edit:seniority", draft: state!.draft, message_id: ANCHOR };
-    await handleEditButton(env, 1, "ed:seniority:senior", "cb", "uk");
+    state = { step: "edit:salary", draft: state!.draft, message_id: ANCHOR };
+    await handleEditButton(env, 1, "ed:salary:90000", "cb", "uk");
     expect(run.mock.calls.map((c) => String(c[0])).some((s) => s.includes("UPDATE profiles"))).toBe(true);
     expect(sent("sendMessage")).toHaveLength(0);
     const edit = sent("editMessageText").at(-1)!;
     expect(edit.message_id).toBe(ANCHOR);
-    expect(keys(edit)).toContain("ed:salary");
+    expect(keys(edit)).toContain("ed:spheres");
     expect(savedState()).toEqual({ step: "edit:menu", messageId: ANCHOR });
   });
 

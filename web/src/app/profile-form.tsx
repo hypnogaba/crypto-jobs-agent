@@ -1,7 +1,7 @@
 import { saveProfile } from "./actions";
 import { t } from "@/lib/i18n";
 import {
-  INDUSTRIES, REMOTE_MODES, SENIORITY, SPHERES, label, needsCity, parseModes, type Locale,
+  INDUSTRIES, REMOTE_MODES, SPHERES, label, needsCity, parseModes, type Locale,
 } from "@/lib/vocab";
 
 /**
@@ -15,12 +15,9 @@ export interface ProfilePre {
   /** Своя роль і своя індустрія: те, чого немає в кнопках. Бот питає це з першого дня. */
   customRole: string | null;
   customIndustry: string | null;
-  /** Рівень своїми словами, коли жоден із чотирьох щаблів не про людину. */
-  customSeniority: string | null;
   /** Стек, роки, мови з резюме. Заповнює розбір, правити може людина. */
   cvHighlights: string | null;
   industries: string[];
-  seniority: string | null;
   remoteMode: string | null;
   location: string | null;
   salaryMin: number | null;
@@ -133,7 +130,7 @@ export default function ProfileForm({ locale, pre, back, error, quote, evidence 
   // уже позначеними кнопками.
   const nothing = Boolean(quote)
     && spheres.size === 0 && industries.size === 0
-    && !pre.seniority && modes.length === 0
+    && modes.length === 0
     && !pre.location && !pre.salaryMin && !pre.wishes;
 
   return (
@@ -212,32 +209,12 @@ export default function ProfileForm({ locale, pre, back, error, quote, evidence 
             guessLabel={t(locale, "onboarding.guessed")} />
         </Question>
 
-        <Question n={2} title={t(locale, "onboarding.seniority")}>
-          <div className="flex flex-wrap gap-2">
-            {SENIORITY.map((s) => (
-              <label key={s.id} className="chip">
-                <input type="radio" name="seniority" value={s.id} defaultChecked={pre.seniority === s.id} />
-                {label(s, locale)}
-              </label>
-            ))}
-          </div>
-          {/* Рівень теж має «свій варіант» — у боті він був з першого дня,
-              а на сайті людину замикали в чотири щаблі. «Head of BD» — це не
-              lead і не senior, і тепер ці слова шукаються в назві вакансії. */}
-          <OwnWords name="customSeniority" locale={locale} value={pre.customSeniority}
-            placeholder={t(locale, "onboarding.seniorityPlaceholder")} />
-          <Reasons items={kept([
-            why("seniority", SENIORITY.find((x) => x.id === pre.seniority)
-              ? label(SENIORITY.find((x) => x.id === pre.seniority)!, locale) : ""),
-          ])} />
-        </Question>
-
         {/* Галочки, не радіо: «офіс у моєму місті» і «готовий переїхати» —
             не альтернативи, і людині, згодній на обидва, раніше доводилось
             викреслити одне. «Тільки віддалено» лишається виключним: разом
             з рештою воно було б суперечністю. Скрипт нижче тримає це
             правило й вмикає обов'язковість міста. */}
-        <Question n={3} title={t(locale, "onboarding.remote")} hint={t(locale, "onboarding.remoteHint")}>
+        <Question n={2} title={t(locale, "onboarding.remote")} hint={t(locale, "onboarding.remoteHint")}>
           <div className="flex flex-wrap gap-2" id="where">
             {REMOTE_MODES.map((m) => (
               <label key={m.id} className="chip">
@@ -276,7 +253,7 @@ export default function ProfileForm({ locale, pre, back, error, quote, evidence 
           )}
         </Question>
 
-        <Question n={4} title={t(locale, "onboarding.salary")} hint={t(locale, "onboarding.salaryHint")}>
+        <Question n={3} title={t(locale, "onboarding.salary")} hint={t(locale, "onboarding.salaryHint")}>
           <div className="flex gap-3">
             <input type="number" name="salaryMin" className="field mono" placeholder="90000"
               defaultValue={pre.salaryMin ?? ""} />
@@ -294,14 +271,14 @@ export default function ProfileForm({ locale, pre, back, error, quote, evidence 
             стек, роки й мови не ловить жодна кнопка, а саме за ними
             відрізняються дві людини з однаковими галочками. Поле видиме й
             редаговане — це слова людини, а не наш висновок про неї. */}
-        <Question n={5} title={t(locale, "onboarding.fromCv")} hint={t(locale, "onboarding.fromCvHint")}>
+        <Question n={4} title={t(locale, "onboarding.fromCv")} hint={t(locale, "onboarding.fromCvHint")}>
           <textarea name="cvHighlights" className="field" rows={2} maxLength={300}
             defaultValue={pre.cvHighlights ?? ""} placeholder={t(locale, "onboarding.fromCvPlaceholder")} />
         </Question>
 
         {/* Побажання: те, чого немає в кнопках. Той самий стовпець, у який
             бот дописує вільний текст, — тут його можна прочитати й підправити. */}
-        <Question n={6} title={t(locale, "onboarding.wishes")} hint={t(locale, "onboarding.wishesHint")}>
+        <Question n={5} title={t(locale, "onboarding.wishes")} hint={t(locale, "onboarding.wishesHint")}>
           <textarea name="wishes" className="field" rows={3} maxLength={2000}
             defaultValue={pre.wishes ?? ""} placeholder={t(locale, "onboarding.wishesPlaceholder")} />
         </Question>
