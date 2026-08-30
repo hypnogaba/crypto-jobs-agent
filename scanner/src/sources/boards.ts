@@ -409,8 +409,10 @@ function jobLocation(node: Record<string, unknown>): string | null {
 }
 
 
-/** Скільки сторінок вакансій відкриваємо за прогін на одну таку дошку. */
-const JSONLD_PAGES = 40;
+/** Скільки сторінок СПИСКУ гортаємо. */
+const JSONLD_LIST_PAGES = 10;
+/** Скільки сторінок ВАКАНСІЙ відкриваємо за прогін на одну дошку. */
+const JSONLD_JOBS = 120;
 
 /**
  * Дошка, яку читаємо розміткою.
@@ -421,25 +423,51 @@ const JSONLD_PAGES = 40;
  * блок JobPosting там належить їй, решта — «схожі вакансії» збоку (перевірено
  * на web3.career: слаг адреси збігається саме з першим блоком).
  *
- * Тому: беремо список, збираємо з нього посилання на вакансії, відкриваємо
- * кожне. Сорок за прогін — дошка не мусить коштувати дорожче за сорок
- * запитів на добу.
+ * Гортаємо список, бо однієї сторінки замало: web3.career показує
+ * вісімнадцять вакансій за раз, а має сорок одну тисячу. Читати їх усі ми не
+ * будемо ніколи й не мусимо — дошка сортує найновішим уперед, а нам і треба
+ * найновіше. Сто двадцять вакансій на добу при чотирнадцятиденній свіжості —
+ * це щоденний зріз, а не спроба скачати сайт.
  */
 async function fetchJsonLd(board: Board, country: string | null, o: FetchOptions): Promise<RawJob[]> {
-  const page = await fetchXml(board.feedUrl, {}, o);
+  const first = await fetchXml(board.feedUrl, {}, o);
 
   // Якщо дошці пощастило мати повну розмітку прямо в списку — на цьому все.
-  const direct = parseJobPostings(page, board.name, country);
+  const direct = parseJobPostings(first, board.name, country);
   if (direct.length) return direct;
 
-  const links = jobLinks(page, board.feedUrl).slice(0, JSONLD_PAGES);
-  const out: RawJob[] = [];
-  await mapLimit(links, 4, async (u) => {
+  const links = new Set(jobLinks(first, board.feedUrl));
+
+  /**
+   * Наступні сторінки. `?page=N` — найпоширеніший вигляд, і спроба безпечна
+   * сама собою: дошка, яка про такий параметр не знає, віддасть ту саму
+   * першу сторінку, нових посилань не буде, і цикл спиниться після одного
+   * зайвого запиту.
+   */
+  for (let n = 2; n <= JSONLD_LIST_PAGES && links.size < JSONLD_JOBS; n++) {
+    let next: string;
     try {
-      const first = parseJobPostings(await fetchXml(u, {}, o), board.name, country, u)[0];
-      if (first) out.push(first);
+      const u = new URL(board.feedUrl);
+      u.searchParams.set("page", String(n));
+      next = u.toString();
+    } catch { break; }
+
+    let more: string[];
+    try { more = jobLinks(await fetchXml(next, {}, o), board.feedUrl); }
+    catch { break; }
+
+    const before = links.size;
+    for (const l of more) links.add(l);
+    if (links.size === before) break;   // та сама сторінка — гортати нікуди
+  }
+
+  const out: RawJob[] = [];
+  await mapLimit([...links].slice(0, JSONLD_JOBS), 4, async (u) => {
+    try {
+      const job = parseJobPostings(await fetchXml(u, {}, o), board.name, country, u)[0];
+      if (job) out.push(job);
     } catch {
-      // Одна сторінка з чотирьох десятків не вирок дошці.
+      // Одна сторінка зі ста двадцяти не вирок дошці.
     }
   });
   return out;

@@ -39,15 +39,45 @@ export function mapIndustries(org: GetroJob["organization"]): string[] {
  * Ендпоінт віддає 406 без заголовка Accept: application/json. Саме через це
  * джерело раніше вважалося мертвим. http.ts надсилає його за замовчуванням.
  */
-export async function fetchGetro(collectionId: number, o: FetchOptions = {}, pages = 3): Promise<RawJob[]> {
+/**
+ * Стеля сторінок на одну колекцію.
+ *
+ * Getro віддає РІВНО ДВАДЦЯТЬ вакансій на сторінку й мовчки ігнорує
+ * `hitsPerPage`: ми просили сто й отримували двадцять, не помічаючи цього
+ * роками. Тобто стара стеля «три сторінки» означала не 300 вакансій, а 60 —
+ * при 1085 у Dragonfly і 925 у Polychain ми брали заледве двадцяту частину.
+ *
+ * Скільки сторінок треба насправді, каже сама колекція полем `count` на
+ * першій сторінці, тож стеля спрацьовує лише на велетнях. Двісті — це 4000
+ * вакансій; найбільша відома колекція має 3666, тож зараз не ріже нікого.
+ *
+ * Дорого це не коштує саме тому, що розмір відомий наперед: маленька
+ * колекція на 27 вакансій попросить дві сторінки, а не двісті. На всіх
+ * двадцяти колекціях виходить близько п'ятисот запитів на добу.
+ */
+const MAX_PAGES = 200;
+/** Скільки Getro віддає за раз. Не наш вибір і не налаштовується. */
+const PER_PAGE = 20;
+
+export async function fetchGetro(collectionId: number, o: FetchOptions = {}, pages = MAX_PAGES): Promise<RawJob[]> {
   const jobs: RawJob[] = [];
-  for (let page = 0; page < pages; page++) {
-    const p = await fetchJson<{ results?: { jobs?: GetroJob[] } }>(
+  let limit = pages;
+  for (let page = 0; page < limit; page++) {
+    const p = await fetchJson<{ results?: { jobs?: GetroJob[]; count?: number } }>(
       `https://api.getro.com/api/v2/collections/${collectionId}/search/jobs`,
       { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ page, hitsPerPage: 100, filters: {} }) }, o);
+        body: JSON.stringify({ page, hitsPerPage: PER_PAGE, filters: {} }) }, o);
     const batch = p.results?.jobs ?? [];
     if (batch.length === 0) break;
+
+    // Колекція сама каже свій розмір — беремо рівно стільки сторінок, скільки
+    // в ній є, і не стукаємо навмання до порожньої.
+    if (page === 0) {
+      const count = p.results?.count;
+      if (typeof count === "number" && count > 0) {
+        limit = Math.min(pages, Math.ceil(count / PER_PAGE));
+      }
+    }
     for (const j of batch) {
       if (!j.url || !j.title) continue;
       const inheritedTags = mapIndustries(j.organization);
