@@ -54,23 +54,64 @@ interface Found {
  * стрічку блогу: `dynamitejobs.com` віддає 138 елементів, і всі вони — статті
  * на кшталт «AI in Hiring: The Good, The Bad».
  */
-async function probeHost(c: Candidate): Promise<Found | null> {
-  for (const path of PATHS) {
-    const feedUrl = `https://${c.host}${path}`;
-    const board: Board = {
-      name: "probe", label: c.host, country: "*", feedUrl, kind: "rss",
-    };
+/**
+ * Стрічка, яку сторінка сама про себе оголошує.
+ *
+ * Питаємо тег, для якого це й придумано. Без цього кроку перевірка ловила б
+ * лише дошки зі стрічкою за вгаданою адресою — а `hireeing.com` тримає її на
+ * `/rss.xml`, і в переліку шляхів її б не було. З шести дошок, доданих
+ * розвідкою вручну, дві знайшлись саме так.
+ */
+async function declaredFeed(host: string): Promise<string | null> {
+  const base = `https://${host}/`;
+  let html: string;
+  try {
+    const { fetchXml } = await import("./http.js");
+    html = await fetchXml(base, {}, { retries: 0, timeoutMs: 15_000 });
+  } catch {
+    return null;
+  }
+  for (const tag of html.match(/<link\b[^>]*>/gi) ?? []) {
+    if (!/rel=["']?alternate/i.test(tag)) continue;
+    if (!/type=["']?application\/(?:rss|atom)\+xml/i.test(tag)) continue;
+    const href = /href=["']([^"']+)["']/i.exec(tag)?.[1];
+    if (!href) continue;
     try {
-      const jobs = await fetchBoard(board, { retries: 0, timeoutMs: 15_000 });
-      if (jobs.length >= MIN_JOBS) {
-        return {
-          candidate: c, feedUrl, jobs: jobs.length, items: jobs.length,
-          samples: jobs.slice(0, 3).map((j) => `${j.company} — ${j.title}`),
-        };
-      }
-    } catch {
-      // 403, таймаут, не XML — просто не цей шлях.
-    }
+      const u = new URL(href, base);
+      // Чужа стрічка з чужого домену — не наша дошка.
+      if (u.hostname.replace(/^www\./, "") === host) return u.toString();
+    } catch { /* криве href — просто наступний тег */ }
+  }
+  return null;
+}
+
+async function tryFeed(c: Candidate, feedUrl: string): Promise<Found | null> {
+  const board: Board = {
+    name: "probe", label: c.host, country: "*", feedUrl, kind: "rss",
+  };
+  try {
+    const jobs = await fetchBoard(board, { retries: 0, timeoutMs: 15_000 });
+    if (jobs.length < MIN_JOBS) return null;
+    return {
+      candidate: c, feedUrl, jobs: jobs.length, items: jobs.length,
+      samples: jobs.slice(0, 3).map((j) => `${j.company} — ${j.title}`),
+    };
+  } catch {
+    // 403, таймаут, не XML — просто не ця адреса.
+    return null;
+  }
+}
+
+async function probeHost(c: Candidate): Promise<Found | null> {
+  // Спершу те, що сторінка каже сама: один запит замість чотирнадцяти.
+  const declared = await declaredFeed(c.host);
+  if (declared) {
+    const hit = await tryFeed(c, declared);
+    if (hit) return hit;
+  }
+  for (const path of PATHS) {
+    const hit = await tryFeed(c, `https://${c.host}${path}`);
+    if (hit) return hit;
   }
   return null;
 }
