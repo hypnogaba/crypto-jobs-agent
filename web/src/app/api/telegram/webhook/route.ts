@@ -115,6 +115,12 @@ async function handle(env: Env, raw: unknown): Promise<void> {
   // апдейт, і ми його весь час викидали: в адмінці людина була вісьмома
   // символами UUID, за якими нікого не впізнати й нікому не написати.
   await rememberName(chatId, update.message?.from ?? update.callback_query?.from);
+
+  // Слід дотику — окремим рядком, бо `webhook_updates` живе добу й існує
+  // заради захисту від повторів, а не заради історії. Пишемо лише рід дії:
+  // що саме людина написала, для графіка активності не потрібно.
+  await run("INSERT INTO bot_activity (chat_id, kind) VALUES (?,?)",
+    String(chatId), update.callback_query ? "button" : "message");
   const langCode = (update.message?.from?.language_code
     ?? update.callback_query?.from?.language_code ?? "en").slice(0, 2).toLowerCase();
   const locale = known && isLocale(known.locale)

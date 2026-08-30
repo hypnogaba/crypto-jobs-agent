@@ -568,9 +568,17 @@ export default async function Admin({ searchParams }: {
   // яких ми ще не знаємо, і досі його не було видно в панелі взагалі.
   const getro = await all<{ collection_id: number; label: string; url: string | null;
     enabled: number; jobs: number }>(
+    // Лише ті, що читаються. Вимкнених буде кілька сотень: розвідка щонеділі
+    // знаходить живі колекції по всьому діапазону й записує їх зупиненими, бо
+    // читати всі щодня коштувало б півтори години замість п'яти хвилин. Їхнє
+    // місце — число, а не стіна рядків.
     `SELECT g.collection_id, g.label, g.url, g.enabled,
             (SELECT COUNT(*) FROM jobs_cache j WHERE j.source = 'getro:' || g.collection_id) jobs
-       FROM getro_collections g ORDER BY jobs DESC, g.collection_id`);
+       FROM getro_collections g WHERE g.enabled = 1
+      ORDER BY jobs DESC, g.collection_id`);
+
+  const getroOff = (await one<{ n: number }>(
+    "SELECT COUNT(*) n FROM getro_collections WHERE enabled = 0"))?.n ?? 0;
 
   // Кнопку «підтягнути ніки» показуємо лише тоді, коли є кого підтягувати.
   const nameless = (await one<{ n: number }>(
@@ -582,6 +590,14 @@ export default async function Admin({ searchParams }: {
     `SELECT date(started_at) d, MAX(jobs_found) jobs, MAX(distinct_companies) companies
        FROM scan_runs WHERE status='ok' AND started_at >= datetime('now', ?)
       GROUP BY d ORDER BY d`, `-${DAYS} day`);
+  // Дотики в боті: єдина наша власна міра того, чи людина взагалі користується
+  // продуктом. Відвідування САЙТУ сюди не входять — вони живуть у Cloudflare
+  // Web Analytics, і дістати їх можна лише через їхній GraphQL із окремим
+  // токеном. Це інша задача, і робити вигляд, що графік їх показує, не можна.
+  const taps = await all<{ d: string; n: number }>(
+    `SELECT date(at) d, COUNT(*) n FROM bot_activity
+      WHERE at >= datetime('now', ?) GROUP BY d ORDER BY d`, `-${DAYS} day`);
+
   const signups = await all<{ d: string; n: number }>(
     "SELECT date(created_at) d, COUNT(*) n FROM users GROUP BY d ORDER BY d");
   // Скільки людей було до початку вікна — щоб лінія росла з реального рівня,
@@ -656,6 +672,10 @@ export default async function Admin({ searchParams }: {
       d,
       v: before + signups.filter((x) => x.d >= axis[0]! && x.d <= d).reduce((a, x) => a + x.n, 0),
     })),
+    // Дотики — за день, а не накопиченням: питання тут «чи користуються нами
+    // сьогодні», і зростаюча крива на нього відповідала б «так» навіть у
+    // місяць повної тиші. День без жодного дотику має бути видно нулем.
+    taps: axis.map((d) => ({ d, v: taps.find((x) => x.d === d)?.n ?? 0 })),
   };
 
   // ── Історія зводок ──────────────────────────────────────────────────────
@@ -812,6 +832,7 @@ export default async function Admin({ searchParams }: {
               <Spark points={growth.jobs} label="вакансій у кеші" />
               <Spark points={growth.companies} label="компаній у скані" />
               <Spark points={growth.people} label="людей усього" />
+              <Spark points={growth.taps} label="дотиків у боті за день" />
             </div>
           </Block>
 
@@ -1092,7 +1113,14 @@ export default async function Admin({ searchParams }: {
             {getro.length > 0 && (
               <details className="card mt-3 px-6 py-5">
                 <summary className="flex cursor-pointer flex-wrap items-baseline justify-between gap-3">
-                  <span className="font-medium">Колекції Getro · {getro.length}</span>
+                  <span className="font-medium">
+                    Колекції Getro · {getro.length}
+                    {getroOff > 0 && (
+                      <span className="ml-2 font-normal" style={{ color: "var(--muted)" }}>
+                        і ще {getroOff} знайдених, але зупинених
+                      </span>
+                    )}
+                  </span>
                   <span className="mono text-xs" style={{ color: "var(--ember)" }}>показати</span>
                 </summary>
                 <p className="mt-2 max-w-prose text-sm" style={{ color: "var(--ink-2)" }}>
