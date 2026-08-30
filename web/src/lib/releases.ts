@@ -13,6 +13,10 @@ export const RELEASES: Release[] = [
     "date": "2026-08-30",
     "changes": [
       {
+        "hash": "b376ab4",
+        "subject": "Джерела: Recruitee, перетегування без скану, вузькі стрічки, межа доречності"
+      },
+      {
         "hash": "4884f12",
         "subject": "Вільне ім'я дошки замість відмови при збігу"
       },
@@ -25,7 +29,7 @@ export const RELEASES: Release[] = [
         "subject": "Чотири блокери запуску: кабінет як канал, порожній профіль, мова, вікно кандидатів"
       }
     ],
-    "chores": 0
+    "chores": 2
   },
   {
     "date": "2026-08-29",
@@ -597,4 +601,4 @@ export const RELEASES: Release[] = [
   }
 ];
 
-export const GENERATED_AT = "2026-08-30 10:17";
+export const GENERATED_AT = "2026-08-30 10:30";
