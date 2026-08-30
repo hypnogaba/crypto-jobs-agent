@@ -13,6 +13,14 @@ export const RELEASES: Release[] = [
     "date": "2026-08-30",
     "changes": [
       {
+        "hash": "d13e1c3",
+        "subject": "Панель: активність у боті, і сотні колекцій Getro не роблять із неї стіни"
+      },
+      {
+        "hash": "6693bdd",
+        "subject": "Розвідка знаходила колекції Getro і викидала їх"
+      },
+      {
         "hash": "3272b96",
         "subject": "Дедуп за повнотою, а не за алфавітом; графіки з періодом і розгортанням"
       },
@@ -209,7 +217,7 @@ export const RELEASES: Release[] = [
         "subject": "Чотири блокери запуску: кабінет як канал, порожній профіль, мова, вікно кандидатів"
       }
     ],
-    "chores": 9
+    "chores": 10
   },
   {
     "date": "2026-08-29",
@@ -781,4 +789,4 @@ export const RELEASES: Release[] = [
   }
 ];
 
-export const GENERATED_AT = "2026-08-30 16:08";
+export const GENERATED_AT = "2026-08-30 16:12";
