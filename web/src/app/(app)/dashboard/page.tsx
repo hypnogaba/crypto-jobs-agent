@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import Shell from "@/app/shell";
 import ApplyButton from "./apply-button";
@@ -12,8 +13,14 @@ import { dayLabel, formatWhen, nextDelivery } from "@/lib/digest-time";
 import { zoneName } from "@/lib/tz";
 import { toLatin } from "@/lib/geo";
 import type { Locale } from "@/lib/vocab";
+import { MATCH_SORTS, isMatchSort, type MatchSort } from "@/lib/match-sort";
 
 type Match = Awaited<ReturnType<typeof listMatches>>[number];
+
+/** Підпис під кожен порядок — щоб перемикач не був набором ідентифікаторів. */
+const SORT_LABEL: Record<MatchSort, string> = {
+  day: "dash.sortDay", score: "dash.sortScore", salary: "dash.sortSalary", fresh: "dash.sortFresh",
+};
 
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -21,16 +28,129 @@ export async function generateMetadata(): Promise<Metadata> {
   return { title: t(locale, "dash.title") };
 }
 
-export default async function Dashboard({ searchParams }: { searchParams: Promise<{ queued?: string }> }) {
-  const { queued } = await searchParams;
+// Те саме, що на головній: локація з дошки лишається в базі як є, а на
+// англійському й французькому екрані показується латиницею.
+const place = (m: Match, locale: Locale): string | null =>
+  m.location && (locale === "en" || locale === "fr") ? toLatin(m.location) : m.location;
+
+const money = (m: Match, locale: Locale): string | null =>
+  m.salary_min
+    ? `${m.salary_min.toLocaleString(locale === "en" ? "en-GB" : locale)} ${m.salary_currency ?? ""}`.trim()
+    : null;
+
+/**
+ * Одна вакансія в кабінеті.
+ *
+ * Винесена з циклу, бо тепер її малюють два різні види: пачками по днях і
+ * пласким списком, коли людина сама обрала порядок. Дві копії розійшлися б
+ * першою ж правкою — так уже було з формою профілю.
+ */
+function MatchCard({ m, i, locale }: { m: Match; i: number; locale: Locale }) {
+                
+                  if (m.hidden_at) {
+                    return (
+                      <li key={m.id} className="flex items-center justify-between gap-4 px-6 py-3 text-xs"
+                          style={{ color: "var(--muted)" }}>
+                        <span>{t(locale, "dash.hidden")}</span>
+                        <form action={unhideMatch}>
+                          <input type="hidden" name="id" value={m.id} />
+                          <button className="link text-xs">{t(locale, "dash.unhide")}</button>
+                        </form>
+                      </li>
+                    );
+                  }
+
+                  const facts = factLabels(parseFacts(m.match_facts), locale);
+                  return (
+                    <li key={m.id}
+                        className={`match grid grid-cols-[2.5rem_1fr] gap-4 px-6 py-6${m.applied_at ? " match-done" : ""}`}>
+                      <span className="mono pt-0.5 text-sm" style={{ color: "var(--muted)" }}>
+                        {String(i + 1).padStart(2, "0")}
+                      </span>
+                      <div className="min-w-0">
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="min-w-0">
+                            <h3 className="font-medium leading-snug">
+                              {m.company} <span style={{ color: "var(--muted)" }}>·</span> {m.title}
+                            </h3>
+                            <p className="mono mt-1 text-xs" style={{ color: "var(--muted)" }}>
+                              {[place(m, locale), money(m, locale)].filter(Boolean).join(" · ") || "—"}
+                            </p>
+                          </div>
+                          {!m.applied_at && (
+                            <div className="row-actions flex shrink-0 items-center gap-2">
+                              <ApplyButton id={m.id} label={t(locale, "dash.apply")} />
+                              <form action={hideMatch}>
+                                <input type="hidden" name="id" value={m.id} />
+                                <button aria-label={t(locale, "dash.hide")} title={t(locale, "dash.hide")}
+                                        className="btn btn-quiet px-2 py-1 text-xs">✕</button>
+                              </form>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Опис самої вакансії. Раніше тут стояв переказ
+                            профілю, однаковий на всі п'ять позицій. Старі
+                            добірки опису не мають — для них лишається
+                            попередній рядок, але вже без зламаного підпису. */}
+                        {m.summary ? (
+                          <p className="mt-3 text-sm" style={{ color: "var(--ink-2)" }}>{m.summary}</p>
+                        ) : m.why_fits ? (
+                          <p className="mt-3 text-sm" style={{ color: "var(--muted)" }}>{m.why_fits}</p>
+                        ) : null}
+
+                        {facts.length > 0 && (
+                          <p className="mt-2">
+                            {facts.map((f) => <span key={f} className="fact">{f}</span>)}
+                          </p>
+                        )}
+
+                        {m.applied_at && (
+                          // div, не p: <form> усередині <p> — недійсний HTML,
+                          // і React зривається на гідратації.
+                          <div className="mono mt-3 flex flex-wrap items-center gap-3 text-xs" style={{ color: "var(--ok)" }}>
+                            <span>✓ {t(locale, "dash.appliedOn").replace("{d}", m.applied_at.slice(0, 10))}</span>
+                            {/* Посилання лишається й після подачі.
+                                Раніше воно жило лише в блоці «ще не подано»,
+                                тож щойно людина відкривала вакансію, єдиний
+                                шлях до неї зникав — повернутись можна було
+                                тільки через «Скасувати», тобто стерши сам
+                                факт, що вона подалась. Сіре мало означати
+                                «ти це вже бачив», а означало «сюди більше
+                                не можна».
+
+                                Через /apply, а не прямо на m.url: той
+                                маршрут перевіряє власність рядка й чистить
+                                адресу (база наповнюється чужими стрічками),
+                                а дату подачі не перезаписує — вона там під
+                                COALESCE. */}
+                            <a href={`/apply/${m.id}`} target="_blank" rel="noreferrer"
+                               className="link text-xs">{t(locale, "dash.openAgain")} ↗</a>
+                            <form action={undoApplied}>
+                              <input type="hidden" name="id" value={m.id} />
+                              <button className="link text-xs">{t(locale, "dash.undo")}</button>
+                            </form>
+                          </div>
+                        )}
+                      </div>
+                    </li>
+                  );
+}
+
+export default async function Dashboard(
+  { searchParams }: { searchParams: Promise<{ queued?: string; sort?: string }> }
+) {
+  const { queued, sort } = await searchParams;
   const locale = await detectLocale();
   const user = await currentUser();
   if (!user) redirect("/login");
 
-  const matches = await listMatches();
+  const matches = await listMatches(sort);
   const me = await one<{ timezone: string; delivery_hour: number }>(
     "SELECT timezone,delivery_hour FROM users WHERE id=?", user.id);
   const tz = me?.timezone ?? "UTC";
+  const current: MatchSort = isMatchSort(sort) ? sort : "day";
+  const byDay = current === "day";
 
   // «Перша добірка — протягом години» правдиве лише поки запит справді
   // висить неопрацьованим. Якщо його вже розгребли й нічого не знайшлося,
@@ -47,16 +167,6 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     digests.set(m.digest_id, list);
   }
 
-  // Те саме, що на головній: локація з дошки лишається в базі як є, а на
-  // англійському й французькому екрані показується латиницею.
-  const place = (m: Match): string | null =>
-    m.location && (locale === "en" || locale === "fr") ? toLatin(m.location) : m.location;
-
-  const money = (m: Match): string | null =>
-    m.salary_min
-      ? `${m.salary_min.toLocaleString(locale === "en" ? "en-GB" : locale)} ${m.salary_currency ?? ""}`.trim()
-      : null;
-
   return (
     <Shell locale={locale} title={t(locale, "dash.title")} width="roomy">
       {queued && <p className="tag tag-ok mb-6 inline-block">{t(locale, "dash.queued")}</p>}
@@ -66,12 +176,37 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
           сама лише кука цього браузера. */}
       {!user.telegramChatId && <NoTelegramNote locale={locale} />}
 
+      {/* Посилання, а не форма: порядок має лишатись в адресі, щоб його можна
+          було зберегти в закладках і щоб «назад» повертало попередній вид. */}
+      {matches.length > 0 && (
+        <div className="mb-6 flex flex-wrap items-center gap-x-4 gap-y-2">
+          <span className="eyebrow">{t(locale, "dash.sortBy")}</span>
+          {MATCH_SORTS.map((s) => (
+            <Link key={s} href={s === "day" ? "/dashboard" : `/dashboard?sort=${s}`}
+                  className="mono text-xs"
+                  style={{ color: s === current ? "var(--ember)" : "var(--muted)",
+                           textDecoration: s === current ? "underline" : "none" }}>
+              {t(locale, SORT_LABEL[s])}
+            </Link>
+          ))}
+        </div>
+      )}
+
       {matches.length === 0 ? (
         <FirstRun locale={locale} hour={me?.delivery_hour ?? 9} tz={me?.timezone ?? "UTC"}
                   connected={Boolean(user.telegramChatId)} queued={firstOnTheWay} />
       ) : (
         <div className="flex flex-col gap-12">
-          {[...digests.entries()].map(([digestId, group]) => {
+          {/* Плаский список, коли людина сама обрала порядок.
+              Пачки по днях відповідають на «що прийшло сьогодні», але не на
+              «де та вакансія на п'ять тисяч» — розкладене по днях шукати
+              нічим. Тому інший порядок означає й інший вид. */}
+          {byDay ? null : (
+            <ol className="ruled card">
+              {matches.map((m, i) => <MatchCard key={m.id} m={m} i={i} locale={locale} />)}
+            </ol>
+          )}
+          {byDay && [...digests.entries()].map(([digestId, group]) => {
             const applied = group.filter((m) => m.applied_at).length;
             return (
               <section key={digestId}>
@@ -98,96 +233,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                 </div>
 
                 <ol className="ruled card mt-4">
-                  {group.map((m, i) => {
-                    if (m.hidden_at) {
-                      return (
-                        <li key={m.id} className="flex items-center justify-between gap-4 px-6 py-3 text-xs"
-                            style={{ color: "var(--muted)" }}>
-                          <span>{t(locale, "dash.hidden")}</span>
-                          <form action={unhideMatch}>
-                            <input type="hidden" name="id" value={m.id} />
-                            <button className="link text-xs">{t(locale, "dash.unhide")}</button>
-                          </form>
-                        </li>
-                      );
-                    }
-
-                    const facts = factLabels(parseFacts(m.match_facts), locale);
-                    return (
-                      <li key={m.id}
-                          className={`match grid grid-cols-[2.5rem_1fr] gap-4 px-6 py-6${m.applied_at ? " match-done" : ""}`}>
-                        <span className="mono pt-0.5 text-sm" style={{ color: "var(--muted)" }}>
-                          {String(i + 1).padStart(2, "0")}
-                        </span>
-                        <div className="min-w-0">
-                          <div className="flex items-start justify-between gap-4">
-                            <div className="min-w-0">
-                              <h3 className="font-medium leading-snug">
-                                {m.company} <span style={{ color: "var(--muted)" }}>·</span> {m.title}
-                              </h3>
-                              <p className="mono mt-1 text-xs" style={{ color: "var(--muted)" }}>
-                                {[place(m), money(m)].filter(Boolean).join(" · ") || "—"}
-                              </p>
-                            </div>
-                            {!m.applied_at && (
-                              <div className="row-actions flex shrink-0 items-center gap-2">
-                                <ApplyButton id={m.id} label={t(locale, "dash.apply")} />
-                                <form action={hideMatch}>
-                                  <input type="hidden" name="id" value={m.id} />
-                                  <button aria-label={t(locale, "dash.hide")} title={t(locale, "dash.hide")}
-                                          className="btn btn-quiet px-2 py-1 text-xs">✕</button>
-                                </form>
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Опис самої вакансії. Раніше тут стояв переказ
-                              профілю, однаковий на всі п'ять позицій. Старі
-                              добірки опису не мають — для них лишається
-                              попередній рядок, але вже без зламаного підпису. */}
-                          {m.summary ? (
-                            <p className="mt-3 text-sm" style={{ color: "var(--ink-2)" }}>{m.summary}</p>
-                          ) : m.why_fits ? (
-                            <p className="mt-3 text-sm" style={{ color: "var(--muted)" }}>{m.why_fits}</p>
-                          ) : null}
-
-                          {facts.length > 0 && (
-                            <p className="mt-2">
-                              {facts.map((f) => <span key={f} className="fact">{f}</span>)}
-                            </p>
-                          )}
-
-                          {m.applied_at && (
-                            // div, не p: <form> усередині <p> — недійсний HTML,
-                            // і React зривається на гідратації.
-                            <div className="mono mt-3 flex flex-wrap items-center gap-3 text-xs" style={{ color: "var(--ok)" }}>
-                              <span>✓ {t(locale, "dash.appliedOn").replace("{d}", m.applied_at.slice(0, 10))}</span>
-                              {/* Посилання лишається й після подачі.
-                                  Раніше воно жило лише в блоці «ще не подано»,
-                                  тож щойно людина відкривала вакансію, єдиний
-                                  шлях до неї зникав — повернутись можна було
-                                  тільки через «Скасувати», тобто стерши сам
-                                  факт, що вона подалась. Сіре мало означати
-                                  «ти це вже бачив», а означало «сюди більше
-                                  не можна».
-
-                                  Через /apply, а не прямо на m.url: той
-                                  маршрут перевіряє власність рядка й чистить
-                                  адресу (база наповнюється чужими стрічками),
-                                  а дату подачі не перезаписує — вона там під
-                                  COALESCE. */}
-                              <a href={`/apply/${m.id}`} target="_blank" rel="noreferrer"
-                                 className="link text-xs">{t(locale, "dash.openAgain")} ↗</a>
-                              <form action={undoApplied}>
-                                <input type="hidden" name="id" value={m.id} />
-                                <button className="link text-xs">{t(locale, "dash.undo")}</button>
-                              </form>
-                            </div>
-                          )}
-                        </div>
-                      </li>
-                    );
-                  })}
+                  {group.map((m, i) => <MatchCard key={m.id} m={m} i={i} locale={locale} />)}
                 </ol>
               </section>
             );
@@ -221,8 +267,8 @@ function FirstRun({ locale, hour, tz, connected, queued }:
         {!queued && (
           <form action={requestFirstFive}><button className="btn" type="submit">{t(locale, "first.now")}</button></form>
         )}
-        {!connected && <a href="/telegram" className="btn">{t(locale, "telegram.button")}</a>}
-        <a href="/profile" className="link text-sm">{t(locale, "first.edit")}</a>
+        {!connected && <Link href="/telegram" className="btn">{t(locale, "telegram.button")}</Link>}
+        <Link href="/profile" className="link text-sm">{t(locale, "first.edit")}</Link>
       </div>
       <p className="mt-4 text-xs" style={{ color: "var(--muted)" }}>
         {queued ? t(locale, "dash.queued") : t(locale, "first.testNote")}

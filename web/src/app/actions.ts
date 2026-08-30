@@ -3,6 +3,7 @@
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
+import { MATCH_LIMIT, orderFor } from "@/lib/match-sort";
 import { all, one, run, uuid } from "@/lib/db";
 import { createSession, currentUser, destroySession, requireUser } from "@/lib/auth";
 import { parseProfile, type ParsedProfile } from "@/lib/parse";
@@ -408,18 +409,23 @@ export async function recordFeedback(formData: FormData): Promise<void> {
  * "use server", і кожен експорт тут є HTTP-ендпоінтом, який можна викликати
  * з будь-яким аргументом.
  */
-export async function listMatches() {
+export async function listMatches(sort: string | undefined = "day") {
   const user = await requireUser();
+
+  // Порядок збирається з БІЛОГО СПИСКУ, не з рядка запиту: `sort` приходить
+  // з адреси, а тут «use server» — кожен експорт є відкритим ендпоінтом.
+  const order = orderFor(sort);
+
   return all<{ id: string; company: string; title: string; location: string | null; url: string;
         why_fits: string; match_facts: string; summary: string | null;
         salary_min: number | null; salary_currency: string | null;
         applied_at: string | null; hidden_at: string | null;
-        created_at: string; digest_id: string }>(
+        created_at: string; digest_id: string; score: number | null }>(
     `SELECT s.id,j.company,j.title,j.location,j.url,s.why_fits,s.match_facts,
             j.summary,j.salary_min,j.salary_currency,
-            s.applied_at,s.hidden_at,s.created_at,s.digest_id
+            s.applied_at,s.hidden_at,s.created_at,s.digest_id,s.score
      FROM sent s JOIN jobs_cache j ON j.id = s.job_id
-     WHERE s.user_id=? ORDER BY s.created_at DESC LIMIT 50`, user.id);
+     WHERE s.user_id=? ORDER BY ${order} LIMIT ${MATCH_LIMIT}`, user.id);
 }
 
 /**

@@ -29,10 +29,13 @@ export class Repo {
    * адмінки й не потребує деплою.
    */
   async listBoards(): Promise<Board[]> {
-    const rows = await this.d1.query<{ name: string; label: string; country: string; feed_url: string; kind: string }>(
-      "SELECT name,label,country,feed_url,kind FROM country_boards WHERE enabled=1 ORDER BY country,name");
+    const rows = await this.d1.query<{ name: string; label: string; country: string;
+      feed_url: string; kind: string; salary_period: string | null }>(
+      `SELECT name,label,country,feed_url,kind,salary_period
+         FROM country_boards WHERE enabled=1 ORDER BY country,name`);
     return rows.map((r) => ({
       name: r.name, label: r.label, country: r.country, feedUrl: r.feed_url, kind: r.kind,
+      salaryPeriod: r.salary_period ?? "year",
     }));
   }
 

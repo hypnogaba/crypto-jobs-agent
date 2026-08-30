@@ -389,3 +389,44 @@ describe("розбір списку web3.career", () => {
     expect(d.salaryMin ?? null).toBeNull();
   });
 });
+
+describe("період зарплати на дошці", () => {
+  const feed = (title: string) => `<rss><channel><item>
+      <title>${title}</title><link>https://jobs.dou.ua/vacancies/1234/</link>
+      <pubDate>Fri, 29 Aug 2026 10:00:00 +0300</pubDate></item></channel></rss>`;
+  const serve = (xml: string) =>
+    ({ fetchImpl: async () => new Response(xml, { status: 200 }) });
+
+  /**
+   * Живий заголовок DOU. Суми там місячні — 350–4500 у кеші проти
+   * 12 000–163 000 у німецької дошки, — але в заголовку про це ні слова.
+   */
+  it("місячну суму дошки зводить до річної", async () => {
+    const jobs = await fetchBoard(
+      { name: "board:dou-python", label: "DOU", country: "UA",
+        feedUrl: "https://jobs.dou.ua/f", kind: "rss", salaryPeriod: "month" },
+      serve(feed("Lead Python Developer в Motorsport Network, $2000–3000, віддалено")));
+    expect(jobs[0]).toMatchObject({ salaryMin: 24000, salaryMax: 36000 });
+  });
+
+  /** Замовчування «рік» означає «нічого не змінюється». */
+  it("річну лишає як є", async () => {
+    const jobs = await fetchBoard(
+      { name: "board:de-x", label: "X", country: "DE",
+        feedUrl: "https://x.de/f", kind: "rss" },
+      serve(feed("Backend Engineer в Acme, $90000–120000, Берлін")));
+    expect(jobs[0]).toMatchObject({ salaryMin: 90000, salaryMax: 120000 });
+  });
+
+  /**
+   * Помножена нісенітниця лишається нісенітницею: 25 мільйонів на рік
+   * з'їдають увесь верх сортування за зарплатою.
+   */
+  it("суму поза межами здорового глузду не бере взагалі", async () => {
+    const jobs = await fetchBoard(
+      { name: "board:x", label: "X", country: "*",
+        feedUrl: "https://x.com/f", kind: "rss", salaryPeriod: "month" },
+      serve(feed("Engineer в Acme, $9000000, віддалено")));
+    expect(jobs[0]!.salaryMin).toBeNull();
+  });
+});

@@ -17,7 +17,16 @@ export interface Board {
   label: string;     // DOU
   country: string;   // UA
   feedUrl: string;
-  kind: string;      // rss | api
+  kind: string;      // rss | api | jsonld | nextjs
+  /**
+   * За який період названа сума в заголовку: 'year' або 'month'.
+   *
+   * Властивість дошки, а не вакансії: DOU називає місяць, GermanTechJobs —
+   * рік, і в заголовку про це не сказано жодним словом. Вгадувати за
+   * величиною ми свідомо НЕ беремось — справжня річна зарплата в бідній
+   * країні перетворилась би на вигадану.
+   */
+  salaryPeriod?: string;
 }
 
 const iso = (v: string): string | null => {
@@ -259,6 +268,23 @@ export function isJunk(text: string, link: string): boolean {
   return false;
 }
 
+/** Найменша й найбільша річна сума, які взагалі бувають. */
+const MIN_YEARLY = 1_000;
+const MAX_YEARLY = 5_000_000;
+
+/**
+ * Сума з заголовка — у річну.
+ *
+ * Множник бере дошка, а не здогад. Межі потрібні окремо: одна вакансія на
+ * web3.career заявляла 25 мільйонів на рік, і така цифра не просто дивна —
+ * вона з'їдає весь верх будь-якого сортування за зарплатою.
+ */
+function yearlyPay(v: number | null, board: Board): number | null {
+  if (v === null) return null;
+  const n = Math.round(board.salaryPeriod === "month" ? v * 12 : v);
+  return n >= MIN_YEARLY && n <= MAX_YEARLY ? n : null;
+}
+
 /**
  * Читає одну дошку.
  *
@@ -291,7 +317,9 @@ export async function fetchBoard(board: Board, o: FetchOptions = {}): Promise<Ra
     out.push({
       url: cleanUrl(it.link), company: p.company, title: p.title,
       location: p.location, remote: p.remote, postedAt: iso(it.date),
-      salaryMin: p.salaryMin, salaryMax: p.salaryMax, salaryCurrency: p.salaryCurrency,
+      // Період бере ДОШКА: у заголовку про нього не сказано жодним словом.
+      salaryMin: yearlyPay(p.salaryMin, board), salaryMax: yearlyPay(p.salaryMax, board),
+      salaryCurrency: p.salaryCurrency,
       source: board.name, country,
     });
   }
@@ -424,8 +452,14 @@ function salaryOf(node: Record<string, unknown>): {
   const q = v as Record<string, unknown>;
   if (String(q.unitText ?? "").toUpperCase() !== "YEAR") return {};
 
-  const num = (x: unknown): number | undefined =>
-    typeof x === "number" && Number.isFinite(x) && x > 0 ? Math.round(x) : undefined;
+  // Ті самі межі, що й на заголовках: одна вакансія на web3.career заявляла
+  // 25 мільйонів на рік, і така цифра з'їдає весь верх сортування за
+  // зарплатою, нічого про зарплату не повідомляючи.
+  const num = (x: unknown): number | undefined => {
+    if (typeof x !== "number" || !Number.isFinite(x) || x <= 0) return undefined;
+    const n = Math.round(x);
+    return n >= MIN_YEARLY && n <= MAX_YEARLY ? n : undefined;
+  };
   const min = num(q.minValue) ?? num(q.value);
   const max = num(q.maxValue);
   if (min === undefined && max === undefined) return {};
