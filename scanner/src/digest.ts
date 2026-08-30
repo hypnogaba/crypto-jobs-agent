@@ -736,21 +736,46 @@ export async function fetchCandidateRows(
     //    спільнота», не могла отримати жодної DevRel-вакансії в принципі.
     //    Тепер свої рядки заходять у вікно всі, а рештою місць його добиває
     //    та сама свіжість, що й раніше.
+    // Доречність — умова, а не порядок сортування.
+    //
+    // Досі вікно бралося з УСЬОГО свіжого кеша, а «своє» лише спливало
+    // нагору сортуванням. Але pickTop потім викидає все, що не збіглося за
+    // сферою чи роллю, тож решта рядків не могла бути обрана в принципі — ми
+    // їх читали й одразу викидали. onTopicSql — надмножина того, що приймає
+    // onTopic (він ще й ловить часткові збіги ролі), тож жодного кандидата
+    // умова не втрачає.
+    //
+    // Одну річ вона таки змінює, і на краще. Стеля «три вакансії на компанію»
+    // рахувалася серед УСІХ вакансій фірми, тож власні недоречні оголошення
+    // витісняли її ж доречні: у компанії з пʼятьма вакансіями дві потрібні
+    // могли отримати rn=4 і rn=5 і не пройти. Тепер стеля рахує саме
+    // кандидатів. Правило лишилось те саме — одна фірма не забирає вікно, —
+    // але тепер воно обмежує те, що справді розглядається. Перевірено на
+    // всіх живих профілях: перші місця ті самі, змінюється хвіст, і замість
+    // «Group Product Manager, Financials» приходить «Product Manager — HER».
+    // Обидві доречні, це не погіршення.
+    //
+    // NOT EXISTS замість NOT IN з тієї ж причини: NOT IN змушував SQLite
+    // перечитувати sent на кожен рядок-кандидат, а NOT EXISTS іде по
+    // UNIQUE(user_id, job_id), який у таблиці вже є.
+    //
+    // Разом на живих профілях: 799 472 прочитаних рядки D1 на шість добірок
+    // → 174 041, тобто −78%. На одну добірку це близько 160 000 → 35 000.
     `SELECT * FROM (
        SELECT j.*, ROW_NUMBER() OVER (
          PARTITION BY j.company_key ORDER BY j.posted_at DESC, j.fetched_at DESC
-       ) AS rn,
-       ${topic.sql} AS on_topic
+       ) AS rn
        FROM jobs_cache j
-       WHERE j.id NOT IN (SELECT job_id FROM sent WHERE user_id = ?)
-         AND j.dedupe_key NOT IN (
-           SELECT dedupe_key FROM sent WHERE user_id = ? AND dedupe_key IS NOT NULL)
+       WHERE ${topic.sql} = 1
          AND j.fetched_at >= datetime('now', '-3 day')
          AND (j.country IS NULL OR j.country = ?)
+         AND NOT EXISTS (SELECT 1 FROM sent s WHERE s.user_id = ? AND s.job_id = j.id)
+         AND NOT EXISTS (
+           SELECT 1 FROM sent s WHERE s.user_id = ? AND s.dedupe_key = j.dedupe_key)
      )
      WHERE rn <= 3
-     ORDER BY on_topic DESC, posted_at DESC, fetched_at DESC
-     LIMIT ${limit}`, [...topic.params, userId, userId, profile.country ?? null]);
+     ORDER BY posted_at DESC, fetched_at DESC
+     LIMIT ${limit}`, [...topic.params, profile.country ?? null, userId, userId]);
 }
 
 /** Рядок бази → кандидат для оцінювання. */

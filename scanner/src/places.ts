@@ -21,6 +21,12 @@ const COUNTRY_WORDS: Array<[string, string[]]> = [
   // ними джерела пишуть 200+ рядків: «Remote - US», «US Remote», «UK».
   ["US", ["united states", "usa", "u.s.a.", "u.s.", "america", "us", "u s"]],
   ["CA", ["canada"]],
+  ["RU", ["russia", "russian federation"]],
+  ["BD", ["bangladesh"]],
+  ["BB", ["barbados"]],
+  ["CI", ["cote d ivoire", "cote divoire", "ivory coast"]],
+  ["IQ", ["iraq"]],
+  ["LB", ["lebanon"]],
   ["GB", ["united kingdom", "great britain", "england", "scotland", "wales", "northern ireland", "uk", "u k"]],
   ["IE", ["ireland"]],
   ["DE", ["germany", "deutschland", "німеччина"]],
@@ -121,6 +127,24 @@ const US_STATE_CODES = new Set([
 ]);
 
 /** Коди провінцій Канади. Жоден із них не є кодом штату США, тож плутанини немає. */
+/**
+ * Провінції словами, а не лише кодами.
+ *
+ * «Kitchener, Ontario», «Saskatoon, Saskatchewan», «Oakville, Ontario» —
+ * у кеші таких рядків десятки, і жоден не читався: коди ON і SK тут є, а
+ * повних назв не було. Штати США словами в цьому файлі вже є, тож це просто
+ * та сама повнота для другої країни.
+ *
+ * «Ontario» — це ще й містечко в Каліфорнії, але в полі локації вакансії
+ * читання «провінція» переважає настільки, що зворотний випадок можна
+ * вважати шумом. Для порівняння: «Brisbane» і «Cambridge» лишаються поза
+ * словником саме тому, що там обидва читання однаково живі.
+ */
+const CA_PROVINCE_WORDS = [
+  "ontario", "quebec", "british columbia", "alberta", "manitoba", "saskatchewan",
+  "nova scotia", "new brunswick", "newfoundland", "prince edward island",
+];
+
 const CA_PROVINCE_CODES = new Set([
   "AB", "BC", "MB", "NB", "NL", "NS", "NT", "NU", "ON", "PE", "QC", "YT",
 ]);
@@ -246,6 +270,12 @@ const CITY_COUNTRY: Record<string, string> = {
   "manila": "PH", "cebu": "PH", "jakarta": "ID", "bali": "ID",
   "hanoi": "VN", "ho chi minh city": "VN", "bangkok": "TH",
   "kuala lumpur": "MY", "karachi": "PK", "lahore": "PK", "islamabad": "PK",
+  // Додано за частотою нерозпізнаних рядків у живому кеші, не навмання.
+  "baghdad": "IQ", "dhaka": "BD", "abidjan": "CI", "beirut": "LB", "metn": "LB",
+  "saskatoon": "CA", "kitchener": "CA", "kanata": "CA",
+  "cdmx": "MX", "ciudad de mexico": "MX",
+  "chon buri": "TH", "chonburi": "TH", "alice springs": "AU", "masterton": "NZ",
+  "augsburg": "DE", "orly": "FR", "bergamo": "IT", "treviglio": "IT", "foetz": "LU",
 };
 
 /**
@@ -268,6 +298,25 @@ const REGION_COUNTRIES: Record<string, string[]> = {
 };
 
 /** «Будь-де»: вакансія без прив'язки до місця взагалі. */
+/**
+ * «Remote» саме по собі сюди НЕ входить, і це перевірено спробою.
+ *
+ * Це найчастіший нерозпізнаний рядок у кеші — 557 записів, більше за всі
+ * міста разом, і спокуса зарахувати його як «будь-де» велика. Але вона
+ * нічого не дає й дечого коштує.
+ *
+ * Не дає: у reachable() вакансія з прапорцем remote і так проходить першою
+ * ж умовою, а в scoreJob штраф placeMiss однаково мовчить і на «hit», і на
+ * «unknown».
+ *
+ * Коштує: для людини, що обрала «віддалено або офіс у моєму місті», fit
+ * став би «hit» — тобто +3 за збіг МІСЦЯ і факт place з назвою її міста
+ * під вакансією, у якої місця не названо взагалі. Картка сказала б
+ * «Берлін» там, де в оголошенні написано лише «Remote».
+ *
+ * Тому «Remote» лишається нерозібраним, і це стан «ми не знаємо», а не
+ * «підходить усім». Те саме стосується «Homeoffice» і «Nationwide Remote».
+ */
 const ANYWHERE = [
   "anywhere", "worldwide", "world wide", "global", "globally", "fully remote",
   "remote - global", "remote (global)", "location agnostic", "no location",
@@ -287,7 +336,6 @@ export interface Place {
 
 const EMPTY: Place = { countries: [], regions: [], anywhere: false, known: false };
 
-/** Розділові знаки, якими джерела ліплять кілька локацій в один рядок. */
 const CHUNK_SPLIT = /[|;\u00b7\u2022\n]|\s+\/\s+|\s+&\s+|\s+and\s+/i;
 
 /** Діакритика геть: «M\u00fcnchen» і «Munchen» мають читатись однаково. */
@@ -315,6 +363,7 @@ const addLookup = (phrase: string, hit: Hit): void => {
 
 for (const [iso, words] of COUNTRY_WORDS) for (const w of words) addLookup(w, { kind: "country", v: iso });
 for (const w of US_STATE_WORDS) addLookup(w, { kind: "country", v: "US" });
+for (const w of CA_PROVINCE_WORDS) addLookup(w, { kind: "country", v: "CA" });
 for (const [city, iso] of Object.entries(CITY_COUNTRY)) addLookup(city, { kind: "city", v: iso });
 for (const [region, words] of REGION_WORDS) for (const w of words) addLookup(w, { kind: "region", v: region });
 for (const w of ANYWHERE) addLookup(w, { kind: "anywhere" });

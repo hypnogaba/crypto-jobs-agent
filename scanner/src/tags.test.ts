@@ -71,3 +71,23 @@ describe("сфера design", () => {
     expect(of("Backend Engineer")).not.toContain("design");
   });
 });
+
+describe("безпека — не фінансовий комплаєнс", () => {
+  const j = (title: string) => deriveTags({
+    url: "https://x.test/1", company: "Acme", title, location: null,
+    remote: false, postedAt: null, source: "ashby:acme",
+  });
+
+  it("фінансовий і юридичний комплаєнс не є безпекою", () => {
+    // Живий прогін: людина з профілем «QA і безпека» отримала обидві.
+    expect(j("Head of Anti-Financial Crime Compliance (AFCC)")).not.toContain("security");
+    expect(j("Legal & Compliance Ops")).not.toContain("security");
+  });
+
+  it("справжня безпека лишається", () => {
+    expect(j("Security Compliance Analyst")).toContain("security");
+    expect(j("Senior Application Security Engineer")).toContain("security");
+    expect(j("GRC Manager")).toContain("security");
+    expect(j("Penetration Tester")).toContain("security");
+  });
+});

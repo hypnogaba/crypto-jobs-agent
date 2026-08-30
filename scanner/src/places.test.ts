@@ -152,3 +152,46 @@ describe("placeFit", () => {
     expect(placeFit(placeOf("Anywhere in the World"), "UA")).toBe("hit");
   });
 });
+
+describe("прогалини, знайдені перебором живого кеша", () => {
+  /**
+   * Кожен рядок нижче справді лежить у jobs_cache і до цієї зміни не читався
+   * ніяк. Разом вони покривають найчастіші нерозпізнані написання після
+   * «Remote», яке лишається нерозібраним навмисно.
+   */
+  it("провінції Канади словами, а не лише кодами", () => {
+    expect(country("Kitchener, Ontario")).toEqual(["CA"]);
+    expect(country("Saskatoon, Saskatchewan")).toEqual(["CA"]);
+    expect(country("Oakville, Ontario")).toEqual(["CA"]);
+    expect(country("Vancouver, British Columbia")).toEqual(["CA"]);
+  });
+
+  it("країни, яких бракувало", () => {
+    expect(country("Moscow, Russia")).toEqual(["RU"]);
+    expect(country("Dhaka, Bangladesh")).toEqual(["BD"]);
+    expect(country("Barbados")).toEqual(["BB"]);
+    expect(country("Abidjan, Côte d'Ivoire")).toEqual(["CI"]);
+    expect(country("Baghdad, Iraq")).toEqual(["IQ"]);
+    expect(country("Beirut, Lebanon")).toEqual(["LB"]);
+  });
+
+  it("міста, які трапляються в кеші десятками", () => {
+    expect(country("Metn, Metn")).toEqual(["LB"]);
+    expect(country("CDMX, Miguel Hidalgo")).toEqual(["MX"]);
+    expect(country("Chon Buri")).toEqual(["TH"]);
+    expect(country("Alice Springs")).toEqual(["AU"]);
+    expect(country("Augsburg")).toEqual(["DE"]);
+  });
+
+  it("двозначні назви лишаються нерозібраними, як і були", () => {
+    // Правило файлу не змінюється: краще не знати, ніж знати неправильно.
+    for (const s of ["Georgia", "Brisbane", "Birmingham", "Cambridge", "Branch HQ"]) {
+      expect(placeOf(s).known).toBe(false);
+    }
+  });
+
+  it("«Remote» і далі не є місцем", () => {
+    expect(placeOf("Remote").known).toBe(false);
+    expect(placeOf("Homeoffice").known).toBe(false);
+  });
+});

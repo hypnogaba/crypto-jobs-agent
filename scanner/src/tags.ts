@@ -18,7 +18,12 @@ const SPHERE_RULES: Array<[string, RegExp]> = [
   ["operations",   /\b(operations|program managers?|project managers?|chief of staff|people ops|hr managers?|recruiters?)\b/i],
   ["marketing",    /\b(marketing|growth|content|brand|seo|demand generation|communications)\b/i],
   ["sales",        /\b(sales|account executives?|account managers?|customer success|solutions engineers?)\b/i],
-  ["security",     /\b(security|appsec|infosec|penetration|compliance|grc)\b/i],
+  // «compliance» саме по собі звідси прибрано. Воно ловило «Head of
+  // Anti-Financial Crime Compliance» і «Legal & Compliance Ops» — це фінанси
+  // й право, а не інформаційна безпека, і людина, що обрала «Безпека»,
+  // отримувала їх у пʼятірці. Справжні ролі з безпеки все одно містять саме
+  // слово «security» («Security Compliance Analyst») або «grc».
+  ["security",     /\b(security|appsec|infosec|penetration|pentest|grc|soc ?2|iso ?27001)\b/i],
   ["qa",           /\b(qa engineers?|quality assurance|test engineers?|sdet)\b/i],
   ["support",      /\b(support|technical support|helpdesk|customer service)\b/i],
   ["finance-legal",/\b(finance|accountant|controller|legal|counsel|compliance officer|tax)\b/i],
