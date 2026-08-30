@@ -17,11 +17,32 @@ export const asLocale = (raw: string | null | undefined): Locale =>
   raw === "uk" || raw === "fr" || raw === "ru" ? raw : "en";
 
 const P = {
+  /**
+   * Привітання за часом доби, а не завжди ранкове.
+   *
+   * `formatDigest` вітається однаково і в плановій ранковій добірці, і у
+   * відповіді на «показати зараз» чи «ще п'ять», — а їх обслуговує служба, що
+   * бігає кожні дві хвилини. Людина, яка налаштувала бота о третій дня, першою
+   * фразою від нас чула «Доброго ранку». Це перше враження від продукту, і
+   * воно було неправдиве.
+   */
   greeting: {
     en: "Good morning. Look what I found for you today.",
     uk: "Доброго ранку. Дивись, що я знайшов саме для тебе.",
     fr: "Bonjour. Regardez ce que j'ai trouvé pour vous aujourd'hui.",
     ru: "Доброе утро. Смотри, что я нашёл именно для тебя.",
+  },
+  greetingDay: {
+    en: "Hi. Look what I found for you.",
+    uk: "Привіт. Дивись, що я знайшов саме для тебе.",
+    fr: "Bonjour. Regardez ce que j'ai trouvé pour vous.",
+    ru: "Привет. Смотри, что я нашёл именно для тебя.",
+  },
+  greetingEvening: {
+    en: "Good evening. Look what I found for you.",
+    uk: "Доброго вечора. Дивись, що я знайшов саме для тебе.",
+    fr: "Bonsoir. Regardez ce que j'ai trouvé pour vous.",
+    ru: "Добрый вечер. Смотри, что я нашёл именно для тебя.",
   },
   why: {
     en: "Why you", uk: "Чому ти", fr: "Pourquoi vous", ru: "Почему ты",

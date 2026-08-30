@@ -119,7 +119,7 @@ async function main(): Promise<void> {
     try {
       const boards = (await repo.listBoards()).filter((b) => !skip.has(b.name));
       if (boards.length) {
-        const runs = await mapLimit(boards, 4, (b) => runSource(b.name, () => fetchBoard(b)));
+        const runs = await mapLimit(boards, 4, (b) => runSource(b.name, () => fetchBoard(b, {}, cfg.freshnessDays)));
         boardResults.push(...runs);
         const jobs = prepare(runs.flatMap((r) => r.jobs), cfg.freshnessDays, now);
         await repo.upsertJobs(jobs);

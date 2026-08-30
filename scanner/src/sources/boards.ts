@@ -298,11 +298,12 @@ function yearlyPay(v: number | null, board: Board): number | null {
  * і означає «видно всім» (digest.ts: `j.country IS NULL OR j.country = ?`),
  * тож перекладаємо тут, а не тримаємо ще одну колонку-прапорець.
  */
-export async function fetchBoard(board: Board, o: FetchOptions = {}): Promise<RawJob[]> {
+export async function fetchBoard(board: Board, o: FetchOptions = {},
+                                freshDays = 14): Promise<RawJob[]> {
   const country = board.country === "*" ? null : board.country;
 
-  if (board.kind === "jsonld") return fetchJsonLd(board, country, o);
-  if (board.kind === "nextjs") return fetchNextBoard(board, country, o);
+  if (board.kind === "jsonld") return fetchJsonLd(board, country, o, freshDays);
+  if (board.kind === "nextjs") return fetchNextBoard(board, country, o, freshDays);
 
   if (board.kind !== "rss") throw new Error(`формат «${board.kind}» ще не вміємо: ${board.name}`);
 
@@ -490,9 +491,9 @@ function jobLocation(node: Record<string, unknown>): string | null {
  * Раніше стелею була ціна: кожна вакансія коштувала окрему сторінку, і зі
  * сорока однієї тисячі ми брали сотню.
  */
-const JSONLD_LIST_PAGES = 60;
+const JSONLD_LIST_PAGES = 200;
 /** Скільки вакансій беремо з дошки за прогін. */
-const JSONLD_JOBS = 1000;
+const JSONLD_JOBS = 4000;
 
 /**
  * Скільки сторінок гортаємо, коли зшити не вдалось.
@@ -517,7 +518,22 @@ const JSONLD_SLOW_PAGES = 5;
  * найновіше. Сто двадцять вакансій на добу при чотирнадцятиденній свіжості —
  * це щоденний зріз, а не спроба скачати сайт.
  */
-async function fetchJsonLd(board: Board, country: string | null, o: FetchOptions): Promise<RawJob[]> {
+/**
+ * Чи є на сторінці бодай одна вакансія, молодша за вікно свіжості.
+ *
+ * Це і є справжня межа глибини. Стала кількість сторінок або читає замало
+ * (jobstash має 7 698 вакансій, а сорок сторінок беруть 400 — і найстаріша з
+ * них лише десятиденна, тобто попереду ще багато свіжого), або гортає в
+ * порожнечу. Дошка сортує найновішим уперед, тож щойно ціла сторінка
+ * виявилась старішою за вікно, далі буде лише старіше.
+ */
+function hasFresh(jobs: RawJob[], freshDays: number): boolean {
+  const edge = Date.now() - freshDays * 86_400_000;
+  return jobs.some((j) => !j.postedAt || new Date(j.postedAt).getTime() >= edge);
+}
+
+async function fetchJsonLd(board: Board, country: string | null, o: FetchOptions,
+                           freshDays: number): Promise<RawJob[]> {
   const out: RawJob[] = [];
   const seen = new Set<string>();
 
@@ -539,6 +555,8 @@ async function fetchJsonLd(board: Board, country: string | null, o: FetchOptions
     // Дошка, яку не вдалось зшити, коштує запит на кожну вакансію — глибше
     // за п'ять сторінок такої ціни ми не платимо.
     if (!stitched) budget = Math.min(budget, JSONLD_SLOW_PAGES);
+    // Сторінка цілком за межею свіжості означає, що далі буде лише старіше.
+    if (page > 1 && !hasFresh(batch, freshDays)) break;
     const before = seen.size;
     for (const j of batch) {
       if (seen.has(j.url)) continue;
@@ -767,7 +785,7 @@ function* nextObjects(blob: string): Generator<Record<string, unknown>> {
 
 
 /** Скільки сторінок такої дошки гортаємо за прогін. */
-const NEXT_PAGES = 40;
+const NEXT_PAGES = 200;
 
 /**
  * Дошка, чиї записи лежать у потоці Next.js.
@@ -781,7 +799,7 @@ const NEXT_PAGES = 40;
  * яка про параметр не знає, і кінець списку — розрізняти їх нема потреби.
  */
 async function fetchNextBoard(board: Board, country: string | null,
-                              o: FetchOptions): Promise<RawJob[]> {
+                              o: FetchOptions, freshDays: number): Promise<RawJob[]> {
   const out: RawJob[] = [];
   const seen = new Set<string>();
 
@@ -798,6 +816,8 @@ async function fetchNextBoard(board: Board, country: string | null,
     let batch: RawJob[];
     try { batch = parseNextPayload(await fetchXml(url, {}, o), board.name, country, board.feedUrl); }
     catch { break; }
+
+    if (page > 1 && !hasFresh(batch, freshDays)) break;
 
     const before = seen.size;
     for (const j of batch) {

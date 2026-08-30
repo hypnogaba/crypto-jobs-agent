@@ -107,7 +107,7 @@ describe("fillMissingSummaries", () => {
 });
 
 // ── Доставка в Telegram ───────────────────────────────────────
-import { clampSummary, fitTelegram, fitDigest, formatDigest, isBlocked, sendTelegram, TELEGRAM_MAX, DIGEST_MAX, describeError, escapeHtml, stripHtml } from "./digest.js";
+import { clampSummary, fitTelegram, fitDigest, formatDigest, greetingFor, isBlocked, sendTelegram, TELEGRAM_MAX, DIGEST_MAX, describeError, escapeHtml, stripHtml } from "./digest.js";
 
 describe("sendTelegram", () => {
   it("обрив мережі — це false, а не виняток на весь прогін", async () => {
@@ -634,5 +634,38 @@ describe("onTopicSql", () => {
     expect(r.sql).toMatch(/j\.tags LIKE \? OR \(LOWER/);
     // «lead» — загальне слово, тож окремим АБО стає лише «community».
     expect(r.params).toEqual(['%"devrel"%', "%community%", "%lead%", "%community%"]);
+  });
+});
+
+describe("привітання за часом доби", () => {
+  it("ранок до одинадцятої — планова добірка в будь-якому поясі", () => {
+    expect(greetingFor(6)).toBe("greeting");
+    expect(greetingFor(10)).toBe("greeting");
+  });
+
+  /**
+   * Саме цей випадок і був вадою: людина налаштувала бота о третій дня,
+   * натиснула «показати зараз» і першою фразою почула «Доброго ранку».
+   */
+  it("удень вітається нейтрально", () => {
+    expect(greetingFor(15)).toBe("greetingDay");
+  });
+
+  it("після сімнадцятої — вечір", () => {
+    expect(greetingFor(17)).toBe("greetingEvening");
+    expect(greetingFor(23)).toBe("greetingEvening");
+  });
+
+  /** Без години лишається ранкове — так поводився код завжди. */
+  it("без години нічого не змінюється", () => {
+    expect(greetingFor(undefined)).toBe("greeting");
+  });
+
+  it("текст добірки справді змінюється", () => {
+    const j = { id: "1", url: "https://x/1", company: "Acme", title: "Engineer",
+      location: null, salaryMin: null, salaryMax: null, salaryCurrency: null,
+      why: "бо так", facts: [], summary: null, source: "x", score: 1 };
+    expect(formatDigest([j as never], "uk", { hour: 15 })).toContain("Привіт");
+    expect(formatDigest([j as never], "uk", { hour: 8 })).toContain("Доброго ранку");
   });
 });

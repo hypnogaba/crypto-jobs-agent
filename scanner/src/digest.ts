@@ -335,13 +335,32 @@ export interface FormatOptions {
   capped?: boolean;
   /** Перша доставлена добірка взагалі: дописуємо, коли прийде планова. */
   trialWhen?: string;
+  /**
+   * Котра година В ЛЮДИНИ, 0–23. Без неї вітаємось по-ранковому — так було
+   * завжди, і для планової добірки це правда.
+   */
+  hour?: number;
+}
+
+/**
+ * Яке привітання пасує годині.
+ *
+ * Межі навмисно широкі: «ранок» до одинадцятої накриває планову добірку в
+ * будь-якому поясі, а все після сімнадцятої — вечір. Проміжок нейтральний,
+ * бо о другій дня «доброго дня» звучить штучно майже всіма мовами, а
+ * «привіт» — ні.
+ */
+export function greetingFor(hour: number | undefined): "greeting" | "greetingDay" | "greetingEvening" {
+  if (hour === undefined || !Number.isFinite(hour)) return "greeting";
+  if (hour < 11) return "greeting";
+  return hour >= 17 ? "greetingEvening" : "greetingDay";
 }
 
 export function formatDigest(
   jobs: DigestJob[], locale: Locale, opts: FormatOptions = {}
 ): string {
   const withSummaries = opts.summaries ?? true;
-  const lines = [escapeHtml(say(locale, "greeting")), ""];
+  const lines = [escapeHtml(say(locale, greetingFor(opts.hour))), ""];
   jobs.forEach((j, i) => {
     if (i > 0) { lines.push("─────────────"); lines.push(""); }
 
@@ -810,7 +829,10 @@ export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
       url: r.url, salaryMin: r.salary_min, salaryMax: r.salary_max, salaryCurrency: r.salary_currency,
       why: r.why_fits, summary: r.summary }));
     const sent = await sendTelegram(
-      botToken!, u.telegram_chat_id!, fitDigest(await localizeJobs(retry, locale, ctx), locale), digestId, locale);
+      botToken!, u.telegram_chat_id!,
+      fitDigest(await localizeJobs(retry, locale, ctx), locale, DIGEST_MAX,
+        { hour: hourIn(u.timezone, now) }),
+      digestId, locale);
     if (sent.ok) {
       await d1.execute("UPDATE sent SET status='sent', sent_at=? WHERE digest_id=?", [now.toISOString(), digestId]);
       ctx.delivered++;
@@ -968,7 +990,10 @@ export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
 
   // Менше за п'ять через стелю — не «тонкий день», а «решта завтра».
   const capped = onRequest && allowance < DIGEST_SIZE;
-  const text = fitDigest(await localizeJobs(withWhy, locale, ctx), locale, DIGEST_MAX, { capped, trialWhen });
+  // Година В ЛЮДИНИ, а не в нас: сервер стоїть у Європі, а вітаємось ми з
+  // тим, у кого зараз може бути ранок або ніч.
+  const text = fitDigest(await localizeJobs(withWhy, locale, ctx), locale, DIGEST_MAX,
+    { capped, trialWhen, hour: hourIn(u.timezone, now) });
   if (botToken && u.telegram_chat_id) {
     const sent = await sendTelegram(botToken, u.telegram_chat_id, text, digestId, locale);
     if (!sent.ok) {
