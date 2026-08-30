@@ -8,7 +8,16 @@
  * Сам файл ніде не зберігається: витягуємо текст і забуваємо про нього.
  */
 
-const MAX_BYTES = 4 * 1024 * 1024;
+/**
+ * Стеля на сам файл. Єдине джерело правди для цього числа: сторінка бере
+ * його звідси й тим самим показує людині ту межу, яка справді діє, а поле
+ * не дає навіть спробувати більший файл.
+ *
+ * Стеля Next на тіло серверної дії (next.config.ts) мусить лишатись ВИЩОЮ:
+ * вона спрацьовує раніше за цей код, і файл рівно на межі має отримати
+ * пояснення, а не сторінку 500.
+ */
+export const CV_MAX_BYTES = 4 * 1024 * 1024;
 
 /**
  * Стеля на розпакований потік і на всі потоки разом.
@@ -112,7 +121,7 @@ async function extractPdf(bytes: Uint8Array): Promise<string> {
 
 export async function extractCvText(file: File): Promise<string> {
   if (file.size === 0) throw new CvError("empty");
-  if (file.size > MAX_BYTES) throw new CvError("tooBig");
+  if (file.size > CV_MAX_BYTES) throw new CvError("tooBig");
 
   const bytes = new Uint8Array(await file.arrayBuffer());
   const isPdf = bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46;
