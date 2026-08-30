@@ -76,6 +76,29 @@ export class Repo {
       [`getro-${collectionId}`, collectionId, label ?? `Колекція ${collectionId}`, url]);
   }
 
+  /**
+   * Перерахувати підсумки по джерелах.
+   *
+   * Один важкий запит раз на прогін замість одинадцяти легких на кожне
+   * відкриття панелі. Робиться в базі цілком: тягнути 26 тисяч рядків у
+   * пам'ять сканера заради підрахунку було б тією самою помилкою, лише в
+   * іншому місці.
+   */
+  async refreshSourceStats(): Promise<void> {
+    await this.d1.execute("DELETE FROM source_stats");
+    await this.d1.execute(
+      `INSERT INTO source_stats (source, family, jobs, fresh, companies)
+       SELECT source,
+              CASE WHEN source LIKE 'aggregator:%' THEN 'aggregator'
+                   WHEN source LIKE 'getro:%'      THEN 'getro'
+                   WHEN source LIKE 'board:%'      THEN 'board'
+                   ELSE 'ats' END,
+              COUNT(*),
+              SUM(CASE WHEN fetched_at >= datetime('now','-3 day') THEN 1 ELSE 0 END),
+              COUNT(DISTINCT company_key)
+         FROM jobs_cache GROUP BY source`);
+  }
+
   // ── вакансії ───────────────────────────────────────────────
   async upsertJobs(jobs: NormalizedJob[]): Promise<void> {
     if (jobs.length === 0) return;

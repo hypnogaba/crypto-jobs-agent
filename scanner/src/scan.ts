@@ -226,6 +226,13 @@ async function main(): Promise<void> {
       notes: outcome.proofOfWork,
     });
 
+    // Підсумки для панелі — після всіх записів, щоб числа були свіжі.
+    try {
+      await repo.refreshSourceStats();
+    } catch (e) {
+      console.log(`Підсумки джерел не оновились: ${e instanceof Error ? e.message : e}`);
+    }
+
     const total = await repo.countJobs();
     console.log(
       `\nПрогін ${runId.slice(0, 8)}: збережено ${outcome.jobs.length} вакансій, ` +

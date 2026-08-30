@@ -362,8 +362,11 @@ export default async function Admin({ searchParams }: {
     allUsers: number; connected: number; newToday: number; newWeek: number;
     sentToday: number; openFeedback: number; thumbsDown: number; wantedMore: number;
     liveJobs: number; liveSources: number }>(`
-    SELECT (SELECT COUNT(*) FROM jobs_cache) jobs,
-           (SELECT COUNT(DISTINCT company_key) FROM jobs_cache) companies,
+    -- Числа беруться з source_stats, а не з jobs_cache: рахунок наживо коштував
+    -- 26 тисяч прочитаних рядків на кожне з цих полів, а панель відкривають
+    -- десятки разів на день. Застарівають вони рівно на один прогін.
+    SELECT (SELECT COALESCE(SUM(jobs),0) FROM source_stats) jobs,
+           (SELECT COALESCE(SUM(companies),0) FROM source_stats) companies,
            (SELECT COUNT(*) FROM companies) sources,
            (SELECT COUNT(*) FROM users WHERE status='active') users,
            (SELECT COUNT(*) FROM users WHERE status='paused') paused,
@@ -381,7 +384,7 @@ export default async function Admin({ searchParams }: {
            (SELECT COUNT(*) FROM site_feedback WHERE handled_at IS NULL) openFeedback,
            (SELECT COUNT(*) FROM feedback WHERE reaction='not_relevant') thumbsDown,
            (SELECT COUNT(*) FROM feedback WHERE reaction='more') wantedMore,
-           (SELECT COUNT(*) FROM jobs_cache WHERE fetched_at >= datetime('now','-3 day')) liveJobs`);
+           (SELECT COALESCE(SUM(fresh),0) FROM source_stats) liveJobs`);
 
   const lastRun = await one<{ started_at: string; status: string; jobs_found: number;
     ladder_reached: string | null; notes: string | null }>(
@@ -413,7 +416,7 @@ export default async function Admin({ searchParams }: {
            (SELECT COUNT(*) FROM api_usage WHERE ok=0 AND at >= datetime('now','-7 day')) failed,
            (SELECT COUNT(*) FROM country_boards WHERE enabled=1) boards,
            (SELECT COUNT(DISTINCT country) FROM country_boards WHERE enabled=1) countries,
-           (SELECT COUNT(*) FROM jobs_cache WHERE source LIKE 'board:%') boardJobs,
+           (SELECT COALESCE(SUM(jobs),0) FROM source_stats WHERE family='board') boardJobs,
            (SELECT COUNT(*) FROM jobs_cache WHERE country IS NOT NULL) localJobs`);
 
   const boards = await all<{ id: string; country: string; name: string; label: string;
@@ -461,15 +464,10 @@ export default async function Admin({ searchParams }: {
    * правильна відповідь: воно нічого нам не дає.
    */
   const families = await all<{ family: string; feeds: number; jobs: number;
-    companies: number; fresh: number }>(`
-    SELECT CASE WHEN source LIKE 'aggregator:%' THEN 'aggregator'
-                WHEN source LIKE 'getro:%'      THEN 'getro'
-                WHEN source LIKE 'board:%'      THEN 'board'
-                ELSE 'ats' END family,
-           COUNT(DISTINCT source) feeds, COUNT(*) jobs,
-           COUNT(DISTINCT company_key) companies,
-           SUM(CASE WHEN fetched_at >= datetime('now','-3 day') THEN 1 ELSE 0 END) fresh
-      FROM jobs_cache GROUP BY family ORDER BY jobs DESC`);
+    companies: number; fresh: number }>(
+    `SELECT family, COUNT(*) feeds, SUM(jobs) jobs,
+            SUM(companies) companies, SUM(fresh) fresh
+       FROM source_stats GROUP BY family ORDER BY jobs DESC`);
 
   /**
    * Повний перелік того, звідки ми тягнемо дані, — одним списком.
@@ -486,45 +484,36 @@ export default async function Admin({ searchParams }: {
    */
   const feeds = await all<{ source: string; label: string; family: string;
     country: string | null; jobs: number; fresh: number; status: string | null }>(`
-    SELECT b.name source, b.label, 'board' family,
-           b.country,
-           COALESCE(j.jobs, 0) jobs, COALESCE(j.fresh, 0) fresh,
+    -- Усе з source_stats: раніше цей запит читав jobs_cache тричі й коштував
+    -- 36 тисяч рядків. Тепер джерел у підсумках менше двох тисяч, і читаються
+    -- вони по індексу родини.
+    SELECT b.name source, b.label, 'board' family, b.country,
+           COALESCE(t.jobs, 0) jobs, COALESCE(t.fresh, 0) fresh,
            CASE WHEN b.enabled = 0 THEN 'off' ELSE s.status END status
       FROM country_boards b
       LEFT JOIN sources_state s ON s.source_name = b.name
-      LEFT JOIN (SELECT source, COUNT(*) jobs,
-                        SUM(CASE WHEN fetched_at >= datetime('now','-3 day') THEN 1 ELSE 0 END) fresh
-                   FROM jobs_cache GROUP BY source) j ON j.source = b.name
+      LEFT JOIN source_stats  t ON t.source = b.name
 
      UNION ALL
-    SELECT j.source, REPLACE(j.source, 'aggregator:', ''), 'aggregator', NULL,
-           COUNT(*), SUM(CASE WHEN j.fetched_at >= datetime('now','-3 day') THEN 1 ELSE 0 END),
-           s.status
-      FROM jobs_cache j LEFT JOIN sources_state s ON s.source_name = j.source
-     WHERE j.source LIKE 'aggregator:%' GROUP BY j.source
+    SELECT t.source, REPLACE(t.source, 'aggregator:', ''), 'aggregator', NULL,
+           t.jobs, t.fresh, s.status
+      FROM source_stats t LEFT JOIN sources_state s ON s.source_name = t.source
+     WHERE t.family = 'aggregator'
 
      UNION ALL
-    SELECT j.source, 'колекція ' || REPLACE(j.source, 'getro:', ''), 'getro', NULL,
-           COUNT(*), SUM(CASE WHEN j.fetched_at >= datetime('now','-3 day') THEN 1 ELSE 0 END),
-           s.status
-      FROM jobs_cache j LEFT JOIN sources_state s ON s.source_name = j.source
-     WHERE j.source LIKE 'getro:%' GROUP BY j.source
+    SELECT t.source, 'колекція ' || REPLACE(t.source, 'getro:', ''), 'getro', NULL,
+           t.jobs, t.fresh, s.status
+      FROM source_stats t LEFT JOIN sources_state s ON s.source_name = t.source
+     WHERE t.family = 'getro'
 
      UNION ALL
-    SELECT 'ats:' || provider, provider || ' · ' || COUNT(DISTINCT company) || ' компаній',
-           'ats', NULL, SUM(n), SUM(fresh_n), NULL
-      FROM (SELECT SUBSTR(source, 1, INSTR(source, ':') - 1) provider,
-                   SUBSTR(source, INSTR(source, ':') + 1) company,
-                   COUNT(*) n,
-                   SUM(CASE WHEN fetched_at >= datetime('now','-3 day') THEN 1 ELSE 0 END) fresh_n
-              FROM jobs_cache
-             WHERE source LIKE '%:%'
-               AND source NOT LIKE 'aggregator:%' AND source NOT LIKE 'board:%'
-               AND source NOT LIKE 'getro:%'
-             GROUP BY source)
-     GROUP BY provider
-
-     ORDER BY jobs DESC`);
+    -- ATS згорнуто по провайдеру: тисяча вісімсот компаній окремими рядками —
+    -- це довідник, а не панель.
+    SELECT 'ats:' || SUBSTR(source, 1, INSTR(source, ':') - 1),
+           SUBSTR(source, 1, INSTR(source, ':') - 1) || ' · ' || COUNT(*) || ' компаній',
+           'ats', NULL, SUM(jobs), SUM(fresh), NULL
+      FROM source_stats WHERE family = 'ats' AND INSTR(source, ':') > 0
+     GROUP BY SUBSTR(source, 1, INSTR(source, ':') - 1)`);
 
   /**
    * Рубрики однієї дошки — це одна дошка.
