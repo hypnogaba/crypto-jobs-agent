@@ -15,6 +15,18 @@ import { logUsage, readUsage } from "@/lib/usage";
 export interface ParsedProfile {
   spheres: SphereId[];
   industries: IndustryId[];
+  /**
+   * Що ми ПРИПУСТИЛИ з назви ролі, а не почули від людини.
+   *
+   * Правило «не вгадуй» лишається для всього, що людина мала б сказати сама:
+   * місто, гроші, формат роботи. Але сфера, яка очевидно випливає з
+   * «комуніті менеджер», — не вигадка, а економія десяти дотиків.
+   *
+   * Лежить ОКРЕМО від spheres саме тому, що вчора була скарга «галочки не
+   * мої»: припущення мусить бути видно як припущення. Форма малює його інакше
+   * й підписує, а evidence у нього немає — бо цитувати нема чого.
+   */
+  suggested?: { spheres: SphereId[]; industries: IndustryId[] };
   /** Набір ідентифікаторів через кому — той самий формат, що в profiles.remote_mode. */
   remoteMode: string;
   location: string | null;
@@ -248,7 +260,7 @@ export function parseLocally(text: string): ParsedProfile {
 
 const SYSTEM = `Ти розбираєш опис пошуку роботи або резюме у структуру.
 Відповідай ЛИШЕ валідним JSON без пояснень, за схемою:
-{"spheres":[],"industries":[],"remoteMode":[],"location":null,"salaryMin":null,"salaryCurrency":null,"evidence":{},"leftover":null,"customRole":null,"customIndustry":null,"cvHighlights":null}
+{"spheres":[],"industries":[],"suggested":{"spheres":[],"industries":[]},"remoteMode":[],"location":null,"salaryMin":null,"salaryCurrency":null,"evidence":{},"leftover":null,"customRole":null,"customIndustry":null,"cvHighlights":null}
 
 spheres — з набору: ${SPHERES.map((s) => s.id).join(", ")}
 industries — з набору: ${INDUSTRIES.map((i) => i.id).join(", ")}
@@ -261,6 +273,16 @@ location — місто, і лише якщо людина справді наз
 НЕ ВГАДУЙ. Чого в тексті немає — це null або порожній список. Порожня відповідь
 краща за правдоподібну вигадку: людина потім побачить ці галочки як «ось що ми
 про тебе зрозуміли», і кожна зайва — це те, чого вона не казала.
+
+suggested — окремий виняток, і лише для sphere та industry. Сюди клади те, що
+  ЛОГІЧНО ВИПЛИВАЄ з названої ролі: «комуніті менеджер» — це devrel і
+  marketing, «бекенд інженер» — engineering. Правила:
+  · лише якщо роль зрозуміла. «іт консультант» чи «шукаю роботу» — порожньо;
+  · нічого, що вже стоїть у spheres або industries;
+  · НІКОЛИ місто, гроші чи формат роботи: з назви ролі вони не виводяться, і
+    здогад там був би тією самою вигадкою, проти якої правило вище;
+  · сумнівне не клади. Людина побачить це як «ми припустили», і кожне зайве
+    коштує їй дотику.
 
 evidence — чому саме ти так вирішив. Ключі: "sphere:<id>", "industry:<id>",
   "remoteMode", "location", "salary". Значення — ДОСЛІВНИЙ уривок
@@ -382,6 +404,14 @@ export function mergeParsed(parsed: RawParsed, local: ParsedProfile, text: strin
 
   const spheres = pick<SphereId>(parsed.spheres, SPHERES);
   const industries = pick<IndustryId>(parsed.industries, INDUSTRIES);
+
+  // Припущення чистимо від того, що вже сказано прямо: галочка, яку людина
+  // назвала своїми словами, не має раптом стати «нашим здогадом».
+  const sug = (parsed as { suggested?: { spheres?: unknown; industries?: unknown } }).suggested;
+  const suggested = {
+    spheres: pick<SphereId>(sug?.spheres, SPHERES).filter((x) => !spheres.includes(x)),
+    industries: pick<IndustryId>(sug?.industries, INDUSTRIES).filter((x) => !industries.includes(x)),
+  };
   // Модель може прислати і список, і один рядок — приймаємо обидва, а фільтрує
   // словник. Порожній набір лишається порожнім: примусове «тільки віддалено»
   // було б відповіддю, якої людина не давала.
@@ -422,5 +452,6 @@ export function mergeParsed(parsed: RawParsed, local: ParsedProfile, text: strin
     customRole: str(parsed.customRole, 60),
     customIndustry: str(parsed.customIndustry, 60),
     cvHighlights: str(parsed.cvHighlights, 300),
+    suggested,
   };
 }

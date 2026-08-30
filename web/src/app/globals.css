@@ -604,3 +604,9 @@ details > summary.list-none { list-style: none; }
 @media (hover: none) { .row-actions { opacity: 1; } }
 
 .match-done { opacity: 0.55; }
+
+/* Припущена галочка.
+   Пунктир, а не колір: кольором у цій панелі позначено стан («працює»,
+   «збоїть»), і ще один відтінок читався б як ще один стан. Пунктир же прямо
+   каже «це не тверде» — і лишається видимим у темній темі та на друку. */
+.chip-guess { border-style: dashed; opacity: 0.85; }

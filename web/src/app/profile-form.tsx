@@ -104,7 +104,7 @@ function Reasons({ items, guessed, guessLabel }: {
   );
 }
 
-export default function ProfileForm({ locale, pre, back, error, quote, evidence }: {
+export default function ProfileForm({ locale, pre, back, error, quote, evidence, suggested }: {
   locale: Locale; pre: ProfilePre;
   /** `profile` — після збереження назад на /profile; інакше — до Telegram. */
   back?: "profile";
@@ -114,6 +114,15 @@ export default function ProfileForm({ locale, pre, back, error, quote, evidence 
   quote?: string;
   /** Підстави з розбору: `sphere:<id>` → уривок із тексту. Див. lib/parse.ts. */
   evidence?: Record<string, string>;
+  /**
+   * Що ми ПРИПУСТИЛИ з назви ролі, а не почули від людини.
+   *
+   * Малюється інакше й підписується окремо. Причина конкретна: вчора була
+   * скарга «галочки не мої», і правило «не вгадуй» з'явилось саме через неї.
+   * Пропонувати можна — але лише так, щоб різницю було видно з першого
+   * погляду, а не після наведення миші.
+   */
+  suggested?: { spheres: string[]; industries: string[] };
 }) {
   const spheres = new Set(pre.spheres);
   const industries = new Set(pre.industries);
@@ -182,13 +191,23 @@ export default function ProfileForm({ locale, pre, back, error, quote, evidence 
             <p className="tag tag-warn mt-3 inline-block">{t(locale, "err.sphere")}</p>
           )}
           <div className="mt-4 flex flex-wrap gap-2">
-            {SPHERES.map((s) => (
-              <label key={s.id} className="chip">
-                <input type="checkbox" name="spheres" value={s.id} defaultChecked={spheres.has(s.id)} />
-                {label(s, locale)}
-              </label>
-            ))}
+            {SPHERES.map((s) => {
+              const guessed = !spheres.has(s.id) && suggested?.spheres.includes(s.id);
+              return (
+                <label key={s.id} className={guessed ? "chip chip-guess" : "chip"}
+                       title={guessed ? t(locale, "onboarding.guessOne") : undefined}>
+                  <input type="checkbox" name="spheres" value={s.id}
+                         defaultChecked={spheres.has(s.id) || Boolean(guessed)} />
+                  {label(s, locale)}
+                </label>
+              );
+            })}
           </div>
+          {(suggested?.spheres.length ?? 0) > 0 && (
+            <p className="mt-3 text-xs" style={{ color: "var(--muted)" }}>
+              {t(locale, "onboarding.guessNote")}
+            </p>
+          )}
           {/* Написане тут шукається в назвах вакансій (matchesCustomRole
               у сканері) — це справжній фільтр, а не мертвий текст. */}
           <OwnWords name="customRole" locale={locale} value={pre.customRole}
@@ -197,8 +216,11 @@ export default function ProfileForm({ locale, pre, back, error, quote, evidence 
             <p className="eyebrow">{t(locale, "onboarding.industries")}</p>
             <div className="mt-3 flex flex-wrap gap-2">
               {INDUSTRIES.map((i) => (
-                <label key={i.id} className="chip">
-                  <input type="checkbox" name="industries" value={i.id} defaultChecked={industries.has(i.id)} />
+                <label key={i.id}
+                       className={!industries.has(i.id) && suggested?.industries.includes(i.id)
+                         ? "chip chip-guess" : "chip"}>
+                  <input type="checkbox" name="industries" value={i.id}
+                         defaultChecked={industries.has(i.id) || suggested?.industries.includes(i.id) || false} />
                   {label(i, locale)}
                 </label>
               ))}

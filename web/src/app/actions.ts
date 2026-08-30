@@ -6,7 +6,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { MATCH_LIMIT, orderFor } from "@/lib/match-sort";
 import { all, one, run, uuid } from "@/lib/db";
 import { createSession, currentUser, destroySession, requireUser } from "@/lib/auth";
-import { parseProfile, type ParsedProfile } from "@/lib/parse";
+import { parseLocally, parseProfile, type ParsedProfile } from "@/lib/parse";
 import { CvError, extractCvText } from "@/lib/cv";
 import { DEFAULT_LOCALE, isLocale } from "@/lib/i18n";
 import { safeTimezone } from "@/lib/digest-time";
@@ -112,8 +112,18 @@ export async function startOnboarding(formData: FormData): Promise<void> {
 
   if (text.length < 3) redirect(`${home}?error=empty`);
 
-  const { ANTHROPIC_API_KEY } = await env();
-  const parsed = await parseProfile(text, ANTHROPIC_API_KEY ?? null);
+  /**
+   * Модель тут НЕ викликається, і це головне в цьому кроці.
+   *
+   * Раніше `parseProfile` стояв просто в переході: людина тиснула стрілку й
+   * дивилась на нерухому сторінку 7.7 секунди (виміряно на claude-opus-5).
+   * Перше, що продукт робив після першої ж дії людини, — змушував її чекати.
+   *
+   * Тепер у чернетку лягає миттєвий розбір регулярками, а уточнення моделлю
+   * робить сама сторінка /onboarding усередині Suspense: каркас з'являється
+   * одразу, галочки доїжджають потоком. Ніхто не чекає на порожньому екрані.
+   */
+  const parsed = parseLocally(text);
 
   /**
    * Чернетка йде в базу, а в куці лишається сам лише ідентифікатор.
@@ -138,19 +148,21 @@ export async function startOnboarding(formData: FormData): Promise<void> {
   redirect("/onboarding");
 }
 
-export async function readDraft(): Promise<{ text: string; parsed: ParsedProfile; source: string } | null> {
+export async function readDraft(): Promise<
+  { id: string; text: string; parsed: ParsedProfile; source: string; refined: boolean } | null
+> {
   const id = (await cookies()).get(DRAFT_COOKIE)?.value;
   if (!id) return null;
   // Прострочену чернетку не віддаємо навіть тоді, коли прибиральник до неї ще
   // не дійшов: кука живе годину, рядок — добу, і читати текст, який ми
   // пообіцяли не тримати, не можна через одну лише розбіжність у розкладі.
-  const row = await one<{ text: string; parsed: string; source: string | null }>(
-    `SELECT text, parsed, source FROM onboarding_drafts
+  const row = await one<{ text: string; parsed: string; source: string | null; refined: number }>(
+    `SELECT text, parsed, source, refined FROM onboarding_drafts
       WHERE id=? AND created_at >= datetime('now', ?)`, id, DRAFT_TTL);
   if (!row) return null;
   try {
-    return { text: row.text, parsed: JSON.parse(row.parsed) as ParsedProfile,
-             source: row.source ?? "freetext" };
+    return { id, text: row.text, parsed: JSON.parse(row.parsed) as ParsedProfile,
+             source: row.source ?? "freetext", refined: row.refined === 1 };
   } catch { return null; }
 }
 
@@ -564,4 +576,22 @@ export async function switchLocale(formData: FormData): Promise<void> {
   const user = await currentUser();
   if (user) await run("UPDATE users SET locale=? WHERE id=?", chosen, user.id);
   redirect(await backToReferer());
+}
+
+/**
+ * Уточнити чернетку моделлю — з боку сторінки, а не з боку переходу.
+ *
+ * Викликається з /onboarding усередині Suspense. Результат кладеться назад у
+ * чернетку, тож повторне відкриття тієї самої сторінки моделі вже не турбує:
+ * розбір коштує грошей, а людина оновлює сторінку частіше, ніж здається.
+ */
+export async function refineDraft(id: string, text: string,
+                                  local: ParsedProfile): Promise<ParsedProfile> {
+  const { ANTHROPIC_API_KEY } = await env();
+  if (!ANTHROPIC_API_KEY) return local;
+
+  const parsed = await parseProfile(text, ANTHROPIC_API_KEY);
+  await run("UPDATE onboarding_drafts SET parsed=?, refined=1 WHERE id=?",
+    JSON.stringify(parsed), id);
+  return parsed;
 }
