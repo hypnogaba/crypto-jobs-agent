@@ -13,6 +13,10 @@ export const RELEASES: Release[] = [
     "date": "2026-08-30",
     "changes": [
       {
+        "hash": "7f05f59",
+        "subject": "Індустрії за розміром, без жаргону, і сказано, що галочка звужує"
+      },
+      {
         "hash": "2080b35",
         "subject": "Зарплата: поле місячне, у базі річна, і 3000 більше не зникає"
       },
@@ -289,7 +293,7 @@ export const RELEASES: Release[] = [
         "subject": "Чотири блокери запуску: кабінет як канал, порожній профіль, мова, вікно кандидатів"
       }
     ],
-    "chores": 15
+    "chores": 16
   },
   {
     "date": "2026-08-29",
@@ -861,4 +865,4 @@ export const RELEASES: Release[] = [
   }
 ];
 
-export const GENERATED_AT = "2026-08-30 18:04";
+export const GENERATED_AT = "2026-08-30 18:07";
