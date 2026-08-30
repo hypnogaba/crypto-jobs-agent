@@ -13,6 +13,14 @@ export const RELEASES: Release[] = [
     "date": "2026-08-30",
     "changes": [
       {
+        "hash": "aac1162",
+        "subject": "Перевіряч дошок мусить знати формат, інакше оголошує живе мертвим"
+      },
+      {
+        "hash": "4a70b0b",
+        "subject": "Джерела з розвідки по твіттеру: шість дошок, три взірці заголовка, повний вид у панелі"
+      },
+      {
         "hash": "da8ca97",
         "subject": "node_modules у гілках буває симлінком, а взірець із рискою його не ловив"
       },
@@ -49,7 +57,7 @@ export const RELEASES: Release[] = [
         "subject": "Чотири блокери запуску: кабінет як канал, порожній профіль, мова, вікно кандидатів"
       }
     ],
-    "chores": 2
+    "chores": 3
   },
   {
     "date": "2026-08-29",
@@ -621,4 +629,4 @@ export const RELEASES: Release[] = [
   }
 ];
 
-export const GENERATED_AT = "2026-08-30 10:50";
+export const GENERATED_AT = "2026-08-30 13:28";
