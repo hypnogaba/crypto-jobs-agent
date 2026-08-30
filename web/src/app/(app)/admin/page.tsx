@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import Nav from "@/app/nav";
 import { detectLocale } from "@/app/actions";
-import { addCompany, reviveSource, replyToFeedback, dismissFeedback, purgeNeverWorked, recheckSome, applyProposal, dismissProposal, applyAllProposals, addBoard, toggleBoard, toggleBoardGroup, addSources, forgetIntake, retryIntake, recountCountries, refreshTelegramNames } from "./actions";
+import { reviveSource, replyToFeedback, dismissFeedback, purgeNeverWorked, recheckSome, applyProposal, dismissProposal, applyAllProposals, addBoard, toggleBoard, toggleBoardGroup, addSources, forgetIntake, retryIntake, recountCountries, refreshTelegramNames } from "./actions";
 import { currentUser } from "@/lib/auth";
 import { all, one } from "@/lib/db";
 import { RELEASES } from "@/lib/releases";
@@ -515,7 +515,17 @@ export default async function Admin() {
   const intake = await all<{ id: string; url: string; at: string; verdict: string;
     kind: string | null; target: string | null; note: string | null; found: number;
     fix: string | null }>(
-    "SELECT * FROM source_intake ORDER BY at DESC LIMIT 12");
+    // Лише невдалі. Вдалий рядок нічого не пояснює — з ним уже все гаразд, —
+    // а займав більшу частину блоку: вісім посилань поспіль зі словом
+    // «додано» ховали два, з якими треба щось робити.
+    `SELECT * FROM source_intake
+      WHERE verdict <> 'added' AND verdict <> 'duplicate'
+      ORDER BY at DESC LIMIT 12`);
+
+  // Скільки прийнялось — числом, бо сам список не потрібен.
+  const intakeOk = (await one<{ n: number }>(
+    `SELECT COUNT(*) n FROM source_intake
+      WHERE verdict = 'added' AND at >= datetime('now','-7 day')`))?.n ?? 0;
 
   // Колекції Getro — борди екосистем фондів. Головний постачальник компаній,
   // яких ми ще не знаємо, і досі його не було видно в панелі взагалі.
@@ -615,7 +625,9 @@ export default async function Admin() {
   const digests = await all<{ d: string; jobs: number; people: number; digests: number }>(
     `SELECT date(created_at) d, COUNT(*) jobs, COUNT(DISTINCT user_id) people,
             COUNT(DISTINCT digest_id) digests
-       FROM sent WHERE status='sent' GROUP BY d ORDER BY d DESC LIMIT ?`, DAYS);
+       FROM sent WHERE status='sent'
+         AND date(created_at) >= date('now', '-' || ((strftime('%w','now') + 6) % 7) || ' day')
+       GROUP BY d ORDER BY d DESC LIMIT 5`);
   const reactions = await all<{ d: string; more: number; nope: number }>(
     `SELECT date(created_at) d,
             SUM(CASE WHEN reaction='more' THEN 1 ELSE 0 END) more,
@@ -627,7 +639,12 @@ export default async function Admin() {
   // групи з нього означало б показувати неправдиві числа.
   const broken = await all<{ source_name: string; status: string; last_ok_at: string | null;
     consecutive_fail_days: number; last_error: string | null; jobs_last_run: number }>(
-    "SELECT * FROM sources_state WHERE status<>'ok' ORDER BY consecutive_fail_days DESC");
+    // Без `deprecated` — і це не косметика, а причина, чому кнопка «Прибрати
+    // зараз» виглядала мертвою. Вона ставила саме `deprecated`, а список брав
+    // усе, що не `ok`, тобто ті самі рядки лишались на екрані незмінними.
+    // Прибране — це вже вирішене, і в блоці «проблеми» йому не місце.
+    `SELECT * FROM sources_state
+      WHERE status<>'ok' AND status<>'deprecated' ORDER BY consecutive_fail_days DESC`);
   const isBlocked = (x: { last_error: string | null }) => /40[13]|429/.test(x.last_error ?? "");
   const blocked = broken.filter(isBlocked);
   const lost = broken.filter((x) => !isBlocked(x) && x.last_ok_at !== null);
@@ -875,6 +892,11 @@ export default async function Admin() {
             </Block>
           )}
 
+          {/* Тиждень, а не весь час: список ріс без кінця й ставав журналом
+              замість панелі. Понеділок цього тижня рахуємо явно через `%w`:
+              `datetime('now','weekday 1','-7 day')` виглядає коротше, але в
+              САМ понеділок дає попередній тиждень, і таблиця тихо показувала б
+              на сім днів більше. */}
           <Block id="digests" title="Історія зводок"
                  lede="Що пішло людям щоранку й що вони на це відповіли.">
             <div className="card overflow-x-auto">
@@ -1053,16 +1075,29 @@ export default async function Admin() {
               </details>
             )}
 
+            {intakeOk > 0 && intake.length === 0 && (
+              <p className="mt-3 text-sm" style={{ color: "var(--muted)" }}>
+                За тиждень прийнято джерел: {intakeOk}. Нерозібраних немає.
+              </p>
+            )}
+
             {intake.length > 0 && (
               <div className="ruled card mt-3">
                 <div className="px-6 pb-1 pt-5">
-                  <h3 className="font-medium">Що сталось із вставленими посиланнями</h3>
+                  <h3 className="font-medium">
+                    Посилання, які не прийнялись · {intake.length}
+                    {intakeOk > 0 && (
+                      <span className="ml-2 font-normal" style={{ color: "var(--muted)" }}>
+                        і ще {intakeOk} прийнятих за тиждень
+                      </span>
+                    )}
+                  </h3>
                   <p className="mt-1 max-w-prose text-sm" style={{ color: "var(--ink-2)" }}>
-                    Кожна спроба лишає слід — і вдала, і ні. Це єдине місце, де видно, ЧОМУ
-                    посилання не прийнялось: раніше воно просто мовчки не додавалось. Рядок,
-                    що не вдався, можна перевірити ще раз — половина відмов тимчасова
+                    Тільки те, з чим треба щось зробити: вдалі рядки нічого не пояснюють, бо
+                    з ними вже все гаразд, — а займали більшу частину блоку. Тут видно, ЧОМУ
+                    посилання не прийнялось, і що з цим робити. Половина відмов тимчасова
                     (дошка віддала 403 під навантаженням, стрічка була порожня між
-                    публікаціями). Розібрався — прибери, список не мусить рости вічно.
+                    публікаціями), тож рядок можна перевірити ще раз. Розібрався — прибери.
                   </p>
                 </div>
                 {intake.map((x) => {
@@ -1109,8 +1144,13 @@ export default async function Admin() {
             )}
           </Block>
 
-          <Block id="boards" title="Національні дошки"
-                 lede="Дошка країни — не агрегатор: вакансія з неї ніде більше не існує. Показується лише людям із тієї ж країни.">
+          {/* Заголовок каже «країни», а сім дошок мають країну «*» — вони
+              глобальні, тобто рівно навпаки: їх бачать усі. Через це Remote3,
+              Remotech і Remote Backend Jobs читались як національні. Назва
+              блоку тепер описує обидва види, а країна кожної дошки стоїть у
+              таблиці окремою колонкою. */}
+          <Block id="boards" title="Дошки"
+                 lede="Дошка — не агрегатор: вакансія з неї ніде більше не існує. Національну бачать лише люди з тієї ж країни, глобальну — усі.">
             <div className="grid gap-3 sm:grid-cols-4">
               <Tile n={spend?.boards ?? 0} label="дошок увімкнено" />
               <Tile n={spend?.countries ?? 0} label="країн" />
@@ -1128,7 +1168,7 @@ export default async function Admin() {
                   <p className="mt-2 max-w-prose text-xs" style={{ color: "var(--muted)" }}>
                     Три перші з цього списку стають запитами до твіттера щонеділі: розвідка
                     шукає дошку саме для них і приносить її сюди пропозицією з високою вагою.
-                    Чекати не обов'язково — стрічку можна додати посиланням будь-коли.
+                    Чекати не обов’язково — стрічку можна додати посиланням будь-коли.
                   </p>
                 </>
               ) : (
@@ -1161,7 +1201,10 @@ export default async function Admin() {
                       const soso = g.rows.filter((r) => r.status === "degraded").length;
                       return (
                         <tr key={`${g.country}|${g.name}`}>
-                          <td className="mono text-xs">{g.country}</td>
+                          <td className="mono text-xs"
+                              style={{ color: g.country === "*" ? "var(--muted)" : undefined }}>
+                            {g.country === "*" ? "усі" : g.country}
+                          </td>
                           <td className="text-xs">
                             {g.rows.length > 1 ? (
                               <details>
@@ -1247,22 +1290,7 @@ export default async function Admin() {
             </p>
           </Block>
 
-          <div className="grid gap-12 lg:grid-cols-2">
-            <Block id="company" title="Додати компанію"
-                   lede="Слаг у її ATS. Провайдера можна не вказувати — скан визначить сам.">
-              <form action={addCompany} className="card flex flex-col gap-3 px-5 py-5">
-                <input name="slug" className="field mono text-sm" placeholder="slug, напр. deepl" required />
-                <input name="name" className="field text-sm" placeholder="Назва компанії" />
-                <select name="provider" className="field mono text-sm" defaultValue="">
-                  <option value="">визначити автоматично</option>
-                  {["greenhouse","lever","ashby","workable","smartrecruiters","breezy","personio","rippling"]
-                    .map((p) => <option key={p} value={p}>{p}</option>)}
-                </select>
-                <button className="btn self-start">Додати</button>
-              </form>
-            </Block>
-          </div>
-
+          
           <Block id="releases" title="Історія версій"
                  lede="Що змінилося для людей. Збирається з комітів, службові — мерджі, документація, перегенерації — відсіяні.">
             <div className="ruled card">
