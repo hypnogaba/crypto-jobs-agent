@@ -215,9 +215,30 @@ const INDUSTRY_WORD_BONUS = 2;
 const INDUSTRY_MAX_BONUS = 4;
 
 /** Слова з побажань, які варто шукати: довші за три символи, без повторів. */
+/**
+ * Слова, які збігаються з будь-чим і тому не значать нічого.
+ *
+ * «tech» має чотири символи, тож проходило поріг довжини — і своя індустрія
+ * «climate tech» збігалася з EdTech, fintech, adtech і взагалі з половиною
+ * кеша. У пробному прогоні дизайнерка, що написала про climate tech,
+ * отримала першою карткою EdTech-компанію з підписом «індустрія climate
+ * tech». Це не слабкий збіг, це неправда під карткою.
+ *
+ * Так само «remote», «team», «work»: вони є в кожному другому оголошенні й
+ * лише роздувають бал, нікого ні з чим не зіставляючи.
+ */
+const GENERIC_WISH_WORDS = new Set([
+  "tech", "technology", "technologies", "digital", "software", "platform",
+  "company", "companies", "team", "teams", "work", "working", "role", "roles",
+  "position", "job", "jobs", "global", "international", "remote", "hybrid",
+  "senior", "junior", "middle", "startup", "startups", "product", "products",
+  "solutions", "services", "group", "innovation", "innovative", "modern",
+]);
+
 export function wishWords(wishes: string | null | undefined): string[] {
   if (!wishes) return [];
-  const words = wishes.toLowerCase().split(/[^\p{L}\p{N}+#-]+/u).filter((w) => w.length >= 4);
+  const words = wishes.toLowerCase().split(/[^\p{L}\p{N}+#-]+/u)
+    .filter((w) => w.length >= 4 && !GENERIC_WISH_WORDS.has(w));
   return [...new Set(words)];
 }
 
@@ -526,13 +547,23 @@ export function onTopic(job: Pick<ScoredJob, "facts">, p: Pick<Profile, "spheres
  *
  * Вимикається трьома способами, і кожен — це слова самої людини: «тільки
  * віддалено» (тоді працює власний штраф за onsite), «готовий переїхати», або
- * вакансія віддалена. Плюс четвертий, наш: місце, якого ми не розібрали,
- * лишається дозволеним — placeFit поверне «не знаємо», і правило мовчить.
+ * вакансія віддалена. Плюс четвертий, наш: місце, яке ми не розібрали, але
+ * яке в оголошенні НАПИСАНЕ, лишається дозволеним — «Wallingford,
+ * Oxfordshire» наш словник не знає, а людина прочитає й вирішить сама.
+ *
+ * А ось офіс, у якого локації немає ЗОВСІМ, не проходить. Тут нема чого
+ * читати й нема чого вирішувати: людині пропонують щодня ходити невідомо
+ * куди. Таких у кеші 1 233, і вони справді доходили: у пробному прогоні
+ * людина, що просила «віддалено або офіс у Берліні», отримала дві картки з
+ * пʼяти саме такі — «Product Owner PBX Software (m/w/d)» без жодної локації.
+ * Після межі в неї знову пʼять карток, просто інших: пул достатній, щоб цю
+ * чесність нічого не коштувала.
  */
 export function reachable(job: CandidateJob, p: Profile): boolean {
   if (job.remote) return true;
   if (remoteOnly(p.remoteMode)) return true;   // там свій штраф, -6 за onsite
   if (willRelocate(p.remoteMode)) return true;
+  if (!job.location?.trim()) return false;     // офіс невідомо де — нікуди ходити
   const myCountry = p.country ?? placeOf(cityText(p)).countries[0] ?? null;
   return placeFit(placeOf(job.location), myCountry) !== "miss";
 }

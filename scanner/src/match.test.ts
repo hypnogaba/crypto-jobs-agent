@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { customIndustryBonus, explainLocally, explainSystem, linksToAggregator, pickTop, scoreJob, wishBonus, type CandidateJob, type Profile } from "./match.js";
+import { customIndustryBonus, explainLocally, explainSystem, linksToAggregator, pickTop, reachable, scoreJob, wishBonus, type CandidateJob, type Profile } from "./match.js";
 
 const p: Profile = {
   userId: "u1", spheres: ["partnerships", "devrel"], industries: ["web3"],
@@ -296,20 +296,23 @@ describe("facts", () => {
 
 describe("побажання (wishes)", () => {
   it("+2 за кожне окреме слово ≥4 символів у назві чи описі, стеля +6", () => {
-    const j = { title: "Startup Growth Lead", summary: "Fully remote, four-day week at a small startup." };
+    // «startup» і «remote» більше не рахуються: вони є в кожному другому
+    // оголошенні й лише роздували бал. Беремо слова, які справді розрізняють.
+    const j = { title: "Kubernetes Growth Lead", summary: "Four-day week, no on-call rotation, cycling budget." };
     expect(wishBonus(j, null)).toBe(0);
     expect(wishBonus(j, "")).toBe(0);
     expect(wishBonus(j, "тільки стартапи")).toBe(0);
-    expect(wishBonus(j, "startup only")).toBe(2);
-    expect(wishBonus(j, "startup startup remote")).toBe(4);       // повтор не рахується
-    expect(wishBonus(j, "startup remote week four-day lead")).toBe(6);
-    expect(wishBonus(j, "no banks")).toBe(0);                     // «no» коротше за 4
+    expect(wishBonus(j, "kubernetes only")).toBe(2);
+    expect(wishBonus(j, "kubernetes kubernetes cycling")).toBe(4);   // повтор не рахується
+    expect(wishBonus(j, "kubernetes cycling rotation four-day")).toBe(6);
+    expect(wishBonus(j, "no banks")).toBe(0);                        // «no» коротше за 4
+    expect(wishBonus(j, "remote startup team")).toBe(0);             // самі загальні слова
   });
   it("бонус впливає на бал і не карає за відсутність", () => {
-    const wished = scoreJob(job({ title: "Startup Partnerships Lead" }), { ...p, wishes: "startup" });
-    const plain = scoreJob(job({ title: "Startup Partnerships Lead" }), p);
+    const wished = scoreJob(job({ title: "Kubernetes Partnerships Lead" }), { ...p, wishes: "kubernetes" });
+    const plain = scoreJob(job({ title: "Kubernetes Partnerships Lead" }), p);
     expect(wished.score - plain.score).toBe(2);
-    expect(scoreJob(job(), { ...p, wishes: "startup" }).score).toBe(scoreJob(job(), p).score);
+    expect(scoreJob(job(), { ...p, wishes: "kubernetes" }).score).toBe(scoreJob(job(), p).score);
   });
   it("системний промпт називає мову словом", () => {
     expect(explainSystem("fr")).toContain("Answer in French");
@@ -543,5 +546,59 @@ describe("pickTop — місце під локальні", () => {
                   ...Array.from({ length: 5 }, (_, i) => globalJob(`g${i}`))];
     const top = pickTop(jobs, local, 5);
     expect(top.filter((j) => j.country === "BE")).toHaveLength(1);
+  });
+});
+
+
+describe("офіс без локації", () => {
+  const job = (over: Partial<CandidateJob> = {}): CandidateJob => ({
+    id: "j", company: "Acme", companyKey: "acme", title: "Product Owner",
+    location: null, remote: false, url: "https://acme.test/1", tags: ["product"],
+    postedAt: null, salaryMin: null, salaryCurrency: null, ...over,
+  });
+  const berlin: Profile = {
+    userId: "u", spheres: ["product"], industries: [], seniority: null,
+    remoteMode: "remote_or_city", location: "Berlin", country: "DE", salaryMin: null,
+  } as unknown as Profile;
+
+  it("не доходить до того, хто не погоджувався переїжджати", () => {
+    expect(reachable(job(), berlin)).toBe(false);
+    expect(reachable(job({ location: "   " }), berlin)).toBe(false);
+  });
+
+  it("написане місто лишається, навіть якщо словник його не знає", () => {
+    // «Wallingford, Oxfordshire» наш словник не розбирає, але людина прочитає.
+    expect(reachable(job({ location: "Wallingford, Oxfordshire" }), berlin)).toBe(true);
+  });
+
+  it("віддаленої вакансії правило не стосується", () => {
+    expect(reachable(job({ remote: true }), berlin)).toBe(true);
+  });
+
+  it("готовому переїхати правило теж не заважає", () => {
+    expect(reachable(job(), { ...berlin, remoteMode: "relocate" })).toBe(true);
+  });
+});
+
+describe("надто загальні слова не вважаються збігом", () => {
+  const j = { title: "Senior Product/Growth Designer (EdTech Unit)", summary: null,
+              tags: ["design"], company: "Applyft" };
+
+  it("«climate tech» не збігається з EdTech через слово tech", () => {
+    // Живий прогін: дизайнерка написала про climate tech і першою карткою
+    // отримала EdTech із підписом «індустрія climate tech».
+    expect(customIndustryBonus(j, "climate tech")).toBe(0);
+  });
+
+  it("справжня назва галузі далі працює", () => {
+    expect(customIndustryBonus({ ...j, company: "Climate Systems" }, "climate tech"))
+      .toBeGreaterThan(0);
+  });
+
+  it("побажання не набирають балів на «remote» і «team»", () => {
+    expect(wishBonus({ title: "Remote Designer", summary: "great team" },
+                     "remote work in a small team")).toBe(0);
+    expect(wishBonus({ title: "Designer", summary: "no on-call rotation" },
+                     "no on-call")).toBeGreaterThan(0);
   });
 });
