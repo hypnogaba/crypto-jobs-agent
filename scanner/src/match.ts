@@ -7,17 +7,36 @@
  */
 
 import { labelOf, languageName, whyLine, type Locale, type WhyBit } from "./digest-copy.js";
+import { placeFit, placeOf } from "./places.js";
 
 /**
  * «Тільки віддалено» — це коли людина прямо це сказала й не назвала при цьому
  * жодного варіанта з місцем. Мовчання й невідоме значення сюди не рахуються:
  * жорсткий мінус за офіс має спиратись на відповідь, а не на порожнє поле.
  */
+const modesOf = (raw: string): string[] => raw.split(",").map((m) => m.trim()).filter(Boolean);
+
 const remoteOnly = (raw: string): boolean => {
-  const modes = raw.split(",").map((m) => m.trim());
+  const modes = modesOf(raw);
   return modes.includes("remote_only")
     && !modes.some((m) => m === "remote_or_city" || m === "relocate");
 };
+
+/** Готовність переїхати робить чужу країну незручністю, а не перешкодою. */
+const willRelocate = (raw: string): boolean => modesOf(raw).includes("relocate");
+
+/**
+ * Чи це саме те місто, яке назвала людина.
+ *
+ * Порівнюємо канонічну англійську назву з профілю з тим, що написало джерело.
+ * До нормалізації профілю сюди приходило «Париж», і збіг не траплявся ніколи.
+ */
+export function cityMatches(jobLocation: string | null, city: string | null | undefined): boolean {
+  const want = city?.trim().toLowerCase();
+  if (!want || want.length < 3 || !jobLocation) return false;
+  return new RegExp(`(?<!\\p{L})${want.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?!\\p{L})`, "iu")
+    .test(jobLocation);
+}
 
 export interface Profile {
   userId: string;
@@ -228,19 +247,43 @@ export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): Score
     facts.push({ k: "level" });
   }
 
+  // Географія.
+  //
+  // Раніше тут стояло `job.location.includes(p.location)` — порівняння двох
+  // рядків, написаних різними людьми різними мовами. Воно не збігалось ніколи,
+  // а розбіжність не коштувала нічого, тож людині в Парижі, яка згодна на офіс
+  // у своєму місті, вакансія в Іллінойсі йшла нарівні з вакансією у Фрайбурзі.
+  //
+  // Тепер порівнюються країни, а не рядки, і в трьох станах: влучили,
+  // промазали, не знаємо. Останній нічого не коштує — «Remote» без країни
+  // розібрати неможливо, і карати вакансію за наше незнання нечесно.
+  const place = placeOf(job.location);
+  // Країна людини береться з профілю, а як її там немає — виводиться з
+  // написаного міста тим самим розбором. Профілі, збережені до появи
+  // стовпця `country`, інакше лишились би без географії назавжди.
+  const myCountry = p.country ?? placeOf(p.location).countries[0] ?? null;
+  const fit = placeFit(place, myCountry);
+  const cityHit = cityMatches(job.location, p.location);
+
   if (remoteOnly(p.remoteMode)) {
     if (job.remote) { add("remote", 3); facts.push({ k: "remote" }); }
     else add("onsite", -6);                       // майже завжди відсікає onsite
-  } else if (job.remote) {
-    add("remote", 1);
-  }
-
-  if (p.location) {
-    const hit = job.location?.toLowerCase().includes(p.location.toLowerCase()) ?? false;
-    if (hit) { add("place", 3); facts.push({ k: "place", v: p.location }); }
-    // Скарга на локацію робить невідповідність дорогою. Без скарг вага 1,
-    // і поведінка така сама, як була: просто немає бонусу.
-    else if (w.location > 1) add("placeMiss", -3 * (w.location - 1));
+    // «Віддалено, але тільки в США» — це не віддалено для людини з Європи.
+    // Прапорець remote про це мовчить, і саме такі вакансії заповнювали
+    // добірки: «Senior Account Executive (Remote), United States».
+    if (fit === "miss" && job.remote) add("placeMiss", -4 * w.location);
+  } else {
+    // Людина згодна на офіс — отже, місце має значення, а не лише прапорець.
+    if (cityHit) { add("place", 4); facts.push({ k: "place", v: p.location! }); }
+    else if (fit === "hit") { add("place", 3); facts.push({ k: "place", v: p.location ?? myCountry! }); }
+    else if (fit === "miss") {
+      // Офіс на іншому континенті — не «менш доречно», а неможливо. Готовність
+      // переїхати робить це незручністю; віддаленість — обмеженням у праві
+      // на роботу, а не в географії, тож теж м'якше за офіс.
+      const cost = job.remote ? 4 : willRelocate(p.remoteMode) ? 2 : 8;
+      add("placeMiss", -cost * w.location);
+    }
+    if (job.remote) add("remote", 1);
   }
 
   // Зарплата — м'який пріоритет: вакансія без вилки НЕ карається
