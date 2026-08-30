@@ -71,6 +71,21 @@ const RANGES = [
   { id: "365", days: 365, label: "рік" },
 ] as const;
 const DEFAULT_DAYS = 14;
+
+/**
+ * Крок графіка людей.
+ *
+ * Вікно й крок — різні речі, і плутати їх дорого: рік із денним кроком це
+ * 365 однакових стовпчиків, а тиждень із місячним — один. Питання «скільки в
+ * нас користувачів» на шести людях узагалі не має графічної відповіді, тому
+ * поруч зі стовпчиками стоять числа.
+ */
+const BUCKETS = [
+  { id: "day",   label: "по днях",    sql: "date(created_at)" },
+  { id: "week",  label: "по тижнях",  sql: "strftime('%Y-%W', created_at)" },
+  { id: "month", label: "по місяцях", sql: "strftime('%Y-%m', created_at)" },
+] as const;
+type Bucket = (typeof BUCKETS)[number];
 /** Скільки змін показуємо в дні одразу; решта — під «ще N». */
 const KEY_CHANGES = 6;
 const num = (n: number) => n.toLocaleString("uk-UA");
@@ -332,10 +347,11 @@ function SourceTable({ rows, total }: {
 }
 
 export default async function Admin({ searchParams }: {
-  searchParams: Promise<{ range?: string }>;
+  searchParams: Promise<{ range?: string; bucket?: string }>;
 }) {
-  const { range } = await searchParams;
+  const { range, bucket } = await searchParams;
   const DAYS = RANGES.find((r) => r.id === range)?.days ?? DEFAULT_DAYS;
+  const step: Bucket = BUCKETS.find((b) => b.id === bucket) ?? BUCKETS[0];
   const locale = await detectLocale();
   const user = await currentUser();
   if (!user) redirect("/login");
@@ -598,6 +614,20 @@ export default async function Admin({ searchParams }: {
     `SELECT date(at) d, COUNT(*) n FROM bot_activity
       WHERE at >= datetime('now', ?) GROUP BY d ORDER BY d`, `-${DAYS} day`);
 
+  // Приріст людей кроком, який обрали. Накопичення рахуємо в JS, бо віконні
+  // функції D1 підтримує, але читати їх тут нікому не легше.
+  const byStep = await all<{ d: string; n: number }>(
+    `SELECT ${step.sql} d, COUNT(*) n FROM users
+      WHERE created_at >= datetime('now', ?) GROUP BY d ORDER BY d`, `-${DAYS} day`);
+  const beforeStep = (await one<{ n: number }>(
+    "SELECT COUNT(*) n FROM users WHERE created_at < datetime('now', ?)", `-${DAYS} day`))?.n ?? 0;
+  const peopleSteps = byStep.reduce<Array<{ d: string; nowTotal: number; added: number }>>(
+    (acc, x) => {
+      const prev = acc.at(-1)?.nowTotal ?? beforeStep;
+      acc.push({ d: x.d, nowTotal: prev + x.n, added: x.n });
+      return acc;
+    }, []);
+
   const signups = await all<{ d: string; n: number }>(
     "SELECT date(created_at) d, COUNT(*) n FROM users GROUP BY d ORDER BY d");
   // Скільки людей було до початку вікна — щоб лінія росла з реального рівня,
@@ -811,6 +841,58 @@ export default async function Admin({ searchParams }: {
                 </table>
               </div>
             </div>
+          </Block>
+
+          <Block id="users" title={`Користувачі · ${funnel?.registered ?? 0}`}
+                 lede="Скільки нас усього і скільки прибуло за крок. На перших десятках людей стовпчики нічого не кажуть, тому поруч стоять числа."
+                 right={
+                   <div className="flex flex-wrap items-center gap-3">
+                     {BUCKETS.map((b) => (
+                       <Link key={b.id}
+                             href={`/admin?${new URLSearchParams({
+                               ...(range ? { range } : {}), ...(b.id === "day" ? {} : { bucket: b.id }),
+                             })}#users`}
+                             className="mono text-xs"
+                             style={{ color: b.id === step.id ? "var(--ember)" : "var(--muted)",
+                                      textDecoration: b.id === step.id ? "underline" : "none" }}>
+                         {b.label}
+                       </Link>
+                     ))}
+                   </div>
+                 }>
+            {peopleSteps.length === 0 ? (
+              <p className="text-sm" style={{ color: "var(--muted)" }}>
+                За обраний період не зареєструвався ніхто.
+              </p>
+            ) : (
+              <div className="grid gap-3 lg:grid-cols-[minmax(0,20rem)_1fr]">
+                <Spark points={peopleSteps.map((x) => ({ d: x.d, v: x.nowTotal }))}
+                       label="людей усього" />
+                <div className="card overflow-x-auto">
+                  <table className="board">
+                    <thead>
+                      <tr><th>{step.label.replace("по ", "")}</th>
+                          <th className="num">прибуло</th><th className="num">усього</th></tr>
+                    </thead>
+                    <tbody>
+                      {/* Найновіше згори: питання «скільки нас зараз» частіше за
+                          «скільки було на початку». */}
+                      {[...peopleSteps].reverse().map((x) => (
+                        <tr key={x.d} className="stripe"
+                            style={{ "--c": x.added > 0 ? "var(--ok)" : "var(--warn)" } as React.CSSProperties}>
+                          <td className="mono text-xs">{x.d}</td>
+                          <td className="num text-xs"
+                              style={{ color: x.added > 0 ? "var(--ok)" : "var(--muted)" }}>
+                            {x.added > 0 ? `+${x.added}` : "—"}
+                          </td>
+                          <td className="num text-xs">{num(x.nowTotal)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </Block>
 
           <Block id="growth" title="Як ми ростемо"
