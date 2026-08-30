@@ -5,7 +5,7 @@ import { requireAdmin } from "@/lib/auth";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { all, one, run } from "@/lib/db";
 import { safeJobUrl } from "@/lib/safe-url";
-import { INTAKE_LIMIT, atsApi, atsInPage, boardName, classify, countJobs, feedInPage,
+import { INTAKE_LIMIT, atsApi, atsListInPage, boardName, classify, countJobs, feedInPage,
          labelOf, tidy, type Provider } from "@/lib/source-link";
 
 /** Перевірка джерела живцем — не чекаючи ранкового прогону. */
@@ -421,14 +421,48 @@ async function intake(url: string): Promise<void> {
   const r = await probe(g.url);
   if (!r.ok) { await record(g.url, "unreachable", null, null, r.note, 0); return; }
 
-  const ats = atsInPage(r.body);
-  if (ats) return takeAts(ats.provider, ats.slug, g.url);
-
+  // Стрічка йде першою: вона дає ВСІ вакансії дошки й оновлюється сама,
+  // тоді як список компаній зі сторінки — лише те, що вмістилось на перший
+  // екран.
   const feed = feedInPage(r.body, g.url);
   if (feed) return takeFeed(feed, g.country, g.host, g.url);
 
+  const ats = atsListInPage(r.body);
+
+  // Одна компанія — це її власний «Careers».
+  if (ats.length === 1) return takeAts(ats[0]!.provider, ats[0]!.slug, g.url);
+
+  /**
+   * Кілька — це дошка, і тоді забираємо всіх. Саме так влаштовані борди Getro
+   * (jobs.solana.com, jobs.avax.network): посилання ведуть просто в ATS
+   * роботодавця, і «додати сайт» означає «взяти собі його компанії».
+   *
+   * Перевіряти кожну живцем тут не можна — це десятки запитів понад ліміт
+   * підзапитів воркера. Тому пишемо їх у список без проби: сканер опитає їх
+   * уранці, а самолікування прибере мертві. Ризик тут інший, ніж у дошки:
+   * зайва компанія коштує один запит на прогін, а не порожню стрічку назавжди.
+   */
+  if (ats.length > 1) {
+    let added = 0;
+    for (const c of ats) {
+      const dup = await one<{ slug: string }>("SELECT slug FROM companies WHERE slug=?", c.slug);
+      if (dup) continue;
+      await run(
+        `INSERT INTO companies (slug,name,ats_provider,ats_slug,tags,discovered_via,added_at)
+         VALUES (?,?,?,?,'[]','link_board',datetime('now'))
+         ON CONFLICT(slug) DO NOTHING`,
+        c.slug, c.slug, c.provider, c.slug);
+      added++;
+    }
+    await record(g.url, added > 0 ? "added" : "duplicate", "board_of_companies", g.host,
+      added > 0
+        ? `дошка компаній: ${added} нових із ${ats.length} на сторінці`
+        : `усі ${ats.length} компаній зі сторінки вже у списку`, added);
+    return;
+  }
+
   await record(g.url, "unknown", null, null,
-    "сторінка відкрилась, але ні ATS, ні стрічки в ній не оголошено", 0);
+    "сторінка відкрилась, але ні ATS, ні стрічки в ній не оголошено — найпевніше вона малюється скриптом, і ми бачимо порожній каркас", 0);
 }
 
 /**

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { atsApi, atsInPage, boardName, classify, countJobs, countryOf, feedInPage, labelOf, tidy } from "./source-link.js";
+import { atsApi, atsListInPage, boardName, classify, countJobs, countryOf, feedInPage, labelOf, tidy } from "./source-link.js";
 
 describe("tidy", () => {
   it("додає схему, бо люди копіюють домен без неї", () => {
@@ -111,16 +111,46 @@ describe("feedInPage", () => {
     expect(feedInPage(html, "https://jobs.dou.ua/")).toBe("https://jobs.dou.ua/vacancies/feeds/");
   });
 
+  /**
+   * Живий випадок: cryptocurrencyjobs.co пише тег без лапок —
+   * `<link rel=alternate href=/index.xml ...>`. Вимога лапок ховала від нас
+   * стрічку, яку сканер і так читає.
+   */
+  it("читає тег без лапок навколо атрибутів", () => {
+    const html = `<link rel=alternate href=/index.xml type=application/rss+xml title="Cryptocurrency Jobs">`;
+    expect(feedInPage(html, "https://cryptocurrencyjobs.co/"))
+      .toBe("https://cryptocurrencyjobs.co/index.xml");
+  });
+
   it("не бере чужу стрічку з чужого домену", () => {
     const html = `<a href="https://someoneelse.com/feed/">Their RSS</a>`;
     expect(feedInPage(html, "https://jobs.dou.ua/")).toBeNull();
   });
 });
 
-describe("atsInPage", () => {
+describe("atsListInPage", () => {
   it("витягує ATS зі сторінки «Careers»", () => {
     const html = `<a href="https://job-boards.greenhouse.io/monzo/jobs/1">Open roles</a>`;
-    expect(atsInPage(html)).toEqual({ provider: "greenhouse", slug: "monzo" });
+    expect(atsListInPage(html)).toEqual([{ provider: "greenhouse", slug: "monzo" }]);
+  });
+
+  /**
+   * Живий випадок, на якому попередня версія помилилась: cryptojobslist.com —
+   * агрегатор, і ми мовчки підписались на випадкову компанію з його оголошень.
+   * Кількість і є відповіддю: одна — «Careers», кілька — дошка компаній.
+   */
+  it("віддає ВСІ компанії дошки, а не першу-ліпшу", () => {
+    const html = `
+      <a href="https://jobs.ashbyhq.com/Coinflow/1">a</a>
+      <a href="https://jobs.lever.co/ondofinance/2">b</a>
+      <a href="https://boards.greenhouse.io/nansen/3">c</a>
+      <a href="https://jobs.ashbyhq.com/Coinflow/4">повтор</a>`;
+    expect(atsListInPage(html)).toHaveLength(3);
+  });
+
+  it("не бере службовий хвіст за компанію", () => {
+    expect(atsListInPage(`<a href="https://boards.greenhouse.io/embed/job_board?for=x">e</a>`))
+      .toEqual([]);
   });
 });
 

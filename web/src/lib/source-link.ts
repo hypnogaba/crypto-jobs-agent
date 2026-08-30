@@ -219,8 +219,11 @@ export function feedInPage(html: string, base: string): string | null {
   for (const tag of html.match(/<link\b[^>]*>/gi) ?? []) {
     if (!/rel=["']?alternate/i.test(tag)) continue;
     if (!/type=["']?application\/(?:rss|atom)\+xml/i.test(tag)) continue;
-    const href = /href=["']([^"']+)["']/i.exec(tag)?.[1];
-    const url = href ? absolute(href) : null;
+    // Лапки в HTML необов'язкові, і cryptocurrencyjobs.co ними не користується:
+    // `<link rel=alternate href=/index.xml ...>`. Вимога лапок ховала від нас
+    // стрічку, яку ми й так читаємо в сканері.
+    const href = /href=(?:["']([^"']+)["']|([^\s"'>]+))/i.exec(tag);
+    const url = href ? absolute(href[1] ?? href[2]!) : null;
     if (url) return url;
   }
 
@@ -234,13 +237,30 @@ export function feedInPage(html: string, base: string): string | null {
   return null;
 }
 
-/** Посилання на ATS усередині сторінки «Careers» — так знаходиться компанія. */
-export function atsInPage(html: string): { provider: Provider; slug: string } | null {
+/**
+ * УСІ компанії на ATS, згадані в сторінці.
+ *
+ * Раніше бралася перша-ліпша, і це виявилось помилкою на живому прикладі:
+ * `cryptojobslist.com` — агрегатор, у його оголошеннях сотні чужих компаній,
+ * і ми мовчки підписались на випадкову з них («re7-capital»), ніби це і є
+ * вставлений сайт.
+ *
+ * Насправді кількість і є відповіддю на питання, що це за сторінка. Одна
+ * компанія — це її власний «Careers». Кілька — це дошка, і тоді потрібні всі:
+ * саме так влаштовані борди Getro (jobs.solana.com, jobs.avax.network), де
+ * 80% посилань ведуть просто в ATS роботодавця. Для них «додати сайт»
+ * означає «забрати собі його компанії».
+ */
+export function atsListInPage(html: string): Array<{ provider: Provider; slug: string }> {
+  const out = new Map<string, Provider>();
   for (const [provider, rx] of ATS) {
-    const slug = rx.exec(html)?.[1]?.toLowerCase();
-    if (slug && !NOT_A_SLUG.has(slug)) return { provider, slug };
+    // Взірці вище без прапорця `g` — для пошуку всіх збігів потрібна копія.
+    for (const m of html.matchAll(new RegExp(rx.source, "gi"))) {
+      const slug = m[1]?.toLowerCase();
+      if (slug && !NOT_A_SLUG.has(slug) && !out.has(slug)) out.set(slug, provider);
+    }
   }
-  return null;
+  return [...out].map(([slug, provider]) => ({ provider, slug }));
 }
 
 /**
