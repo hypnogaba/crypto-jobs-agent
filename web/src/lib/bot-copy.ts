@@ -18,10 +18,10 @@ const P = {
     ru: "Ты уже подключён. /profile — посмотреть профиль, /time — изменить час, /pause — приостановить.",
   },
   greeting: {
-    en: "Hi. Every morning I send five jobs picked for you.\nFour questions, thirty seconds.",
-    uk: "Привіт. Я щоранку надсилаю п'ять вакансій, підібраних під тебе.\nЧотири питання, тридцять секунд.",
-    fr: "Bonjour. Chaque matin je vous envoie cinq offres choisies pour vous.\nQuatre questions, trente secondes.",
-    ru: "Привет. Я каждое утро присылаю пять вакансий, подобранных под тебя.\nЧетыре вопроса, тридцать секунд.",
+    en: "Hi. Every morning I send five jobs picked for you.\nThree questions, thirty seconds.",
+    uk: "Привіт. Я щоранку надсилаю п'ять вакансій, підібраних під тебе.\nТри питання, тридцять секунд.",
+    fr: "Bonjour. Chaque matin je vous envoie cinq offres choisies pour vous.\nTrois questions, trente secondes.",
+    ru: "Привет. Я каждое утро присылаю пять вакансий, подобранных под тебя.\nТри вопроса, тридцать секунд.",
   },
   // «Протягом години» — бо сайт уже поставив запит на першу добірку в чергу
   // (delivery_requests); ту саму обіцянку дає кабінет. Далі — щодня о
@@ -258,10 +258,10 @@ const P = {
     ru: "Час должен быть числом от 0 до 23. Например: /time 9",
   },
   noProfile: {
-    en: "No profile yet. Send /start and I will ask four questions.",
-    uk: "Профілю ще немає. Напиши /start, і я поставлю чотири питання.",
-    fr: "Pas encore de profil. Envoyez /start et je poserai quatre questions.",
-    ru: "Профиля ещё нет. Напиши /start, и я задам четыре вопроса.",
+    en: "No profile yet. Send /start and I will ask three questions.",
+    uk: "Профілю ще немає. Напиши /start, і я поставлю три питання.",
+    fr: "Pas encore de profil. Envoyez /start et je poserai trois questions.",
+    ru: "Профиля ещё нет. Напиши /start, и я задам три вопроса.",
   },
   deleteAsk: {
     en: "This erases your profile, your history and your CV text. It cannot be undone. Sure?",
