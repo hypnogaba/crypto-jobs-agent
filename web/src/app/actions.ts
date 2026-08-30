@@ -231,7 +231,11 @@ export async function saveProfile(formData: FormData): Promise<void> {
     cvHighlights: String(formData.get("cvHighlights") ?? "").trim().slice(0, 300) || null,
     remoteMode: serializeModes(modes) || "remote_only",
     location,
-    salaryMin: Number.isFinite(salaryMinRaw) && salaryMinRaw > 0 && salaryMinRaw < 10_000_000 ? salaryMinRaw : null,
+    // Поле МІСЯЧНЕ — так думають люди, і так воно підписане. У базі лежить
+    // річна: вакансії зведені до річних, і дві одиниці виміру в одній колонці
+    // вже коштували нам мовчазної втрати «3000 євро».
+    salaryMin: Number.isFinite(salaryMinRaw) && salaryMinRaw > 0 && salaryMinRaw < 1_000_000
+      ? salaryMinRaw * 12 : null,
     salaryCurrency: String(formData.get("salaryCurrency") ?? "").trim().slice(0, 8) || null,
     wishes: String(formData.get("wishes") ?? "").trim().slice(0, 2000) || null,
   };

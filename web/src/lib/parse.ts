@@ -260,13 +260,16 @@ export function parseLocally(text: string): ParsedProfile {
 
 const SYSTEM = `Ти розбираєш опис пошуку роботи або резюме у структуру.
 Відповідай ЛИШЕ валідним JSON без пояснень, за схемою:
-{"spheres":[],"industries":[],"suggested":{"spheres":[],"industries":[]},"remoteMode":[],"location":null,"salaryMin":null,"salaryCurrency":null,"evidence":{},"leftover":null,"customRole":null,"customIndustry":null,"cvHighlights":null}
+{"spheres":[],"industries":[],"suggested":{"spheres":[],"industries":[]},"remoteMode":[],"location":null,"salaryMin":null,"salaryCurrency":null,"salaryPeriod":null,"evidence":{},"leftover":null,"customRole":null,"customIndustry":null,"cvHighlights":null}
 
 spheres — з набору: ${SPHERES.map((s) => s.id).join(", ")}
 industries — з набору: ${INDUSTRIES.map((i) => i.id).join(", ")}
 remoteMode — список із: ${REMOTE_MODES.map((m) => m.id).join(", ")}. Це НАБІР:
   «готовий переїхати» і «офіс у моєму місті» можуть стояти разом. remote_only
   ставиться лише окремо, коли людина не згодна на офіс ніде.
+salaryPeriod — "month" або "year": за який період названа сума. Це питання
+  культури, а не числа: «3000 євро» в Європі майже завжди місяць, «120k» у
+  США — рік. Не впевнений — null, тоді вирішимо за величиною.
 location — місто, і лише якщо людина справді назвала місто. Країна, регіон,
   назва мови чи технології містом не є.
 
@@ -313,7 +316,7 @@ const MODEL = "claude-opus-5";
 /** Що модель могла прислати. Кожне поле перевіряється окремо перед ужитком. */
 interface RawParsed {
   spheres?: unknown; industries?: unknown; remoteMode?: unknown;
-  location?: unknown; salaryMin?: unknown; salaryCurrency?: unknown;
+  location?: unknown; salaryMin?: unknown; salaryCurrency?: unknown; salaryPeriod?: unknown;
   evidence?: unknown; leftover?: unknown;
   customRole?: unknown; customIndustry?: unknown;
   cvHighlights?: unknown;
@@ -396,6 +399,9 @@ export async function parseProfile(text: string, apiKey?: string | null): Promis
  * означає саме «не знаю», і регулярка сюди більше не дописує: вона працює
  * тоді, коли моделі немає зовсім.
  */
+/** Нижче цієї суми число майже напевно місячне, а не річне. */
+const MONTHLY_EDGE = 20_000;
+
 export function mergeParsed(parsed: RawParsed, local: ParsedProfile, text: string): ParsedProfile {
   const pick = <T extends string>(v: unknown, vocab: ReadonlyArray<{ id: string }>): T[] => {
     const ids = new Set(vocab.map((x) => x.id));
@@ -421,8 +427,26 @@ export function mergeParsed(parsed: RawParsed, local: ParsedProfile, text: strin
     .map((m) => String(m).trim())
     .filter((m) => REMOTE_MODES.some((x) => x.id === m));
 
-  const salaryMin = typeof parsed.salaryMin === "number" && Number.isFinite(parsed.salaryMin)
-    && parsed.salaryMin >= 20_000 && parsed.salaryMin <= 1_000_000 ? Math.round(parsed.salaryMin) : null;
+  /**
+   * Зарплата зводиться до РІЧНОЇ — однієї одиниці виміру на всю систему.
+   *
+   * Раніше тут стояла межа «не менше 20 000», і вона мовчки викидала все
+   * місячне: «шукаю фронтенд, 3000 євро» давало профіль ЗОВСІМ без зарплати, і
+   * людина бачила порожнє поле там, де щойно назвала суму. Число було не
+   * помилкою — воно було місячним.
+   *
+   * Період питаємо в моделі. Не сказала — вирішуємо за величиною, і тут це
+   * чесно: річної зарплати нижче двадцяти тисяч у наших вакансіях не буває, а
+   * місячна вища за двадцять тисяч — рідкість, якої в цьому продукті ще не
+   * траплялось.
+   */
+  const rawSalary = typeof parsed.salaryMin === "number" && Number.isFinite(parsed.salaryMin)
+    && parsed.salaryMin > 0 ? Math.round(parsed.salaryMin) : null;
+  const monthly = rawSalary !== null
+    && (parsed.salaryPeriod === "month"
+        || (parsed.salaryPeriod !== "year" && rawSalary < MONTHLY_EDGE));
+  const yearly = rawSalary === null ? null : monthly ? rawSalary * 12 : rawSalary;
+  const salaryMin = yearly !== null && yearly >= 12_000 && yearly <= 1_000_000 ? yearly : null;
 
   // Підстави моделі мають пріоритет — вона бачить речення, а не збіг слова, —
   // але лише ті, що справді є в тексті. Локальні лишаються для полів, про які

@@ -6,6 +6,7 @@ import ProfileForm, { parseList } from "@/app/profile-form";
 import { currentUser } from "@/lib/auth";
 import { one } from "@/lib/db";
 import { t } from "@/lib/i18n";
+import { monthlyFrom } from "@/lib/salary-period";
 
 export async function generateMetadata(): Promise<Metadata> {
   const locale = await detectLocale();
@@ -39,7 +40,7 @@ export default async function Profile({ searchParams }: { searchParams: Promise<
         customRole: row.custom_role, customIndustry: row.custom_industry,
         cvHighlights: row.cv_highlights, fromCv: row.mode === "cv",
         remoteMode: row.remote_mode, location: row.location,
-        salaryMin: row.salary_min, salaryCurrency: row.salary_currency, wishes: row.wishes,
+        salaryMin: monthlyFrom(row.salary_min), salaryCurrency: row.salary_currency, wishes: row.wishes,
       }} />
     </Shell>
   );

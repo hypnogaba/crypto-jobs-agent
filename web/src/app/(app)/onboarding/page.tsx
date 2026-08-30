@@ -7,6 +7,7 @@ import ProfileForm, { parseList, type ProfilePre } from "@/app/profile-form";
 import { currentUser } from "@/lib/auth";
 import { one } from "@/lib/db";
 import { t } from "@/lib/i18n";
+import { monthlyFrom } from "@/lib/salary-period";
 import type { Locale } from "@/lib/vocab";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -70,7 +71,7 @@ async function Filled({ locale, error }: { locale: Locale; error?: string }) {
       customRole: row.custom_role, customIndustry: row.custom_industry,
       cvHighlights: row.cv_highlights, fromCv: row.mode === "cv",
       remoteMode: row.remote_mode, location: row.location,
-      salaryMin: row.salary_min, salaryCurrency: row.salary_currency, wishes: row.wishes };
+      salaryMin: monthlyFrom(row.salary_min), salaryCurrency: row.salary_currency, wishes: row.wishes };
   }
   if (!pre) redirect("/");
 
