@@ -246,12 +246,24 @@ export default function ProfileForm({ locale, pre, back, error, quote, evidence 
               </label>
             ))}
           </div>
-          <label className="mt-4 block" id="cityRow" hidden={!needsCity(modes)}>
+          {/* Місто видно завжди, а обов'язкове — лише там, де людина обрала
+              офіс чи переїзд.
+
+              Раніше воно ховалось від тих, хто працює лише віддалено. З міста
+              виводиться країна, з країни — національні дошки, і виходило, що
+              людина в Києві, згодна на віддалену роботу, ніколи не бачила
+              жодної української вакансії й не мала як про це дізнатись. У всіх
+              шести живих акаунтів країна порожня саме через це.
+
+              Здогадуватись про країну з часового поясу ми навмисно не будемо:
+              пояс каже, де людина сидить, а не де хоче працювати. Тому просто
+              питаємо — і не наполягаємо. */}
+          <label className="mt-4 block" id="cityRow">
             <span className="eyebrow">{t(locale, "onboarding.location")}</span>
             <input type="text" name="location" id="city" className="field mt-2" maxLength={120}
               required={needsCity(modes)} defaultValue={pre.location ?? ""} />
             <span className="mt-2 block text-xs" style={{ color: "var(--muted)" }}>
-              {t(locale, "onboarding.locationHint")}
+              {t(locale, needsCity(modes) ? "onboarding.locationHint" : "onboarding.locationOptional")}
             </span>
           </label>
           <Reasons items={kept([
@@ -310,6 +322,7 @@ export default function ProfileForm({ locale, pre, back, error, quote, evidence 
         `try{document.getElementById('tz').value=Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC'}catch(e){}
 try{(function(){
 var box=document.getElementById('where'),row=document.getElementById('cityRow'),city=document.getElementById('city');
+var HINT_NEED=${JSON.stringify(t(locale, "onboarding.locationHint"))},HINT_OPT=${JSON.stringify(t(locale, "onboarding.locationOptional"))};
 var m=box.querySelectorAll('input[name=remoteMode]');
 function sync(e){
   if(e&&e.target.checked){
@@ -320,7 +333,9 @@ function sync(e){
   }
   var need=false;
   for(var j=0;j<m.length;j++)if(m[j].checked&&m[j].value!=='remote_only')need=true;
-  row.hidden=!need;city.required=need;
+  city.required=need;
+  var hint=row.querySelector('span:last-child');
+  if(hint)hint.textContent=need?HINT_NEED:HINT_OPT;
 }
 for(var k=0;k<m.length;k++)m[k].addEventListener('change',sync);
 sync();

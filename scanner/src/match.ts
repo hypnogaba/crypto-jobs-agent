@@ -310,6 +310,28 @@ export function hasSearchSignal(p: Pick<Profile, "spheres" | "customRole">): boo
   return p.spheres.length > 0 || roleWords(p.customRole).length > 0;
 }
 
+/**
+ * Чи ця вакансія взагалі з тієї роботи, яку людина шукає.
+ *
+ * Сфера або своя роль — і нічого більше. Індустрія, рівень, віддаленість
+ * і свіжість уточнюють збіг, але самі його не створюють: «senior, віддалено,
+ * у крипті» — це три прикметники без іменника.
+ *
+ * Навіщо межа. Штраф за жодного збігу — вісім балів, а віддаленість, рівень,
+ * індустрія і свіжість разом дають десять. Тобто зовсім чужа вакансія
+ * проходила з +2 і добивала добірку до п'яти. На живій перевірці людина, що
+ * шукала DevRel у web3, отримала адміністратора акцій і HR-операції — і сам
+ * рядок «чому підходить» під ними чесно писав «далеко від DevRel».
+ *
+ * Ціна рішення: у вузькій сфері добірка стає коротшою за п'ять. Це чесніше.
+ * Дві доречні вакансії кращі за дві доречні й три, під якими написано, що
+ * вони не підходять.
+ */
+export function onTopic(job: Pick<ScoredJob, "facts">, p: Pick<Profile, "spheres" | "customRole">): boolean {
+  if (!hasSearchSignal(p)) return false;
+  return job.facts.some((f) => f.k === "sphere" || f.k === "role");
+}
+
 export function pickTop(jobs: CandidateJob[], p: Profile, limit = 5, now = new Date()): ScoredJob[] {
   // Порожній профіль — не «нічого не знайшлось», а «нема чого шукати».
   if (!hasSearchSignal(p)) return [];
@@ -319,6 +341,7 @@ export function pickTop(jobs: CandidateJob[], p: Profile, limit = 5, now = new D
     .filter((j) => fitsCountry(j, p))
     .map((j) => scoreJob(j, p, now))
     .filter((j) => j.score > 0)
+    .filter((j) => onTopic(j, p))
     .sort((a, b) => b.score - a.score);
 
   const picked: ScoredJob[] = [];

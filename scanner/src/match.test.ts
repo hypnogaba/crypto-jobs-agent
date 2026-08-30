@@ -385,3 +385,68 @@ describe("pickTop з порожнім профілем", () => {
     expect(pickTop(jobs, { ...empty, customRole: "commercial counsel" }, 5).length).toBe(1);
   });
 });
+
+// ── Межа доречності ───────────────────────────────────────────
+import { onTopic } from "./match.js";
+
+describe("onTopic", () => {
+  const p = { spheres: ["devrel"], customRole: null };
+
+  it("збіг за сферою або своєю роллю — доречно", () => {
+    expect(onTopic({ facts: [{ k: "sphere", v: "devrel" }] }, p)).toBe(true);
+    expect(onTopic({ facts: [{ k: "role", v: "community lead" }] }, p)).toBe(true);
+  });
+
+  it("індустрія, рівень, віддаленість і свіжість самі збігу не роблять", () => {
+    // Саме ця комбінація давала +2 попри штраф −8 і добивала добірку
+    // вакансіями, під якими стояло «далеко від DevRel».
+    expect(onTopic({ facts: [
+      { k: "industry", v: "web3" }, { k: "level" }, { k: "remote" }, { k: "fresh" },
+    ] }, p)).toBe(false);
+  });
+
+  it("без жодного факту — теж ні", () => {
+    expect(onTopic({ facts: [] }, p)).toBe(false);
+  });
+});
+
+describe("pickTop із межею доречності", () => {
+  const job = (id: string, title: string, tags: string[]): CandidateJob => ({
+    id, company: `Co${id}`, companyKey: `co${id}`, title, location: null, remote: true,
+    url: `https://co${id}.test/1`, tags, postedAt: null, salaryMin: null, salaryCurrency: null,
+  });
+  const devrel = {
+    userId: "u", spheres: ["devrel"], industries: ["web3"], seniority: "senior",
+    remoteMode: "remote_only", location: null, salaryMin: null, customRole: null,
+  };
+
+  it("краще дві доречні, ніж дві доречні й три чужі", () => {
+    const jobs = [
+      job("1", "Community Manager", ["devrel"]),
+      job("2", "Developer Advocate", ["devrel", "web3"]),
+      // Ці троє — web3 + senior + remote, тобто рівно те, що раніше
+      // пролізало з +2: Stock Administrator, HR Operations і подібні.
+      job("3", "Senior Stock Administrator", ["web3", "senior"]),
+      job("4", "HR Operations Senior Manager", ["web3", "operations", "senior"]),
+      job("5", "Senior Commercial Counsel", ["finance-legal", "senior"]),
+    ];
+    const top = pickTop(jobs, devrel, 5);
+    expect(top.map((j) => j.title)).toEqual(["Developer Advocate", "Community Manager"]);
+  });
+
+  it("своя роль пускає вакансію без жодної галочки", () => {
+    const jobs = [job("1", "Solidity Auditor", ["engineering"])];
+    const top = pickTop(jobs, { ...devrel, spheres: [], customRole: "solidity auditor" }, 5);
+    expect(top).toHaveLength(1);
+  });
+
+  it("широкому профілю межа нічого не забирає", () => {
+    const jobs = [
+      job("1", "Backend Engineer", ["engineering"]),
+      job("2", "Platform Engineer", ["engineering"]),
+      job("3", "Site Reliability Engineer", ["engineering"]),
+    ];
+    const wide = { ...devrel, spheres: ["engineering"], industries: [] };
+    expect(pickTop(jobs, wide, 5)).toHaveLength(3);
+  });
+});

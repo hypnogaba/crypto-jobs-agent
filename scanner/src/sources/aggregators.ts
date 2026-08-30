@@ -141,6 +141,29 @@ async function rssSource(url: string, source: string, o: FetchOptions): Promise<
 }
 
 export const fetchWeWorkRemotely = (o: FetchOptions = {}) => rssSource("https://weworkremotely.com/remote-jobs.rss", "aggregator:wwr", o);
+
+/**
+ * Категорійні стрічки WWR: дизайн, підтримка, devops.
+ *
+ * Це не спроба доставити людям вакансії з WWR — вони й далі відсіюються
+ * `linksToAggregator`, бо ведуть на каталог, а не до роботодавця. Сенс інший:
+ * саме з агрегаторів сіється зростання списку компаній (див. «Зростання
+ * окремо від достатності» у scan.ts), а спільна стрічка WWR — це тридцять
+ * останніх вакансій упереміш, де інженерія витісняє все інше.
+ *
+ * Виміряно на живих стрічках із сервера: спільна дає ~30 позицій, сама лише
+ * категорія дизайну — 62. Тобто дизайнерські компанії просто не доходили до
+ * вгадування ATS, і їхні власні дошки в список не потрапляли. Кеш це видно
+ * прямо: дизайн 311 рядків із 19 811 при 4 674 інженерних.
+ *
+ * Категорії обрані під наші тонкі сфери, а не «усі, які є».
+ */
+const WWR_CATEGORY = (slug: string) => (o: FetchOptions = {}) =>
+  rssSource(`https://weworkremotely.com/categories/${slug}.rss`, `aggregator:wwr-${slug.replace(/^remote-|-jobs$/g, "")}`, o);
+
+export const fetchWwrDesign  = WWR_CATEGORY("remote-design-jobs");
+export const fetchWwrSupport = WWR_CATEGORY("remote-customer-support-jobs");
+export const fetchWwrDevOps  = WWR_CATEGORY("remote-devops-sysadmin-jobs");
 export const fetchJobspresso     = (o: FetchOptions = {}) => rssSource("https://jobspresso.co/?feed=job_feed", "aggregator:jobspresso", o);
 export const fetchNoDesk         = (o: FetchOptions = {}) => rssSource("https://nodesk.co/remote-jobs/index.xml", "aggregator:nodesk", o);
 export const fetchCryptoJobs     = (o: FetchOptions = {}) => rssSource("https://cryptocurrencyjobs.co/index.xml", "aggregator:cryptocurrencyjobs", o);
@@ -205,6 +228,10 @@ export const AGGREGATORS: Record<string, (o?: FetchOptions) => Promise<RawJob[]>
   "aggregator:landingjobs": fetchLandingJobs,
   "aggregator:themuse": fetchTheMuse,
   "aggregator:wwr": fetchWeWorkRemotely,
+  // Категорії WWR годують саме зростання списку компаній, не добірку.
+  "aggregator:wwr-design": fetchWwrDesign,
+  "aggregator:wwr-customer-support": fetchWwrSupport,
+  "aggregator:wwr-devops-sysadmin": fetchWwrDevOps,
   "aggregator:jobspresso": fetchJobspresso,
   "aggregator:nodesk": fetchNoDesk,
   "aggregator:cryptocurrencyjobs": fetchCryptoJobs,
