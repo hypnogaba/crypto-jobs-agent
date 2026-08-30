@@ -32,20 +32,18 @@ const APPLY_BASE = "https://nextrole.info/go/";
 export interface UserRow {
   id: string; telegram_chat_id: string | null; locale: string;
   timezone: string; delivery_hour: number; status: string; last_interaction_at: string | null;
-  spheres: string; industries: string; seniority: string | null;
+  spheres: string; industries: string;
   remote_mode: string; location: string | null; salary_min: number | null;
   salary_currency: string | null;
   country: string | null;
   custom_role: string | null;
   custom_industry: string | null;
-  custom_seniority: string | null;
   custom_role_en: string | null;
   custom_industry_en: string | null;
   wishes_en: string | null;
   location_en: string | null;
   cv_highlights: string | null;
   wishes: string | null;
-  seniority_weight: number | null;
   location_weight: number | null;
   salary_weight: number | null;
 }
@@ -605,17 +603,15 @@ export function profileOf(u: UserRow): Profile {
     customRoleEn: u.custom_role_en,
     customIndustry: u.custom_industry,
     customIndustryEn: u.custom_industry_en,
-    customSeniority: u.custom_seniority,
     cvHighlights: u.cv_highlights,
     wishes: u.wishes,
     wishesEn: u.wishes_en,
     // Вивчене зі скарг. Немає рядка — усі ваги одиничні, поведінка як була.
     tuning: {
-      seniority: u.seniority_weight ?? 1,
       location: u.location_weight ?? 1,
       salary: u.salary_weight ?? 1,
     },
-    seniority: u.seniority, remoteMode: u.remote_mode, location: u.location, salaryMin: u.salary_min,
+    remoteMode: u.remote_mode, location: u.location, salaryMin: u.salary_min,
     salaryCurrency: u.salary_currency,
     locationEn: u.location_en,
     country: u.country,
@@ -624,10 +620,10 @@ export function profileOf(u: UserRow): Profile {
 
 /** Стовпці профілю, які читає підбір. Один список на digest і replay. */
 export const PROFILE_COLUMNS =
-  `u.*, p.spheres,p.industries,p.seniority,p.remote_mode,p.location,p.salary_min,p.salary_currency,p.custom_role,p.country,
-        p.wishes,p.custom_industry,p.custom_seniority,p.cv_highlights,
+  `u.*, p.spheres,p.industries,p.remote_mode,p.location,p.salary_min,p.salary_currency,p.custom_role,p.country,
+        p.wishes,p.custom_industry,p.cv_highlights,
         p.custom_role_en,p.custom_industry_en,p.wishes_en,p.location_en,
-        t.seniority_weight,t.location_weight,t.salary_weight
+        t.location_weight,t.salary_weight
    FROM users u JOIN profiles p ON p.user_id = u.id
    LEFT JOIN user_tuning t ON t.user_id = u.id`;
 

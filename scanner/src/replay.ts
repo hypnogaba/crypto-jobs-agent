@@ -72,7 +72,6 @@ export function describeProfile(p: Profile): string {
     p.customRole ? `роль «${p.customRole}»` : null,
     p.industries.join("+") || null,
     p.customIndustry ? `галузь «${p.customIndustry}»` : null,
-    p.customSeniority ?? p.seniority,
     p.remoteMode,
     p.location ? `${p.location}${p.country ? ` (${p.country})` : ""}` : p.country,
     p.salaryMin ? `від ${p.salaryMin}` : null,

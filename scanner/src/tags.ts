@@ -35,16 +35,21 @@ const INDUSTRY_RULES: Array<[string, RegExp]> = [
   ["nonprofit", /\b(non-?profit|ngo|foundation|humanitarian|united nations)\b/i],
 ];
 
-const SENIORITY_RULES: Array<[string, RegExp]> = [
-  // «vp » з пробілом усередині групи, обрамленої \b...\b, не працює: пробіл
-  // не є символом слова, тож межа після нього не збігається ніде, крім
-  // «vp  x». Через це «VP, Growth Marketing» лишався БЕЗ тегу рівня — і
-  // потрапляв до junior-а без жодного штрафу. Таких свіжих рядків 55.
-  // Тепер це \bvp\b, який ловить і «VP,», і «VP:», і «VP» в кінці назви.
-  ["lead",   /\b(head of|director|[sve]?vp|vice president|chief|principal|staff|lead)\b/i],
-  ["senior", /\b(senior|sr\.?|expert)\b/i],
-  ["junior", /\b(junior|jr\.?|intern|graduate|entry[- ]level|working student|trainee)\b/i],
-];
+/**
+ * Тегів рівня тут більше немає.
+ *
+ * Вони жили тільки заради одного правила в scoreJob, і те правило прибрано
+ * разом із питанням про рівень. Тримати тег, якого ніхто не читає, — саме
+ * та тиха розбіжність, що й породила початкову ваду: `middle` стояв кнопкою
+ * на сайті, а в цьому списку його не було ніколи, тож збіг за ним не міг
+ * статися в принципі.
+ *
+ * Старі рядки в кеші свої junior/senior/lead ще носять. Вони нічому не
+ * заважають: жоден запит їх не питає, а `onTopicSql` шукає лише сфери, з
+ * якими ці слова не збігаються. Зникнуть вони на першому ж скані —
+ * `upsertJobs` перезаписує теги цілком. `retag` тут не поможе: він лише
+ * додає нові теги й ніколи не знімає наявних.
+ */
 
 /** Джерело саме по собі несе інформацію про нішу. */
 const SOURCE_TAGS: Array<[string, string[]]> = [
@@ -68,7 +73,6 @@ export function deriveTags(job: RawJob): string[] {
 
   for (const [tag, rx] of SPHERE_RULES) if (rx.test(title)) tags.add(tag);
   for (const [tag, rx] of INDUSTRY_RULES) if (rx.test(`${title} ${job.company}`)) tags.add(tag);
-  for (const [tag, rx] of SENIORITY_RULES) { if (rx.test(title)) { tags.add(tag); break; } }
   for (const [prefix, extra] of SOURCE_TAGS) {
     if (job.source.startsWith(prefix)) extra.forEach((t) => tags.add(t));
   }

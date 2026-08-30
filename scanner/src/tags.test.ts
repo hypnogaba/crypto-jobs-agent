@@ -17,22 +17,17 @@ describe("deriveTags — маршрутизація за нішами", () => {
     expect(t).toContain("web3");
     expect(t).toContain("engineering");
   });
-  it("бере рівень із назви", () => {
-    expect(deriveTags(j({ title: "Head of Product" }))).toContain("lead");
-    expect(deriveTags(j({ title: "Junior QA Engineer" }))).toContain("junior");
-  });
-  it("VP лишається VP, хоч із комою, хоч без", () => {
-    // Правило було /\b(...|vp |...)\b/: пробіл усередині групи, обрамленої
-    // \b, не збігався ніде. «VP, Growth Marketing» лишався без тегу рівня —
-    // і йшов junior-ові без жодного штрафу. У свіжому кеші таких 55.
-    for (const title of ["VP, Growth Marketing", "VP: Sales", "SVP Engineering",
-                         "EVP Partnerships", "VP of Product", "Regional VP"]) {
-      expect(deriveTags(j({ title }))).toContain("lead");
+  // Рівень більше не тегується взагалі: питання про нього прибрано, і
+  // єдине правило, що читало ці теги, пішло разом із ним. Тег, якого ніхто
+  // не питає, — саме та тиха розбіжність, з якої й почалась історія.
+  it("рівня в тегах немає", () => {
+    for (const title of ["Head of Product", "Junior QA Engineer", "Senior Backend Engineer",
+                         "VP, Growth Marketing", "SVP Engineering"]) {
+      const t = deriveTags(j({ title }));
+      expect(t).not.toContain("lead");
+      expect(t).not.toContain("senior");
+      expect(t).not.toContain("junior");
     }
-  });
-  it("схожі слова рівнем не стають", () => {
-    expect(deriveTags(j({ title: "VPN Infrastructure Engineer" }))).not.toContain("lead");
-    expect(deriveTags(j({ title: "DevOps Engineer" }))).not.toContain("lead");
   });
   it("Getro сам по собі більше не означає web3", () => {
     // Колекція 1200 — ізраїльська дошка з Teva й NVIDIA. Нішу тепер диктує

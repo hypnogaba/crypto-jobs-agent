@@ -3,7 +3,7 @@ import { customIndustryBonus, explainLocally, explainSystem, linksToAggregator, 
 
 const p: Profile = {
   userId: "u1", spheres: ["partnerships", "devrel"], industries: ["web3"],
-  seniority: "senior", remoteMode: "remote_only", location: null, salaryMin: 80_000,
+  remoteMode: "remote_only", location: null, salaryMin: 80_000,
 };
 
 const job = (o: Partial<CandidateJob> = {}): CandidateJob => ({
@@ -13,16 +13,21 @@ const job = (o: Partial<CandidateJob> = {}): CandidateJob => ({
   salaryMin: null, salaryCurrency: null, ...o });
 
 describe("scoreJob", () => {
-  it("нагороджує збіг сфери, індустрії й рівня", () => {
+  it("нагороджує збіг сфери й індустрії", () => {
     expect(scoreJob(job(), p).score).toBeGreaterThan(10);
   });
   it("сильно карає onsite для того, хто хоче лише віддалено", () => {
     expect(scoreJob(job({ remote: false }), p).score)
       .toBeLessThan(scoreJob(job(), p).score - 8);
   });
-  it("карає розрив у рівні", () => {
-    expect(scoreJob(job({ tags: ["partnerships", "web3", "junior"] }), p).score)
-      .toBeLessThan(scoreJob(job(), p).score);
+  it("рівень у тегах більше нічого не важить", () => {
+    // Раніше тут був штраф за розрив у щаблях. Він спирався на тег, якого не
+    // мали 62% кеша, а «middle» не існувало взагалі — тож питання прибрано
+    // цілком, разом із цим правилом.
+    for (const level of ["junior", "senior", "lead"]) {
+      expect(scoreJob(job({ tags: ["partnerships", "web3", level] }), p).score)
+        .toBe(scoreJob(job({ tags: ["partnerships", "web3"] }), p).score);
+    }
   });
   it("НЕ карає вакансію без вказаної вилки", () => {
     expect(scoreJob(job({ salaryMin: null }), p).score)
@@ -56,17 +61,13 @@ describe("слова людини", () => {
     expect(scoreJob(job(), own).score).toBe(scoreJob(job(), { ...p, industries: [] }).score);
   });
 
-  it("свій рівень працює замість щабля, коли щабля немає", () => {
-    const own: Profile = { ...p, seniority: null, customSeniority: "head of partnerships" };
+  it("слова про рівень тепер працюють через побажання", () => {
+    // Куди переїхав «мій варіант» рівня: не в окреме поле, а в той самий
+    // вільний текст, який і так шукається в назві й описі.
+    const own: Profile = { ...p, wishes: "head of partnerships" };
     const hit = job({ title: "Head of Partnerships", tags: ["partnerships", "web3"] });
-    expect(scoreJob(hit, own).score).toBeGreaterThan(scoreJob(hit, { ...p, seniority: null }).score);
-    expect(scoreJob(hit, own).facts.some((f) => f.k === "level")).toBe(true);
-  });
-
-  it("свій рівень не додається, коли обрано щабель зі списку", () => {
-    const both: Profile = { ...p, customSeniority: "head of partnerships" };
-    const hit = job({ title: "Head of Partnerships", tags: ["partnerships", "web3", "senior"] });
-    expect(scoreJob(hit, both).score).toBe(scoreJob(hit, p).score);
+    expect(scoreJob(hit, own).score)
+      .toBeGreaterThan(scoreJob(hit, p).score);
   });
 
   it("витяг із резюме не впливає на бали — лише на пояснення", () => {
@@ -190,24 +191,17 @@ describe("різноманітність добірки", () => {
 });
 
 describe("навчання на скаргах", () => {
-  it("скарга на рівень робить розрив дорожчим", () => {
-    const junior = job({ tags: ["partnerships", "junior"] });
-    const plain = scoreJob(junior, p).score;
-    const tuned = scoreJob(junior, { ...p, tuning: { seniority: 3, location: 1, salary: 1 } }).score;
-    expect(tuned).toBeLessThan(plain);
-  });
-
   it("без скарг поведінка така сама, як була", () => {
     const j = job({ location: "Berlin" });
     const withLoc = { ...p, location: "Lisbon" };
     expect(scoreJob(j, withLoc).score)
-      .toBe(scoreJob(j, { ...withLoc, tuning: { seniority: 1, location: 1, salary: 1 } }).score);
+      .toBe(scoreJob(j, { ...withLoc, tuning: { location: 1, salary: 1 } }).score);
   });
 
   it("скарга на локацію карає невідповідність, якої раніше просто не помічали", () => {
     const j = job({ location: "Berlin" });
     const withLoc = { ...p, location: "Lisbon" };
-    expect(scoreJob(j, { ...withLoc, tuning: { seniority: 1, location: 3, salary: 1 } }).score)
+    expect(scoreJob(j, { ...withLoc, tuning: { location: 3, salary: 1 } }).score)
       .toBeLessThan(scoreJob(j, withLoc).score);
   });
 });
@@ -251,7 +245,7 @@ import type { MatchFact } from "./match.js";
 
 const prof = (over: Partial<Profile> = {}): Profile => ({
   userId: "u1", spheres: ["operations"], industries: ["fintech"],
-  seniority: "senior", remoteMode: "remote_only", location: null, salaryMin: null, ...over,
+  remoteMode: "remote_only", location: null, salaryMin: null, ...over,
 });
 
 const cand = (over: Partial<CandidateJob> = {}): CandidateJob => ({
@@ -266,15 +260,13 @@ describe("facts", () => {
     const f = scoreJob(cand(), prof()).facts;
     expect(f).toContainEqual({ k: "sphere", v: "operations" } satisfies MatchFact);
     expect(f).toContainEqual({ k: "industry", v: "fintech" } satisfies MatchFact);
-    expect(f).toContainEqual({ k: "level" } satisfies MatchFact);
     expect(f).toContainEqual({ k: "remote" } satisfies MatchFact);
   });
 
   it("тримає порядок від сильнішого до слабшого", () => {
     const ks = scoreJob(cand({ postedAt: new Date().toISOString() }), prof()).facts.map((x) => x.k);
     expect(ks.indexOf("sphere")).toBeLessThan(ks.indexOf("industry"));
-    expect(ks.indexOf("industry")).toBeLessThan(ks.indexOf("level"));
-    expect(ks.indexOf("level")).toBeLessThan(ks.indexOf("remote"));
+    expect(ks.indexOf("industry")).toBeLessThan(ks.indexOf("remote"));
     expect(ks.at(-1)).toBe("fresh");
   });
 
@@ -377,7 +369,7 @@ describe("pickTop з порожнім профілем", () => {
     // з упевненим поясненням під кожним.
     const jobs = [job("1", "Senior commercial counsel"), job("2", "People Business Partner")];
     const empty = {
-      userId: "u", spheres: [], industries: [], seniority: null,
+      userId: "u", spheres: [], industries: [],
       remoteMode: "remote_only", location: null, salaryMin: null, customRole: null,
     };
     expect(pickTop(jobs, empty, 5)).toEqual([]);
@@ -416,7 +408,7 @@ describe("pickTop із межею доречності", () => {
     url: `https://co${id}.test/1`, tags, postedAt: null, salaryMin: null, salaryCurrency: null,
   });
   const devrel = {
-    userId: "u", spheres: ["devrel"], industries: ["web3"], seniority: "senior",
+    userId: "u", spheres: ["devrel"], industries: ["web3"],
     remoteMode: "remote_only", location: null, salaryMin: null, customRole: null,
   };
 
@@ -448,5 +440,63 @@ describe("pickTop із межею доречності", () => {
     ];
     const wide = { ...devrel, spheres: ["engineering"], industries: [] };
     expect(pickTop(jobs, wide, 5)).toHaveLength(3);
+  });
+});
+
+/**
+ * Резерв під локальні вакансії.
+ *
+ * Глобальних у кеші двадцять тисяч проти шестисот національних, тож самим
+ * балом місцева вакансія в добірку не потрапляла майже ніколи — навіть коли
+ * людина сама написала місто.
+ */
+describe("pickTop — місце під локальні", () => {
+  const local: Profile = { ...p, country: "BE" };
+  const beJob = (id: string, over: Partial<CandidateJob> = {}): CandidateJob =>
+    job({ id, companyKey: `be-${id}`, company: `BE ${id}`, country: "BE", ...over });
+  const globalJob = (id: string): CandidateJob =>
+    job({ id, companyKey: `gl-${id}`, company: `Global ${id}`,
+          postedAt: new Date().toISOString() });
+
+  it("бере локальні, навіть коли глобальні сильніші за балом", () => {
+    // Глобальні свіжі, отже мають вищий бал; локальні — ні.
+    const jobs = [...Array.from({ length: 8 }, (_, i) => globalJob(`g${i}`)),
+                  beJob("b1"), beJob("b2")];
+    const top = pickTop(jobs, local, 5);
+    expect(top.filter((j) => j.country === "BE")).toHaveLength(2);
+    expect(top).toHaveLength(5);
+  });
+
+  it("не резервує місця, коли країни в профілі немає", () => {
+    const jobs = [...Array.from({ length: 8 }, (_, i) => globalJob(`g${i}`))];
+    const top = pickTop(jobs, p, 5);
+    expect(top.every((j) => !j.country)).toBe(true);
+  });
+
+  /**
+   * Головна межа: резерв не є приводом надіслати не ту роботу. Місцева
+   * вакансія не з тієї сфери мусить відпасти на тих самих фільтрах, що й
+   * будь-яка інша.
+   */
+  it("не тягне локальну вакансію, яка не пройшла доречність", () => {
+    const offTopic = beJob("bad", { title: "Plumber", tags: ["trades"] });
+    const jobs = [offTopic, ...Array.from({ length: 4 }, (_, i) => globalJob(`g${i}`))];
+    const top = pickTop(jobs, local, 5);
+    expect(top.find((j) => j.id === "bad")).toBeUndefined();
+  });
+
+  it("порожній резерв віддає місця далі, а не лишає дірку", () => {
+    const jobs = Array.from({ length: 5 }, (_, i) => globalJob(`g${i}`));
+    expect(pickTop(jobs, local, 5)).toHaveLength(5);
+  });
+
+  // Одна роль на компанію діє й тут: дві вакансії одного місцевого
+  // роботодавця — це одна можливість, а не дві.
+  it("не бере дві вакансії однієї місцевої компанії", () => {
+    const jobs = [beJob("b1", { companyKey: "same", company: "Same" }),
+                  beJob("b2", { companyKey: "same", company: "Same" }),
+                  ...Array.from({ length: 5 }, (_, i) => globalJob(`g${i}`))];
+    const top = pickTop(jobs, local, 5);
+    expect(top.filter((j) => j.country === "BE")).toHaveLength(1);
   });
 });

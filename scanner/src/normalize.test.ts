@@ -60,6 +60,6 @@ describe("prepare", () => {
   it("проставляє теги", () => {
     const [job] = prepare([raw({ title: "Senior Partnerships Manager" })], 14);
     expect(job!.tags).toContain("partnerships");
-    expect(job!.tags).toContain("senior");
+    expect(job!.tags).not.toContain("senior");
   });
 });

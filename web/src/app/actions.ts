@@ -10,7 +10,7 @@ import { CvError, extractCvText } from "@/lib/cv";
 import { DEFAULT_LOCALE, isLocale } from "@/lib/i18n";
 import { safeTimezone } from "@/lib/digest-time";
 import { FEEDBACK_LIMITS, ONBOARD_LIMITS, checkRate, recordFailure } from "@/lib/ratelimit";
-import { INDUSTRIES, SENIORITY, SPHERES, needsCity, parseModes, serializeModes, type Locale } from "@/lib/vocab";
+import { INDUSTRIES, SPHERES, needsCity, parseModes, serializeModes, type Locale } from "@/lib/vocab";
 import { persistDerived } from "@/lib/profile-country";
 import { pathFor } from "@/lib/seo";
 import { sendText } from "@/lib/telegram-send";
@@ -202,7 +202,6 @@ export async function saveProfile(formData: FormData): Promise<void> {
 
   // Усе, що має словник, звіряємо зі словником; вільні поля обрізаємо.
   // Форма й так дає лише ці значення, але форма — не межа довіри.
-  const seniorityRaw = String(formData.get("seniority") ?? "");
   // «Де хочеш працювати» — набір: офіс у своєму місті й готовність переїхати
   // не виключають одне одного. parseModes викидає «тільки віддалено», коли
   // воно стоїть поруч із ширшим варіантом.
@@ -214,8 +213,6 @@ export async function saveProfile(formData: FormData): Promise<void> {
     industries: allowed(formData.getAll("industries").map(String), INDUSTRIES),
     customRole: String(formData.get("customRole") ?? "").trim().slice(0, SHORT_FIELD_MAX) || null,
     customIndustry: String(formData.get("customIndustry") ?? "").trim().slice(0, SHORT_FIELD_MAX) || null,
-    seniority: SENIORITY.some((s) => s.id === seniorityRaw) ? seniorityRaw : null,
-    customSeniority: String(formData.get("customSeniority") ?? "").trim().slice(0, SHORT_FIELD_MAX) || null,
     // Витяг із резюме людина бачить і може виправити — тому він приходить
     // формою, а не тягнеться з чернетки повз неї.
     cvHighlights: String(formData.get("cvHighlights") ?? "").trim().slice(0, 300) || null,
@@ -286,7 +283,7 @@ export async function saveProfile(formData: FormData): Promise<void> {
 async function persistProfile(
   userId: string, rawInput: string | null, source: string,
   p: { spheres: string[]; industries: string[]; customRole: string | null;
-       customIndustry: string | null; seniority: string | null; customSeniority: string | null;
+       customIndustry: string | null;
        remoteMode: string;
        location: string | null; salaryMin: number | null; salaryCurrency: string | null;
        wishes: string | null; cvHighlights: string | null }
@@ -303,13 +300,12 @@ async function persistProfile(
     ? "mode=profiles.mode, raw_input=profiles.raw_input, cv_text=profiles.cv_text"
     : "mode=excluded.mode, raw_input=excluded.raw_input, cv_text=excluded.cv_text";
   await run(
-    `INSERT INTO profiles (user_id,mode,raw_input,cv_text,spheres,custom_role,industries,custom_industry,seniority,custom_seniority,remote_mode,location,salary_min,salary_currency,wishes,cv_highlights,updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+    `INSERT INTO profiles (user_id,mode,raw_input,cv_text,spheres,custom_role,industries,custom_industry,remote_mode,location,salary_min,salary_currency,wishes,cv_highlights,updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
      ON CONFLICT(user_id) DO UPDATE SET
        ${textCols},
        spheres=excluded.spheres, custom_role=excluded.custom_role,
        industries=excluded.industries, custom_industry=excluded.custom_industry,
-       seniority=excluded.seniority, custom_seniority=excluded.custom_seniority,
        remote_mode=excluded.remote_mode, location=excluded.location,
        salary_min=excluded.salary_min, salary_currency=excluded.salary_currency,
        wishes=excluded.wishes, cv_highlights=excluded.cv_highlights,
@@ -319,7 +315,6 @@ async function persistProfile(
     isCv ? rawInput!.slice(0, 20_000) : null,
     JSON.stringify(p.spheres), p.customRole,
     JSON.stringify(p.industries), p.customIndustry,
-    p.seniority, p.customSeniority,
     p.remoteMode, p.location, p.salaryMin, p.salaryCurrency, p.wishes, p.cvHighlights);
   await persistDerived(userId, (await env()).ANTHROPIC_API_KEY ?? null);
 

@@ -27,6 +27,16 @@ describe("extractCvText", () => {
     await expect(extractCvText(file("коротко"))).rejects.toThrow(/unreadable/);
   });
 
+  /**
+   * Довжина нічого не доводить. Резюме зі вшитим шрифтом, прочитане без
+   * таблиці символів, дає саме таке: багато байтів, жодного слова. Раніше
+   * воно проходило перевірку й їхало в модель під виглядом резюме.
+   */
+  it("відхиляє довгий, але нечитний набір байтів", async () => {
+    const noise = Array.from({ length: 400 }, (_, i) => String.fromCharCode(1 + (i % 30))).join("");
+    await expect(extractCvText(file(noise))).rejects.toThrow(/unreadable/);
+  });
+
   it("обрізає дуже довге резюме", async () => {
     const t = await extractCvText(file(LONG.repeat(600)));
     expect(t.length).toBeLessThanOrEqual(20_000);

@@ -1,6 +1,6 @@
 import {
   INDUSTRIES, REMOTE_MODES, SPHERES, serializeModes,
-  type IndustryId, type RemoteModeId, type SeniorityId, type SphereId,
+  type IndustryId, type RemoteModeId, type SphereId,
 } from "./vocab";
 import { logUsage, readUsage } from "@/lib/usage";
 
@@ -15,7 +15,6 @@ import { logUsage, readUsage } from "@/lib/usage";
 export interface ParsedProfile {
   spheres: SphereId[];
   industries: IndustryId[];
-  seniority: SeniorityId | null;
   /** Набір ідентифікаторів через кому — той самий формат, що в profiles.remote_mode. */
   remoteMode: string;
   location: string | null;
@@ -24,7 +23,7 @@ export interface ParsedProfile {
   /**
    * Що саме в тексті дало кожне значення.
    *
-   * Ключі: `sphere:<id>`, `industry:<id>`, `seniority`, `remoteMode`,
+   * Ключі: `sphere:<id>`, `industry:<id>`, `remoteMode`,
    * `location`, `salary`. Значення — короткий уривок ЗІ СЛІВ ЛЮДИНИ, не
    * переказ: рядок «бо ти написав …» має цитувати, інакше він нічим не кращий
    * за галочку без пояснення.
@@ -44,8 +43,6 @@ export interface ParsedProfile {
   customRole: string | null;
   /** Індустрія словами людини: «climate tech», «esports». */
   customIndustry: string | null;
-  /** Рівень словами людини, коли junior/middle/senior/lead не про неї. */
-  customSeniority: string | null;
   /**
    * Стек, роки, мови, ринки — те з резюме, чого не ловить жодна кнопка.
    * Досі cv_text розбирали на галочки й забували; тепер витяг лишається
@@ -117,15 +114,6 @@ const INDUSTRY_HINTS: Record<IndustryId, RegExp> = {
   // а саме так крипто-інженер отримував галочку «некомерційний сектор».
   nonprofit: w(`non-?profit|ngo|humanitarian|charity|${stem("неприбутков")}|${stem("некомерц")}|${stem("некоммерч")}|${stem("благодійн")}|${stem("associatif")}|${stem("caritatif")}`),
 };
-
-const SENIORITY_HINTS: Array<[SeniorityId, RegExp]> = [
-  ["lead",   w(`lead|head of|director|vp|chief|principal|staff|${stem("керівник")}|${stem("руководител")}`)],
-  ["senior", w(`senior|sr\\.?|${stem("досвідчен")}|${stem("опытн")}`)],
-  ["junior", w(`junior|jr\\.?|intern|graduate|entry|${stem("початк")}|${stem("начинающ")}`)],
-  // «middle» саме по собі — це ще й Middle East, middle name, middle of the
-  // year. Рівень означає лише сусідство з роллю або форма «mid-level».
-  ["middle", /(?<!\p{L})(?:mid[- ]level|middle[- ](?:developer|engineer|dev|level|розробник|инженер)|(?:developer|engineer|dev|розробник|инженер)[- ]middle)(?!\p{L})/iu],
-];
 
 const CURRENCIES: Array<[string, RegExp]> = [
   ["EUR", /(?:€|\beur\b|euro)/i],
@@ -214,10 +202,6 @@ export function parseLocally(text: string): ParsedProfile {
     return Boolean(h);
   });
 
-  const level = SENIORITY_HINTS.find(([, rx]) => rx.test(text));
-  const seniority = level?.[0] ?? null;
-  if (level) evidence.seniority = hit(text, level[1])!;
-
   const remoteHit = hit(text, WANTS_REMOTE);
   const relocateHit = hit(text, WILL_RELOCATE);
 
@@ -248,7 +232,6 @@ export function parseLocally(text: string): ParsedProfile {
   return {
     spheres,
     industries,
-    seniority,
     remoteMode: serializeModes(modes),
     location,
     salaryMin: min,
@@ -259,18 +242,16 @@ export function parseLocally(text: string): ParsedProfile {
     // списку, може дати лише модель, що бачить речення цілком.
     customRole: null,
     customIndustry: null,
-    customSeniority: null,
     cvHighlights: null,
   };
 }
 
 const SYSTEM = `Ти розбираєш опис пошуку роботи або резюме у структуру.
 Відповідай ЛИШЕ валідним JSON без пояснень, за схемою:
-{"spheres":[],"industries":[],"seniority":null,"remoteMode":[],"location":null,"salaryMin":null,"salaryCurrency":null,"evidence":{},"leftover":null,"customRole":null,"customIndustry":null,"customSeniority":null,"cvHighlights":null}
+{"spheres":[],"industries":[],"remoteMode":[],"location":null,"salaryMin":null,"salaryCurrency":null,"evidence":{},"leftover":null,"customRole":null,"customIndustry":null,"cvHighlights":null}
 
 spheres — з набору: ${SPHERES.map((s) => s.id).join(", ")}
 industries — з набору: ${INDUSTRIES.map((i) => i.id).join(", ")}
-seniority — junior | middle | senior | lead | null
 remoteMode — список із: ${REMOTE_MODES.map((m) => m.id).join(", ")}. Це НАБІР:
   «готовий переїхати» і «офіс у моєму місті» можуть стояти разом. remote_only
   ставиться лише окремо, коли людина не згодна на офіс ніде.
@@ -282,18 +263,18 @@ location — місто, і лише якщо людина справді наз
 про тебе зрозуміли», і кожна зайва — це те, чого вона не казала.
 
 evidence — чому саме ти так вирішив. Ключі: "sphere:<id>", "industry:<id>",
-  "seniority", "remoteMode", "location", "salary". Значення — ДОСЛІВНИЙ уривок
+  "remoteMode", "location", "salary". Значення — ДОСЛІВНИЙ уривок
   із тексту людини, не довший за 48 символів і не переказ своїми словами. Для
   кожного значення, яке ти поставив, має бути запис; чого не ставив — того не
   згадуй.
-customRole — точна назва ролі СЛОВАМИ ЛЮДИНИ: «technical recruiter»,
-  «ecosystem lead», «chief of staff». Береться з резюме або з тез, навіть
-  якщо сфера зі списку вже стоїть: сфера — це категорія, а це назва, за
-  якою шукають вакансію. До 60 символів. Назви в тексті немає — null.
+customRole — точна назва ролі СЛОВАМИ ЛЮДИНИ, разом із рівнем, якщо він у
+  ній є: «senior backend engineer», «technical recruiter», «ecosystem lead»,
+  «head of BD». Береться з резюме або з тез, навіть якщо сфера зі списку вже
+  стоїть: сфера — це категорія, а це назва, за якою шукають вакансію. Окремого
+  поля під рівень більше немає — слово «senior» чи «junior» лишається тут, у
+  назві. До 60 символів. Назви в тексті немає — null.
 customIndustry — індустрія словами людини, якої немає в списку вище:
   «climate tech», «esports», «логістика». До 60 символів, інакше null.
-customSeniority — рівень словами людини, коли junior/middle/senior/lead не
-  про неї: «head of BD», «founder», «staff+». До 60 символів, інакше null.
 cvHighlights — ЛИШЕ для резюме: стек, роки досвіду, мови, ринки, найбільші
   досягнення — одним рядком до 300 символів, словами людини. Це не переказ
   біографії, а те, за чим шукають: «8 років BD у Web3, Solana та Cosmos,
@@ -309,10 +290,10 @@ const MODEL = "claude-opus-5";
 
 /** Що модель могла прислати. Кожне поле перевіряється окремо перед ужитком. */
 interface RawParsed {
-  spheres?: unknown; industries?: unknown; seniority?: unknown; remoteMode?: unknown;
+  spheres?: unknown; industries?: unknown; remoteMode?: unknown;
   location?: unknown; salaryMin?: unknown; salaryCurrency?: unknown;
   evidence?: unknown; leftover?: unknown;
-  customRole?: unknown; customIndustry?: unknown; customSeniority?: unknown;
+  customRole?: unknown; customIndustry?: unknown;
   cvHighlights?: unknown;
 }
 
@@ -401,10 +382,6 @@ export function mergeParsed(parsed: RawParsed, local: ParsedProfile, text: strin
 
   const spheres = pick<SphereId>(parsed.spheres, SPHERES);
   const industries = pick<IndustryId>(parsed.industries, INDUSTRIES);
-  const seniorityRaw = typeof parsed.seniority === "string" ? parsed.seniority : null;
-  const seniority = (["junior", "middle", "senior", "lead"] as const)
-    .find((s) => s === seniorityRaw) ?? null;
-
   // Модель може прислати і список, і один рядок — приймаємо обидва, а фільтрує
   // словник. Порожній набір лишається порожнім: примусове «тільки віддалено»
   // було б відповіддю, якої людина не давала.
@@ -424,7 +401,6 @@ export function mergeParsed(parsed: RawParsed, local: ParsedProfile, text: strin
   const keep = new Set([
     ...spheres.map((s) => `sphere:${s}`),
     ...industries.map((i) => `industry:${i}`),
-    ...(seniority ? ["seniority"] : []),
     ...(modes.length ? ["remoteMode"] : []),
     ...(parsed.location ? ["location"] : []),
     ...(salaryMin ? ["salary"] : []),
@@ -432,7 +408,7 @@ export function mergeParsed(parsed: RawParsed, local: ParsedProfile, text: strin
   for (const key of Object.keys(evidence)) if (!keep.has(key)) delete evidence[key];
 
   return {
-    spheres, industries, seniority,
+    spheres, industries,
     remoteMode: serializeModes(modes),
     location: str(parsed.location, 120),
     salaryMin,
@@ -445,7 +421,6 @@ export function mergeParsed(parsed: RawParsed, local: ParsedProfile, text: strin
     // що галочка вже є, означало б викинути найточніше слово з резюме.
     customRole: str(parsed.customRole, 60),
     customIndustry: str(parsed.customIndustry, 60),
-    customSeniority: seniority ? null : str(parsed.customSeniority, 60),
     cvHighlights: str(parsed.cvHighlights, 300),
   };
 }

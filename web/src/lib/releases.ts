@@ -13,6 +13,14 @@ export const RELEASES: Release[] = [
     "date": "2026-08-30",
     "changes": [
       {
+        "hash": "142c4e8",
+        "subject": "Розвідка мусить питати сторінку, а не лише вгадувати адресу"
+      },
+      {
+        "hash": "8814396",
+        "subject": "web3.career: 115 вакансій → 874, і сторінка коштує один запит замість вісімнадцяти"
+      },
+      {
         "hash": "17e28f3",
         "subject": "Читаємо дошки, чиї вакансії лежать у потоці Next.js"
       },
@@ -73,7 +81,7 @@ export const RELEASES: Release[] = [
         "subject": "Чотири блокери запуску: кабінет як канал, порожній профіль, мова, вікно кандидатів"
       }
     ],
-    "chores": 4
+    "chores": 5
   },
   {
     "date": "2026-08-29",
@@ -645,4 +653,4 @@ export const RELEASES: Release[] = [
   }
 ];
 
-export const GENERATED_AT = "2026-08-30 13:54";
+export const GENERATED_AT = "2026-08-30 14:12";

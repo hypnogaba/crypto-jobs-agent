@@ -387,9 +387,9 @@ const user = (o: Partial<UserRow> = {}): UserRow => ({
   // Сфера тут не декорація: без неї (і без своєї ролі) deliverTo виходить
   // одразу — підбирати нема за чим. Порожній профіль перевіряється окремим
   // тестом нижче, а решті потрібна людина, яка щось про себе сказала.
-  status: "active", last_interaction_at: null, spheres: "[\"engineering\"]", industries: "[]", seniority: null,
+  status: "active", last_interaction_at: null, spheres: "[\"engineering\"]", industries: "[]",
   remote_mode: "any", location: null, salary_min: null, country: null, custom_role: null, wishes: null,
-  seniority_weight: null, location_weight: null, salary_weight: null, ...o });
+  location_weight: null, salary_weight: null, ...o });
 
 const ctxOf = (d1: unknown, o: Partial<RunContext> = {}): RunContext => ({
   d1: d1 as RunContext["d1"], cfg: { anthropicApiKey: null } as RunContext["cfg"],

@@ -2,10 +2,19 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import Nav from "@/app/nav";
 import Footer from "@/app/footer";
 import { startOnboarding } from "@/app/actions";
+import CvInput from "@/app/cv-input";
+import { CV_MAX_BYTES } from "@/lib/cv";
 import { all, one } from "@/lib/db";
 import { t } from "@/lib/i18n";
 import { toLatin } from "@/lib/geo";
 import type { Locale } from "@/lib/vocab";
+
+/**
+ * Межа розміру в копію. Число живе в cv.ts — і в підказці під скріпкою, і в
+ * помилці має стояти те саме, інакше вони розійдуться першою ж зміною стелі.
+ */
+const cvMax = (s: string): string =>
+  s.replace("{max}", String(Math.round(CV_MAX_BYTES / (1024 * 1024))));
 
 type FeedRow = {
   company: string;
@@ -169,18 +178,15 @@ export default async function HomeBody({
                   placeholder={t(locale, "home.placeholder")}
                 />
                 <div className="composer-bar">
-                  <label className="icon-btn" title={t(locale, "home.orCv")}>
-                    <span className="sr-only">{t(locale, "home.orCv")}</span>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                         strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                    </svg>
-                    <input type="file" name="cv" className="sr-only"
-                           accept=".pdf,.txt,.md,text/plain,application/pdf" />
-                  </label>
-                  <span className="text-xs" style={{ color: "var(--muted)" }}>
-                    {t(locale, "home.cvHint")}
-                  </span>
+                  {/* Межа розміру приходить із cv.ts, а не переписується тут:
+                      підказка під скріпкою і перевірка перед відправкою мусять
+                      називати одне й те саме число. */}
+                  <CvInput
+                    maxBytes={CV_MAX_BYTES}
+                    label={t(locale, "home.orCv")}
+                    hint={cvMax(t(locale, "home.cvHint"))}
+                    tooBig={cvMax(t(locale, "err.tooBig"))}
+                  />
                   <button type="submit" className="icon-btn icon-send" aria-label={t(locale, "home.cta")}>
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                          strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -192,7 +198,7 @@ export default async function HomeBody({
 
               {error && (
                 <p className="mt-3 text-sm" style={{ color: "var(--ember)" }}>
-                  {t(locale, `err.${error}`)}
+                  {cvMax(t(locale, `err.${error}`))}
                 </p>
               )}
             </form>

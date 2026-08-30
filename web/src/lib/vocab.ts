@@ -27,12 +27,24 @@ export const INDUSTRIES = [
   { id: "nonprofit", en: "Non-profit",     uk: "Некомерційний сектор", fr: "Associatif", ru: "Некоммерческий сектор" },
 ] as const;
 
-export const SENIORITY = [
-  { id: "junior", en: "Junior",         uk: "Junior",         fr: "Junior",        ru: "Junior" },
-  { id: "middle", en: "Middle",         uk: "Middle",         fr: "Confirmé",      ru: "Middle" },
-  { id: "senior", en: "Senior",         uk: "Senior",         fr: "Senior",        ru: "Senior" },
-  { id: "lead",   en: "Lead and above", uk: "Lead і вище",    fr: "Lead et plus",  ru: "Lead и выше" },
-] as const;
+/**
+ * Рівня тут більше немає, і це навмисно.
+ *
+ * Питання стояло третім із чотирьох, а працювало гірше за випадковість.
+ * Бал за рівень спирався на тег, який сканер брав із НАЗВИ вакансії, — і
+ * 62% кеша (14 049 рядків із 22 674) не мали того тегу взагалі. Тобто на
+ * двох третинах вакансій відповідь людини не робила нічого.
+ *
+ * Гірше: тега `middle` не існувало ніколи. Кнопка на сайті була, збігу за
+ * нею не могло бути в принципі, а невідповідність із senior і lead коштувала
+ * −2 і −4. Людина, що чесно назвала свій рівень, діставала за це лише штраф
+ * на 7 867 вакансіях.
+ *
+ * За весь час жодна скарга не назвала рівень причиною, і всі seniority_weight
+ * лишились одиницями. Тому питання прибране цілком, а не полагоджене:
+ * слова про рівень людина й далі може написати в побажаннях, і вони там
+ * справді шукаються — на відміну від цих чотирьох кнопок.
+ */
 
 export const REMOTE_MODES = [
   { id: "remote_only",    en: "Remote only",                 uk: "Тільки віддалено",            fr: "100% à distance",        ru: "Только удалённо" },
@@ -42,7 +54,6 @@ export const REMOTE_MODES = [
 
 export type SphereId = (typeof SPHERES)[number]["id"];
 export type IndustryId = (typeof INDUSTRIES)[number]["id"];
-export type SeniorityId = (typeof SENIORITY)[number]["id"];
 export type RemoteModeId = (typeof REMOTE_MODES)[number]["id"];
 export type Locale = "en" | "uk" | "fr" | "ru";
 

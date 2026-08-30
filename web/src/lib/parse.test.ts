@@ -85,12 +85,6 @@ describe("більше не вигадує", () => {
     expect(p.industries).not.toContain("nonprofit");
   });
 
-  it("Middle East — не рівень", () => {
-    expect(parseLocally("led Middle East expansion").seniority).not.toBe("middle");
-    expect(parseLocally("middle developer").seniority).toBe("middle");
-    expect(parseLocally("mid-level engineer").seniority).toBe("middle");
-  });
-
   it("роки досвіду й розмір команди — не зарплата", () => {
     // Клас [k к] містив пробіл, тож будь-яке число з пробілом ставало вилкою.
     expect(parseLocally("I have 10 years of experience").salaryMin).toBeNull();
@@ -196,13 +190,6 @@ describe("слова людини з резюме", () => {
     expect(merged.customRole).toBe("ecosystem lead");
   });
 
-  it("свій рівень стоїть лише замість щабля зі списку", () => {
-    expect(mergeParsed({ seniority: "senior", customSeniority: "head of BD" }, local, "x").customSeniority)
-      .toBeNull();
-    expect(mergeParsed({ customSeniority: "head of BD" }, local, "x").customSeniority)
-      .toBe("head of BD");
-  });
-
   it("витяг із резюме обрізається до 300 символів", () => {
     const long = "Solana ".repeat(80);
     expect(mergeParsed({ cvHighlights: long }, local, "x").cvHighlights!.length).toBe(300);
@@ -218,18 +205,23 @@ describe("mergeParsed", () => {
   const local = parseLocally("product manager");
 
   it("null від моделі означає «не знаю», а не «спитай регулярку»", () => {
-    const guessy = parseLocally("senior product manager");
-    expect(guessy.seniority).toBe("senior");
-    const merged = mergeParsed({ spheres: ["product"], seniority: null }, guessy, "senior product manager");
-    expect(merged.seniority).toBeNull();
+    const guessy = parseLocally("senior product manager in Berlin");
+    const merged = mergeParsed({ spheres: ["product"], location: null }, guessy, "senior product manager in Berlin");
+    expect(merged.location).toBeNull();
+  });
+
+  // Рівень більше не поле анкети: питання прибрано, бо тег рівня стояв лише
+  // на третині кеша, а «middle» не існувало взагалі. Слова про рівень тепер
+  // живуть у назві ролі й у побажаннях, де вони справді шукаються.
+  it("рівня серед розібраних полів немає", () => {
+    expect("seniority" in parseLocally("senior product manager")).toBe(false);
   });
 
   it("відкидає значення поза словником", () => {
     const merged = mergeParsed(
-      { spheres: ["product", "astrology"], seniority: "wizard", remoteMode: ["teleport"] },
+      { spheres: ["product", "astrology"], remoteMode: ["teleport"] },
       local, "product manager");
     expect(merged.spheres).toEqual(["product"]);
-    expect(merged.seniority).toBeNull();
     expect(merged.remoteMode).toBe("");
   });
 

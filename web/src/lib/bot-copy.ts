@@ -157,9 +157,6 @@ const P = {
   whySphere: {
     en: "Wrong kind of work", uk: "Не та сфера", fr: "Mauvais domaine", ru: "Не та сфера",
   },
-  whyLevel: {
-    en: "Wrong level", uk: "Не той рівень", fr: "Mauvais niveau", ru: "Не тот уровень",
-  },
   whyPlace: {
     en: "Wrong place", uk: "Не та локація", fr: "Mauvais lieu", ru: "Не та локация",
   },
@@ -199,12 +196,6 @@ const P = {
     uk: "Прийняв і записав. Вагами це не лікується, але я це бачу.",
     fr: "Noté et consigné. Les pondérations n'y peuvent rien, mais je le vois.",
     ru: "Принял и записал. Весами это не лечится, но я это вижу.",
-  },
-  learnedLevel: {
-    en: "Noted. Level mismatches will cost more for you from now on.",
-    uk: "Прийняв. Невідповідність рівня тепер каратиметься сильніше саме для тебе.",
-    fr: "Noté. Les écarts de niveau compteront davantage pour vous.",
-    ru: "Принял. Несоответствие уровня теперь будет наказываться сильнее именно для тебя.",
   },
   learnedPlace: {
     en: "Noted. Jobs outside your place will sink for you from now on.",

@@ -2,13 +2,24 @@
  * Витяг тексту з файлу резюме.
  *
  * Продукт обіцяє «завантаж CV», а вмів досі лише вставлений текст.
- * Працює у Workers без жодної залежності: PDF розбирається власним
- * мінімальним читачем потоків, решта — як текст.
+ * Працює у Workers без жодної залежності: PDF читає власний розбірник у
+ * pdf.ts, решта — як текст.
  *
  * Сам файл ніде не зберігається: витягуємо текст і забуваємо про нього.
  */
 
-const MAX_BYTES = 4 * 1024 * 1024;
+import { PdfAbort, readPdfText, toBinaryString } from "./pdf";
+
+/**
+ * Стеля на сам файл. Єдине джерело правди для цього числа: сторінка бере
+ * його звідси й тим самим показує людині ту межу, яка справді діє, а поле
+ * не дає навіть спробувати більший файл.
+ *
+ * Стеля Next на тіло серверної дії (next.config.ts) мусить лишатись ВИЩОЮ:
+ * вона спрацьовує раніше за цей код, і файл рівно на межі має отримати
+ * пояснення, а не сторінку 500.
+ */
+export const CV_MAX_BYTES = 4 * 1024 * 1024;
 
 /**
  * Стеля на розпакований потік і на всі потоки разом.
@@ -22,30 +33,6 @@ const MAX_INFLATED_TOTAL = 8 * 1024 * 1024;
 
 export class CvError extends Error {}
 
-/**
- * Байт у символ один в один.
- *
- * УВАГА: TextDecoder("latin1") — це насправді windows-1252, а не ISO-8859-1.
- * Байти 0x80–0x9F мапляться на інші кодові позиції, і зворотне перетворення
- * їх псує. Саме через це ламався zlib-заголовок кожного PDF.
- */
-const toBinaryString = (b: Uint8Array): string => {
-  let out = "";
-  for (let i = 0; i < b.length; i += 8192) {
-    out += String.fromCharCode(...b.subarray(i, i + 8192));
-  }
-  return out;
-};
-
-const indexOfBytes = (hay: Uint8Array, needle: string, from: number): number => {
-  const n = needle.length;
-  outer: for (let i = from; i <= hay.length - n; i++) {
-    for (let k = 0; k < n; k++) if (hay[i + k] !== needle.charCodeAt(k)) continue outer;
-    return i;
-  }
-  return -1;
-};
-
 /** Читає розпакований потік, зупиняючись на стелі замість того, щоб рости. */
 async function inflateCapped(slice: Uint8Array, cap: number): Promise<Uint8Array> {
   const ds = new DecompressionStream("deflate");
@@ -58,7 +45,7 @@ async function inflateCapped(slice: Uint8Array, cap: number): Promise<Uint8Array
     total += value.byteLength;
     if (total > cap) {
       await reader.cancel();
-      throw new CvError("tooBig");
+      throw new PdfAbort("tooBig");
     }
     parts.push(value);
   }
@@ -68,22 +55,29 @@ async function inflateCapped(slice: Uint8Array, cap: number): Promise<Uint8Array
   return out;
 }
 
-/** Розпаковує потоки FlateDecode і збирає текст із рядкових літералів. */
-async function extractPdf(bytes: Uint8Array): Promise<string> {
+/**
+ * Запасний прохід: рядкові літерали з усього файлу підряд.
+ *
+ * Читач у pdf.ts розуміє формат, і саме тому може на ньому спіткнутись —
+ * зламаний xref, чужий /Encoding, генератор із власними вигадками. Тоді
+ * лишається те, що працювало раніше: узяти все, що лежить у круглих дужках.
+ * Для простих PDF (LaTeX, старі принтери) цього досить, і краще мати грубий
+ * текст, ніж не мати ніякого.
+ */
+async function literalSweep(bytes: Uint8Array): Promise<string> {
   const chunks: string[] = [];
+  const bin = toBinaryString(bytes);
   let cursor = 0;
   let inflated = 0;
 
   for (;;) {
-    // Межі потоку шукаємо в БАЙТАХ: будь-який рядковий проміжний крок
-    // спотворив би стиснені дані.
-    const open = indexOfBytes(bytes, "stream", cursor);
+    const open = bin.indexOf("stream", cursor);
     if (open === -1) break;
     let start = open + 6;
     if (bytes[start] === 0x0d) start++;
     if (bytes[start] === 0x0a) start++;
 
-    const close = indexOfBytes(bytes, "endstream", start);
+    const close = bin.indexOf("endstream", start);
     if (close === -1) break;
     let end = close;
     if (bytes[end - 1] === 0x0a) end--;
@@ -95,10 +89,10 @@ async function extractPdf(bytes: Uint8Array): Promise<string> {
     try {
       const buf = await inflateCapped(slice, MAX_INFLATED_STREAM);
       inflated += buf.byteLength;
-      if (inflated > MAX_INFLATED_TOTAL) throw new CvError("tooBig");
+      if (inflated > MAX_INFLATED_TOTAL) throw new PdfAbort("tooBig");
       text = toBinaryString(buf);
     } catch (e) {
-      if (e instanceof CvError) throw e;
+      if (e instanceof PdfAbort) throw e;
       text = toBinaryString(slice);   // нестиснений потік
     }
 
@@ -107,23 +101,81 @@ async function extractPdf(bytes: Uint8Array): Promise<string> {
     }
   }
 
-  return chunks.join(" ").replace(/\s+/g, " ").trim();
+  return chunks.join(" ");
 }
+
+/**
+ * Частка літер і цифр серед усього тексту.
+ *
+ * Потрібна саме тому, що довжина нічого не доводить. Резюме з підмножиною
+ * шрифта, прочитане без таблиці /ToUnicode, дає сотні символів — але це
+ * коди гліфів і уламки шрифтових таблиць, а не слова. Стара перевірка
+ * «більше 120 символів» таке пропускала, і далі в модель їхало сміття під
+ * виглядом резюме. Живий текст будь-якою мовою впевнено переходить межу.
+ */
+const literacy = (s: string): number =>
+  s.length === 0 ? 0 : (s.match(/[\p{L}\p{N}\s]/gu)?.length ?? 0) / s.length;
+
+const MIN_CHARS = 120;
+const MIN_LITERACY = 0.7;
+
+/**
+ * Прибирання пробілів зі збереженням рядків.
+ *
+ * Розриви лишаються навмисно: у резюме рядок — це одиниця сенсу (посада,
+ * компанія, дата), і модель розбирає такий текст помітно краще, ніж суцільне
+ * полотно. Схлопуються тільки повтори.
+ */
+const tidy = (s: string): string => s
+  .replace(/\u00a0/g, " ")
+  .replace(/[^\S\n]+/g, " ")
+  .replace(/ ?\n ?/g, "\n")
+  .replace(/\n{2,}/g, "\n")
+  .trim();
 
 export async function extractCvText(file: File): Promise<string> {
   if (file.size === 0) throw new CvError("empty");
-  if (file.size > MAX_BYTES) throw new CvError("tooBig");
+  if (file.size > CV_MAX_BYTES) throw new CvError("tooBig");
 
   const bytes = new Uint8Array(await file.arrayBuffer());
   const isPdf = bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46;
 
-  const text = isPdf
-    ? await extractPdf(bytes)
-    : new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+  if (!isPdf) {
+    const clean = tidy(new TextDecoder("utf-8", { fatal: false }).decode(bytes));
+    // Та сама перевірка, що й для PDF: під виглядом .txt приходить і .doc, і
+    // архів, і будь-що інше, з чого декодер зробить довгий набір знаків.
+    if (clean.length < MIN_CHARS || literacy(clean) < MIN_LITERACY) throw new CvError("unreadable");
+    return clean.slice(0, 20_000);
+  }
 
-  const clean = text.replace(/ /g, " ").replace(/\s+/g, " ").trim();
+  let inflated = 0;
+  const inflate = async (slice: Uint8Array): Promise<Uint8Array> => {
+    const out = await inflateCapped(slice, MAX_INFLATED_STREAM);
+    inflated += out.byteLength;
+    if (inflated > MAX_INFLATED_TOTAL) throw new PdfAbort("tooBig");
+    return out;
+  };
 
-  // Занадто мало тексту — майже завжди скан-картинка, а не текстовий PDF
-  if (clean.length < 120) throw new CvError("unreadable");
+  let clean = "";
+  try {
+    clean = tidy(await readPdfText(bytes, inflate));
+  } catch (e) {
+    if (e instanceof PdfAbort) throw new CvError("tooBig");
+    clean = "";   // читач спіткнувся — нижче спробуємо грубо
+  }
+
+  if (clean.length < MIN_CHARS || literacy(clean) < MIN_LITERACY) {
+    const rough = tidy(await literalSweep(bytes).catch((e) => {
+      if (e instanceof PdfAbort) throw new CvError("tooBig");
+      return "";
+    }));
+    // Беремо запасний прохід лише тоді, коли він справді кращий: інакше
+    // грубі уламки заступили б нормально прочитаний, просто короткий текст.
+    if (literacy(rough) >= MIN_LITERACY && rough.length > clean.length) clean = rough;
+  }
+
+  // Занадто мало тексту або суцільні коди гліфів — майже завжди скан-картинка
+  // або шрифт без таблиці символів. Обіцяти таке резюме не можна.
+  if (clean.length < MIN_CHARS || literacy(clean) < MIN_LITERACY) throw new CvError("unreadable");
   return clean.slice(0, 20_000);
 }

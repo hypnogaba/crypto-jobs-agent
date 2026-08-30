@@ -57,14 +57,17 @@ export interface Profile {
   /** Своя індустрія: «climate tech», «esports». Того ж роду, що customRole. */
   customIndustry?: string | null;
   customIndustryEn?: string | null;
-  /** Свій рівень: «head of BD», «founder». Стоїть замість seniority, не поруч. */
-  customSeniority?: string | null;
-  /** Вільні побажання людини: «тільки стартапи, без банків, 4-денний тиждень». */
+  /**
+   * Вільні побажання людини: «тільки стартапи, без банків, 4-денний тиждень».
+   * Сюди ж переїхали слова про рівень — «senior і вище», «перша робота»:
+   * питання про рівень прибрано, і це тепер єдине місце, де такі слова живуть.
+   * На відміну від чотирьох кнопок, тут вони справді шукаються — у назві
+   * вакансії й в описі.
+   */
   wishes?: string | null;
   wishesEn?: string | null;
   /** Стек, роки, мови з резюме. У бали не йде — лише в промпт пояснень. */
   cvHighlights?: string | null;
-  seniority: string | null;
   /**
    * Набір варіантів через кому: «тільки віддалено» | «віддалено або офіс у
    * моєму місті» | «готовий переїхати». Останні два сумісні між собою, тож
@@ -84,7 +87,7 @@ export interface Profile {
    * Ваги правил, вивчені з відповідей людини. Одиниця — як у всіх.
    * Кожна скарга на цей вимір робить невідповідність дорожчою саме для неї.
    */
-  tuning?: { seniority: number; location: number; salary: number };
+  tuning?: { location: number; salary: number };
 }
 
 export interface CandidateJob {
@@ -122,7 +125,6 @@ export type MatchFact =
   | { k: "role"; v: string }
   | { k: "industry"; v: string }
   | { k: "place"; v: string }
-  | { k: "level" }
   | { k: "remote" }
   | { k: "salary" }
   | { k: "fresh" };
@@ -142,8 +144,6 @@ export interface ScoredJob extends CandidateJob {
   facts: MatchFact[];
   parts: ScorePart[];
 }
-
-const SENIORITY_ORDER = ["junior", "middle", "senior", "lead"];
 
 /**
  * Теги індустрій, які взагалі вміє ставити сканер (див. INDUSTRY_RULES).
@@ -338,24 +338,18 @@ export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): Score
   const ownIndustry = customIndustryBonus(job, industryText(p));
   if (ownIndustry > 0) { add("ownIndustry", ownIndustry); facts.push({ k: "industry", v: p.customIndustry! }); }
 
-  // Рівень: збіг тягне вгору, розрив у два щаблі — сильно вниз
-  const w = p.tuning ?? { seniority: 1, location: 1, salary: 1 };
-
-  if (p.seniority) {
-    const jobLevel = SENIORITY_ORDER.find((l) => tags.has(l));
-    if (jobLevel === p.seniority) { add("level", 3); facts.push({ k: "level" }); }
-    else if (jobLevel) {
-      const gap = Math.abs(SENIORITY_ORDER.indexOf(jobLevel) - SENIORITY_ORDER.indexOf(p.seniority));
-      add("levelGap", -gap * 2 * w.seniority);
-    }
-  } else if (matchesCustomRole(job.title, p.customSeniority)) {
-    // Свій рівень стоїть ЗАМІСТЬ щабля, а не поруч: «head of BD» — не lead
-    // і не senior, і чотири кнопки про таку людину не кажуть нічого. Слова
-    // шукаються в назві вакансії, як і своя роль, але важать менше: рівень
-    // уточнює збіг, а не створює його.
-    add("level", 3);
-    facts.push({ k: "level" });
-  }
+  // Рівня тут навмисно немає.
+  //
+  // Бал за рівень спирався на тег, який сканер брав із назви вакансії, а
+  // тегу не мали 14 049 рядків із 22 674 — тобто на 62% кеша відповідь
+  // людини не робила нічого. Тега `middle` не існувало взагалі, хоч кнопка
+  // на сайті була: така людина не могла отримати збіг у принципі й лише
+  // платила штраф на 7 867 вакансіях. Жодна скарга за весь час не назвала
+  // рівень причиною, і всі ваги лишились одиницями.
+  //
+  // Слова про рівень тепер приходять у customRole («senior backend
+  // engineer») і в wishes — і там вони шукаються по-справжньому.
+  const w = p.tuning ?? { location: 1, salary: 1 };
 
   // Географія.
   //
@@ -463,13 +457,16 @@ export function fitsCountry(job: CandidateJob, p: Profile): boolean {
 }
 
 /**
- * Топ-5 із трьома правилами проти одноманітності.
+ * Топ-5 із чотирма правилами проти одноманітності.
  *
  * 1. Одна роль на компанію. П'ять позицій в одній фірмі — це одна можливість.
- * 2. Спершу по одній вакансії з кожної сфери, яку людина обрала. Без цього
+ * 2. Спершу до двох вакансій із дошки своєї країни, якщо країна відома.
+ *    Місцева вакансія ніде більше не існує, а конкурувати самим балом із
+ *    двадцятьма тисячами глобальних вона не може.
+ * 3. Далі по одній вакансії з кожної сфери, яку людина обрала. Без цього
  *    добірка сповзає в найсильнішу сферу: перша справжня доставка дала п'ять
  *    вакансій із двох сфер і однієї індустрії, хоча профіль ширший.
- * 3. Решту місць добираємо за балом, як раніше.
+ * 4. Решту місць добираємо за балом, як раніше.
  *
  * Сортування за балом лишається всередині кожного кола, тож різноманітність
  * не купується ціною доречності: з кожної сфери береться її найкраще.
@@ -592,6 +589,31 @@ export function pickTop(jobs: CandidateJob[], p: Profile, limit = 5, now = new D
     return true;
   };
 
+  /**
+   * Коло нульове: вакансії з дошки своєї країни.
+   *
+   * Досі локальна вакансія лише ДОЗВОЛЯЛАСЬ — вона проходила фільтр країни
+   * нарівні з глобальними й далі конкурувала з ними самим балом. Глобальних
+   * у кеші двадцять тисяч проти шестисот національних, тож у добірку вони не
+   * потрапляли майже ніколи. Людина, яка написала «Антверпен», отримувала ту
+   * саму стрічку віддалених вакансій, що й людина без міста.
+   *
+   * Тому місце під них резервується. Два з п'яти — щоб локальне було завжди,
+   * але не витіснило сфери, які людина обрала сама.
+   *
+   * Резерв заповнюється лише тим, що вже пройшло ВСІ фільтри вище: бал,
+   * доречність, компанію. Порожній резерв просто віддає місця далі — краще
+   * коротша добірка, ніж місцева вакансія не з тієї роботи.
+   */
+  const localSlots = p.country ? Math.min(2, Math.floor(limit / 2)) : 0;
+  if (localSlots > 0) {
+    for (const job of scored) {
+      if (picked.length >= localSlots) break;
+      if (job.country !== p.country) continue;
+      take(job);
+    }
+  }
+
   // Коло перше: найкраще з кожної обраної сфери.
   for (const sphere of p.spheres) {
     if (picked.length >= limit) break;
@@ -685,7 +707,6 @@ export async function explainWithClaude(
     `Сфери: ${names(p.spheres)}. Індустрії: ${names(p.industries)}. ` +
     (p.customRole ? `Своя роль: ${clip(p.customRole, FIELD_MAX.title)}. ` : "") +
     (p.customIndustry ? `Своя індустрія: ${clip(p.customIndustry, FIELD_MAX.title)}. ` : "") +
-    `Рівень: ${p.customSeniority ? clip(p.customSeniority, FIELD_MAX.title) : (p.seniority ?? "—")}. ` +
     `Робота: ${p.remoteMode}. ` +
     `Зарплата від: ${p.salaryMin ?? "—"}.` +
     // Стек, роки й мови з резюме. Саме вони відрізняють двох людей з

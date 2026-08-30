@@ -69,6 +69,64 @@ export const KEYWORD_QUERIES = [
   "startup jobs board hiring engineers",
 ];
 
+/**
+ * Код країни → як її називають у твітах.
+ *
+ * Потрібно рівно для одного: скласти запит «job board Belgium hiring» під
+ * країну, де в нас уже є люди й немає дошки. Тому список короткий і містить
+ * англійську назву плюс місцеву там, де нею справді пишуть вакансії:
+ * бельгійська дошка називає себе «vacatures», а не «job board».
+ */
+const COUNTRY_WORDS: Record<string, string[]> = {
+  BE: ["Belgium", "vacatures Belgie", "emploi Belgique"],
+  AT: ["Austria", "Stellenangebote Österreich"],
+  CH: ["Switzerland", "Stellen Schweiz"],
+  SE: ["Sweden", "jobb Sverige"], NO: ["Norway", "jobb Norge"],
+  DK: ["Denmark", "job Danmark"], FI: ["Finland", "työpaikat"],
+  EE: ["Estonia", "töö Eesti"], LV: ["Latvia", "darbs Latvija"],
+  LT: ["Lithuania", "darbo skelbimai"],
+  HU: ["Hungary", "allas Magyarorszag"], SK: ["Slovakia", "praca Slovensko"],
+  SI: ["Slovenia"], HR: ["Croatia", "posao Hrvatska"], RS: ["Serbia", "poslovi Srbija"],
+  BG: ["Bulgaria", "raboti Bulgaria"], GR: ["Greece"], TR: ["Turkey", "is ilanlari"],
+  CY: ["Cyprus"], MT: ["Malta"], LU: ["Luxembourg"], IS: ["Iceland"],
+  MD: ["Moldova"], GE: ["Georgia Tbilisi"], AM: ["Armenia"], AZ: ["Azerbaijan"],
+  KZ: ["Kazakhstan"], IL: ["Israel", "drushim"], AE: ["UAE Dubai"],
+  SA: ["Saudi Arabia"], QA: ["Qatar"], EG: ["Egypt"],
+  ZA: ["South Africa"], NG: ["Nigeria"], KE: ["Kenya"], GH: ["Ghana"], MA: ["Morocco"],
+  IN: ["India"], PK: ["Pakistan"], BD: ["Bangladesh"], SG: ["Singapore"],
+  MY: ["Malaysia"], ID: ["Indonesia"], TH: ["Thailand"], VN: ["Vietnam"],
+  PH: ["Philippines"], JP: ["Japan"], KR: ["South Korea"], CN: ["China"],
+  HK: ["Hong Kong"], TW: ["Taiwan"], AU: ["Australia"], NZ: ["New Zealand"],
+  CA: ["Canada"], US: ["United States"], MX: ["Mexico", "empleos Mexico"],
+  BR: ["Brazil", "vagas Brasil"], AR: ["Argentina", "empleos Argentina"],
+  CL: ["Chile"], CO: ["Colombia"], PE: ["Peru"], UY: ["Uruguay"], CR: ["Costa Rica"],
+  UA: ["Ukraine"], PL: ["Poland", "praca IT"], DE: ["Germany"], FR: ["France"],
+  GB: ["United Kingdom"], ES: ["Spain", "empleo Espana"], IT: ["Italy", "lavoro Italia"],
+  PT: ["Portugal", "emprego Portugal"], NL: ["Netherlands", "vacatures"],
+  CZ: ["Czechia", "prace IT"], RO: ["Romania"], IE: ["Ireland"],
+};
+
+/**
+ * Запити під країну, де в нас є люди й немає дошки.
+ *
+ * Порожній масив, якщо країну не знаємо, — і це правильна відповідь:
+ * вигаданий запит «job board XX» витратив би виклик і не дав нічого.
+ */
+export function queriesForCountry(code: string): string[] {
+  const words = COUNTRY_WORDS[code.toUpperCase()];
+  if (!words) return [];
+  return words.map((w) => `job board ${w} hiring tech`);
+}
+
+/**
+ * Домен верхнього рівня країни. Збігається з кодом ISO майже завжди —
+ * винятків рівно два, і обидва трапляються в наших користувачів.
+ */
+const TLD_EXCEPTIONS: Record<string, string> = { GB: "uk", EL: "gr" };
+
+export const tldOf = (code: string): string =>
+  TLD_EXCEPTIONS[code.toUpperCase()] ?? code.toLowerCase();
+
 /** Скільки разів повторювати запит, який віддав порожньо. Див. пастку 1. */
 const RETRIES = 3;
 
@@ -108,8 +166,12 @@ const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms)
  * частоти, і тоді порожні відповіді приходять на кожен другий запит.
  */
 export async function collectTweets(token: string, o: FetchOptions = {},
-                                    pauseMs = 4000): Promise<Tweet[]> {
+                                    pauseMs = 4000,
+                                    extraQueries: string[] = []): Promise<Tweet[]> {
   const plan: Array<Record<string, unknown>> = [
+    // Країни, яких нам бракує, — першими: якщо ліміт частоти зріже прогін
+    // посередині, втратити краще загальний запит, а не цільовий.
+    ...extraQueries.map((q) => ({ keywords: q, product: "Top" })),
     ...HASHTAGS.map((h) => ({ hashtag: h, product: "Latest" })),
     ...KEYWORD_QUERIES.map((q) => ({ keywords: q, product: "Top" })),
   ];
@@ -190,6 +252,21 @@ export interface Candidate {
   authors: number;   // скільки РІЗНИХ авторів на нього послались
   tweets: number;
   example: string;
+  /** Домен верхнього рівня країни, якої нам бракує: `be` для `jobat.be`. */
+  wantedTld: string | null;
+}
+
+/**
+ * Домен верхнього рівня країни, якщо він серед потрібних.
+ *
+ * `wanted` — це країни, де в нас уже є люди й немає дошки. Для них ccTLD сам
+ * по собі є сигналом, і достатнім: бельгійська дошка може називатись
+ * `stepstone.be` — жодного слова про роботу в назві немає, і за загальним
+ * правилом ми б її викинули.
+ */
+function wantedTldOf(host: string, wanted: Set<string>): string | null {
+  const tld = host.slice(host.lastIndexOf(".") + 1);
+  return wanted.has(tld) ? tld : null;
 }
 
 /**
@@ -199,7 +276,7 @@ export interface Candidate {
  * це його власна реклама, а не популярність дошки.
  */
 export function rankHosts(tweets: Tweet[], expanded: Map<string, string>,
-                          known: Set<string>): Candidate[] {
+                          known: Set<string>, wanted: Set<string> = new Set()): Candidate[] {
   const authors = new Map<string, Set<string>>();
   const count = new Map<string, number>();
   const example = new Map<string, string>();
@@ -217,7 +294,10 @@ export function rankHosts(tweets: Tweet[], expanded: Map<string, string>,
     for (const h of hosts) {
       if (NOISE.has(h) || THROWAWAY.some((s) => h.endsWith(s))) continue;
       if (isKnown(h, known)) continue;
-      if (!JOBBY.test(h)) continue;
+      // Слово про роботу в назві АБО домен потрібної країни. Друге саме по
+      // собі достатнє: у назві бельгійської дошки може не бути ні «job», ні
+      // «career», а потрібна вона нам більше за будь-яку глобальну.
+      if (!JOBBY.test(h) && !wantedTldOf(h, wanted)) continue;
       (authors.get(h) ?? authors.set(h, new Set()).get(h)!).add(t.userScreenName);
       count.set(h, (count.get(h) ?? 0) + 1);
     }
@@ -227,8 +307,12 @@ export function rankHosts(tweets: Tweet[], expanded: Map<string, string>,
     .map(([host, set]) => ({
       host, authors: set.size, tweets: count.get(host) ?? 0,
       example: example.get(host) ?? `https://${host}`,
+      wantedTld: wantedTldOf(host, wanted),
     }))
-    .sort((a, b) => b.authors - a.authors || b.tweets - a.tweets);
+    // Країна, де в нас є люди й немає дошки, йде поперед усього іншого:
+    // одна така дошка вартніша за десяту глобальну стрічку віддалених.
+    .sort((a, b) => Number(Boolean(b.wantedTld)) - Number(Boolean(a.wantedTld))
+                 || b.authors - a.authors || b.tweets - a.tweets);
 }
 
 /** Хост або будь-який його батьківський домен уже відомі. */
