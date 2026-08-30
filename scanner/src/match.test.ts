@@ -450,3 +450,61 @@ describe("pickTop із межею доречності", () => {
     expect(pickTop(jobs, wide, 5)).toHaveLength(3);
   });
 });
+
+/**
+ * Резерв під локальні вакансії.
+ *
+ * Глобальних у кеші двадцять тисяч проти шестисот національних, тож самим
+ * балом місцева вакансія в добірку не потрапляла майже ніколи — навіть коли
+ * людина сама написала місто.
+ */
+describe("pickTop — місце під локальні", () => {
+  const local: Profile = { ...p, country: "BE" };
+  const beJob = (id: string, over: Partial<CandidateJob> = {}): CandidateJob =>
+    job({ id, companyKey: `be-${id}`, company: `BE ${id}`, country: "BE", ...over });
+  const globalJob = (id: string): CandidateJob =>
+    job({ id, companyKey: `gl-${id}`, company: `Global ${id}`,
+          postedAt: new Date().toISOString() });
+
+  it("бере локальні, навіть коли глобальні сильніші за балом", () => {
+    // Глобальні свіжі, отже мають вищий бал; локальні — ні.
+    const jobs = [...Array.from({ length: 8 }, (_, i) => globalJob(`g${i}`)),
+                  beJob("b1"), beJob("b2")];
+    const top = pickTop(jobs, local, 5);
+    expect(top.filter((j) => j.country === "BE")).toHaveLength(2);
+    expect(top).toHaveLength(5);
+  });
+
+  it("не резервує місця, коли країни в профілі немає", () => {
+    const jobs = [...Array.from({ length: 8 }, (_, i) => globalJob(`g${i}`))];
+    const top = pickTop(jobs, p, 5);
+    expect(top.every((j) => !j.country)).toBe(true);
+  });
+
+  /**
+   * Головна межа: резерв не є приводом надіслати не ту роботу. Місцева
+   * вакансія не з тієї сфери мусить відпасти на тих самих фільтрах, що й
+   * будь-яка інша.
+   */
+  it("не тягне локальну вакансію, яка не пройшла доречність", () => {
+    const offTopic = beJob("bad", { title: "Plumber", tags: ["trades"] });
+    const jobs = [offTopic, ...Array.from({ length: 4 }, (_, i) => globalJob(`g${i}`))];
+    const top = pickTop(jobs, local, 5);
+    expect(top.find((j) => j.id === "bad")).toBeUndefined();
+  });
+
+  it("порожній резерв віддає місця далі, а не лишає дірку", () => {
+    const jobs = Array.from({ length: 5 }, (_, i) => globalJob(`g${i}`));
+    expect(pickTop(jobs, local, 5)).toHaveLength(5);
+  });
+
+  // Одна роль на компанію діє й тут: дві вакансії одного місцевого
+  // роботодавця — це одна можливість, а не дві.
+  it("не бере дві вакансії однієї місцевої компанії", () => {
+    const jobs = [beJob("b1", { companyKey: "same", company: "Same" }),
+                  beJob("b2", { companyKey: "same", company: "Same" }),
+                  ...Array.from({ length: 5 }, (_, i) => globalJob(`g${i}`))];
+    const top = pickTop(jobs, local, 5);
+    expect(top.filter((j) => j.country === "BE")).toHaveLength(1);
+  });
+});

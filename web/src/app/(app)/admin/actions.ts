@@ -16,6 +16,7 @@ import { requireAdmin } from "@/lib/auth";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { all, one, run } from "@/lib/db";
 import { safeJobUrl } from "@/lib/safe-url";
+import { deriveCountry } from "@/lib/geo";
 import { INTAKE_LIMIT, atsApi, atsListInPage, boardName, classify, countJobs, diagnose,
          diagnoseHttp, feedInPage, getroIdInPage, jobPostingCount, labelOf, nextPayloadJobs, tidy,
          type Provider } from "@/lib/source-link";
@@ -614,6 +615,33 @@ export async function forgetIntake(formData: FormData): Promise<void> {
  * раз, — а саме їх власник і хоче впізнати сьогодні. `getChat` віддає нік
  * за chat_id, і це рівно один запит на людину.
  */
+/**
+ * Перерахувати країну в усіх профілях, де вона виводиться з написаної локації.
+ *
+ * Країна проставляється один раз — коли людина зберігає профіль. Але словник
+ * місць росте: він почався з дванадцяти країн і виріс до сімдесяти п'яти.
+ * Кожне таке розширення лишає позаду тих, хто вже написав своє місто: у базі
+ * лежав профіль із локацією «зфкши» («paris» кирилицею) і порожньою країною —
+ * розбір це вже вмів, а перерахувати не було чим.
+ *
+ * Тому кнопка. Автоматично при кожному завантаженні панелі робити це не можна:
+ * читання сторінки не мусить мовчки писати в базу.
+ */
+export async function recountCountries(): Promise<void> {
+  await requireAdmin();
+  const rows = await all<{ user_id: string; location: string | null; country: string | null }>(
+    "SELECT user_id, location, country FROM profiles WHERE location IS NOT NULL AND location <> ''");
+
+  for (const r of rows) {
+    const next = deriveCountry(r.location);
+    // Пишемо лише зміну: зайвий UPDATE на кожен профіль нічого не дає.
+    if (next !== r.country) {
+      await run("UPDATE profiles SET country=? WHERE user_id=?", next, r.user_id);
+    }
+  }
+  refresh();
+}
+
 export async function refreshTelegramNames(): Promise<void> {
   await requireAdmin();
   const { env } = getCloudflareContext();

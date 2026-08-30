@@ -20,7 +20,8 @@ import { loadConfig } from "./config.js";
 import { D1Client } from "./d1.js";
 import { mapLimit } from "./http.js";
 import { fetchBoard, type Board } from "./sources/boards.js";
-import { collectTweets, expandAll, rankHosts, type Candidate } from "./sources/twitter.js";
+import { collectTweets, expandAll, queriesForCountry, rankHosts, tldOf,
+         type Candidate } from "./sources/twitter.js";
 
 /** Скільки кандидатів перевіряємо стрічкою за прогін. Кожен — до 20 запитів. */
 const PROBE_LIMIT = 25;
@@ -180,7 +181,32 @@ async function main(): Promise<void> {
   for (const h of IN_CODE) known.add(h);
   console.log(`Уже відомо ${known.size} доменів.`);
 
-  const tweets = await collectTweets(token);
+  /**
+   * Країни, де в нас уже є люди й немає жодної дошки.
+   *
+   * Це і є замикання петлі. Досі така країна лише з'являлась у панелі
+   * повідомленням «знайди дошку сам». Тепер вона стає запитом: людина
+   * написала «Антверпен» → країна BE → BE немає серед дошок → розвідка
+   * цього тижня питає твіттер саме про бельгійські дошки.
+   *
+   * Три країни за прогін: кожна коштує кілька викликів, а власникові однаково
+   * не варто показувати тридцять пропозицій за раз.
+   */
+  const gaps = await d1.query<{ country: string; people: number }>(
+    `SELECT p.country, COUNT(*) AS people
+       FROM profiles p
+      WHERE p.country IS NOT NULL AND p.country <> ''
+        AND p.country NOT IN (SELECT country FROM country_boards WHERE enabled=1)
+      GROUP BY p.country ORDER BY people DESC LIMIT 3`);
+
+  const wanted = new Set(gaps.map((g) => tldOf(g.country)));
+  const extra = gaps.flatMap((g) => queriesForCountry(g.country));
+  if (gaps.length) {
+    console.log(`Країни без дошки: ${gaps.map((g) => `${g.country} (${g.people})`).join(", ")}` +
+                ` → ${extra.length} цільових запитів.`);
+  }
+
+  const tweets = await collectTweets(token, {}, 4000, extra);
   console.log(`Зібрано ${tweets.length} твітів.`);
   if (tweets.length === 0) {
     console.log("Порожньо — схоже на вичерпаний ліміт або мертвий токен. Нічого не роблю.");
@@ -191,8 +217,11 @@ async function main(): Promise<void> {
   const ok = [...expanded.values()].filter(Boolean).length;
   console.log(`Розгорнуто ${ok} із ${expanded.size} скорочень.`);
 
-  const candidates = rankHosts(tweets, expanded, known);
-  console.log(`Нових кандидатів: ${candidates.length}. Перевіряю перші ${limit}.`);
+  const candidates = rankHosts(tweets, expanded, known, wanted);
+  const targeted = candidates.filter((c) => c.wantedTld).length;
+  console.log(`Нових кандидатів: ${candidates.length}` +
+              (targeted ? `, з них ${targeted} із потрібних країн` : "") +
+              `. Перевіряю перші ${limit}.`);
 
   const probed = await mapLimit(candidates.slice(0, limit), 4, probeHost);
   const found = probed.filter((x): x is Found => x !== null)
@@ -211,22 +240,37 @@ async function main(): Promise<void> {
   if (dry) { console.log("Пробний прогін, нічого не записано."); return; }
 
   const runId = crypto.randomUUID();
+  const gapFor = new Map(gaps.map((g) => [tldOf(g.country), g]));
+
   for (const f of found) {
-    const { host, authors, tweets: mentions } = f.candidate;
+    const { host, authors, tweets: mentions, wantedTld } = f.candidate;
+    const gap = wantedTld ? gapFor.get(wantedTld) : undefined;
+
+    // Країна в заголовку, коли дошка закриває саме ту прогалину, через яку
+    // її й шукали. Без цього власник бачив би просто «нова дошка» й не знав,
+    // що вона єдина для людини, яка вже в нас є.
+    const title = gap
+      ? `Дошка для ${gap.country}: ${host}`
+      : `Нова дошка: ${host}`;
+    const why = gap
+      ? `Це країна, де в нас уже ${gap.people} ${gap.people === 1 ? "людина" : "людей"} ` +
+        `і жодної місцевої дошки — вони бачать лише глобальні вакансії. `
+      : "";
+
     await d1.execute(
       `INSERT INTO proposals (id,kind,target,title,detail,evidence,severity,run_id)
        VALUES (?,'add_source',?,?,?,?,?,?)
        ON CONFLICT DO NOTHING`,
-      [crypto.randomUUID(), f.feedUrl,
-       `Нова дошка: ${host}`,
+      [crypto.randomUUID(), f.feedUrl, title,
+       why +
        `Стрічка віддала ${f.jobs} вакансій, і всі розібрались на компанію й посаду. ` +
        `Наприклад: ${f.samples.join(" · ")}. ` +
        `Знайдено в твіттері: ${authors} різних авторів послались на цей домен ` +
        `у ${mentions} твітах про наймання.`,
        `${f.feedUrl} · ${f.jobs} вакансій при перевірці · ${authors} авторів`,
-       // Дошка з сотнею вакансій важливіша за дошку з десятком, але жодна
-       // з них не «висока вага»: це пропозиція, а не поломка.
-       f.jobs >= 50 ? "medium" : "low", runId]);
+       // Дошка, яка закриває країну з живими людьми, важить більше за ще
+       // одну глобальну стрічку віддалених — скільки б та не давала.
+       gap ? "high" : f.jobs >= 50 ? "medium" : "low", runId]);
   }
 
   const open = (await d1.query<{ n: number }>(
