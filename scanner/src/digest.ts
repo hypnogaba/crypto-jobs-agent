@@ -12,12 +12,13 @@
  */
 import { loadConfig } from "./config.js";
 import { D1Client } from "./d1.js";
-import { explainWithClaude, hasSearchSignal, meaningfulRoleWords, pickTop, roleText, roleWords,
+import { explainWithClaude, hasSearchSignal, matchPercent, meaningfulRoleWords, pickTop, roleText, roleWords,
          type CandidateJob, type Profile } from "./match.js";
-import { asLocale, formatWhen, nextDelivery, salaryLine, say, thin, type Locale } from "./digest-copy.js";
+import { asLocale, formatWhen, matchLine, nextDelivery, salaryLine, say, thin, type Locale } from "./digest-copy.js";
 import { summarize } from "./summary.js";
 import { costUsd } from "./pricing.js";
 import { extractSalary, type Salary } from "./salary.js";
+import { plausibleSalary } from "./money.js";
 import { applyTranslations, d1Store, translateJobs } from "./translate.js";
 
 const DIGEST_SIZE = 5;
@@ -33,6 +34,7 @@ export interface UserRow {
   timezone: string; delivery_hour: number; status: string; last_interaction_at: string | null;
   spheres: string; industries: string; seniority: string | null;
   remote_mode: string; location: string | null; salary_min: number | null;
+  salary_currency: string | null;
   country: string | null;
   custom_role: string | null;
   custom_industry: string | null;
@@ -318,6 +320,12 @@ export type DigestJob = CandidateJob & {
   why: string; summary?: string | null;
   /** id рядка sent — саме він стоїть у посиланні «Податися». */
   sentId: string;
+  /**
+   * Бал збігу. Необов'язковий: відкладені добірки з бази його не мають, і
+   * тоді рядок «Збіг …%» просто не друкується — краще без числа, ніж із
+   * вигаданим.
+   */
+  score?: number;
 };
 
 export interface FormatOptions {
@@ -349,7 +357,15 @@ export function formatDigest(
     const facts = [
       j.location ?? (j.remote ? say(locale, "remote") : null),
       j.remote && j.location ? say(locale, "remote") : null,
-      salaryLine(locale, j.salaryMin, j.salaryMax, j.salaryCurrency),
+      // Наскільки близько. Порядок у добірці й так за спаданням, але без
+      // числа різниця між першою і п'ятою невидима, а вона буває велика:
+      // у живій добірці перша тягнула на 74%, п'ята на 40%.
+      j.score === undefined ? null : matchLine(locale, matchPercent(j.score)),
+      // Неправдоподібну вилку не показуємо взагалі: «від 1 000 USD» під
+      // вакансією senior-рівня виглядає як зламаний продукт, і воно ним і є —
+      // це або місячна сума, або уламок тексту, який розбір узяв за вилку.
+      plausibleSalary(j.salaryMin, j.salaryMax, j.salaryCurrency)
+        ? salaryLine(locale, j.salaryMin, j.salaryMax, j.salaryCurrency) : null,
     ].filter(Boolean) as string[];
     if (facts.length) lines.push(escapeHtml(facts.join(" · ")));
 
@@ -600,6 +616,7 @@ export function profileOf(u: UserRow): Profile {
       salary: u.salary_weight ?? 1,
     },
     seniority: u.seniority, remoteMode: u.remote_mode, location: u.location, salaryMin: u.salary_min,
+    salaryCurrency: u.salary_currency,
     locationEn: u.location_en,
     country: u.country,
   };
@@ -607,7 +624,7 @@ export function profileOf(u: UserRow): Profile {
 
 /** Стовпці профілю, які читає підбір. Один список на digest і replay. */
 export const PROFILE_COLUMNS =
-  `u.*, p.spheres,p.industries,p.seniority,p.remote_mode,p.location,p.salary_min,p.custom_role,p.country,
+  `u.*, p.spheres,p.industries,p.seniority,p.remote_mode,p.location,p.salary_min,p.salary_currency,p.custom_role,p.country,
         p.wishes,p.custom_industry,p.custom_seniority,p.cv_highlights,
         p.custom_role_en,p.custom_industry_en,p.wishes_en,p.location_en,
         t.seniority_weight,t.location_weight,t.salary_weight
@@ -945,12 +962,12 @@ export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
   await d1.batch(withWhy.map((j) => ({
     // OR IGNORE: D1 повторює запити, і таймаут після коміту дав би конфлікт
     // ключа на другій спробі.
-    sql: `INSERT OR IGNORE INTO sent (id,user_id,job_id,digest_id,why_fits,match_facts,status,sent_at,dedupe_key)
-          VALUES (?,?,?,?,?,?,?,?,?)
+    sql: `INSERT OR IGNORE INTO sent (id,user_id,job_id,digest_id,why_fits,match_facts,status,sent_at,dedupe_key,score)
+          VALUES (?,?,?,?,?,?,?,?,?,?)
           ON CONFLICT(user_id,job_id) DO NOTHING`,
     params: [j.sentId, u.id, j.id, digestId, j.why, JSON.stringify(j.facts),
              bornSent ? "sent" : "pending", bornSent ? now.toISOString() : null,
-             dedupeById.get(j.id) ?? null],
+             dedupeById.get(j.id) ?? null, j.score ?? null],
   })));
 
   // Менше за п'ять через стелю — не «тонкий день», а «решта завтра».

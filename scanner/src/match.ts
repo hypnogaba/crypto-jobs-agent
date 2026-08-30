@@ -8,6 +8,7 @@
 
 import { labelOf, languageName, whyLine, type Locale, type WhyBit } from "./digest-copy.js";
 import { placeFit, placeOf } from "./places.js";
+import { toEur } from "./money.js";
 
 /**
  * «Тільки віддалено» — це коли людина прямо це сказала й не назвала при цьому
@@ -75,6 +76,8 @@ export interface Profile {
   /** Місто канонічною англійською: «Париж» -> «Paris». Порівнюється саме воно. */
   locationEn?: string | null;
   salaryMin: number | null;
+  /** Валюта очікування. Без неї 120 000 UAH дорівнювало 120 000 EUR. */
+  salaryCurrency?: string | null;
   /** Країна людини, виведена з локації або часового поясу. Може бути порожня. */
   country?: string | null;
   /**
@@ -393,16 +396,29 @@ export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): Score
     if (job.remote) add("remote", 1);
   }
 
-  // Зарплата — м'який пріоритет: вакансія без вилки НЕ карається
-  if (p.salaryMin && job.salaryMin) {
-    if (job.salaryMin >= p.salaryMin) { add("salary", 2); facts.push({ k: "salary" }); }
+  // Зарплата — м'який пріоритет: вакансія без вилки НЕ карається.
+  //
+  // Обидві суми зводяться до євро. Досі порівнювались самі числа, тож
+  // «120 000 USD» дорівнювало «120 000 EUR», а «від 1 000 USD» — очевидно
+  // хибний розбір — чесно зараховувалось як мала зарплата й давало штраф
+  // замість того, щоб бути проігнорованим. Невідома валюта чи неправдоподібна
+  // сума дають null, тобто мовчання.
+  const wantEur = toEur(p.salaryMin, p.salaryCurrency ?? "EUR");
+  const jobEur = toEur(job.salaryMin, job.salaryCurrency);
+  if (wantEur && jobEur) {
+    if (jobEur >= wantEur) { add("salary", 2); facts.push({ k: "salary" }); }
     else add("salaryLow", -2 * w.salary);
   }
 
   if (job.postedAt) {
     const days = (now.getTime() - new Date(job.postedAt).getTime()) / 86_400_000;
-    if (days <= 3) { add("fresh", 2); facts.push({ k: "fresh" }); }
-    else if (days <= 7) add("fresh", 1);
+    // Свіжість більше не важить як індустрія. Раніше вона давала +2 — стільки
+    // ж, скільки збіг за галуззю, — і саме вона вирішувала порядок там, де
+    // решта стояла в нічию: у живій добірці чотири вакансії мали по 13 балів,
+    // і першою стала та, яку виставили на дванадцять годин раніше.
+    // Остаточний порядок за датою лишається, але вже після бала (див. pickTop).
+    if (days <= 3) { add("fresh", 1); facts.push({ k: "fresh" }); }
+    else if (days <= 7) add("fresh", 0.5);
   }
 
   // Дошка програє прямому посиланню на роботодавця — але лише в нічию.
@@ -521,6 +537,39 @@ export function reachable(job: CandidateJob, p: Profile): boolean {
   return placeFit(placeOf(job.location), myCountry) !== "miss";
 }
 
+/**
+ * Бал сильного збігу.
+ *
+ * Не максимум — саме «сильний»: сфера (6) плюс точний збіг за назвою ролі
+ * (12) плюс рівень (3). Усе понад це — вже подарунок, і показувати 140%
+ * було б дивно.
+ *
+ * Шкала навмисно АБСОЛЮТНА, а не «відсоток від найкращого сьогодні». Інакше
+ * перша вакансія завжди мала б 100%, навіть у день, коли нічого доброго не
+ * знайшлось, — і число перестало б щось означати.
+ */
+export const STRONG_SCORE = 21;
+
+/**
+ * Наскільки ця вакансія близька, у відсотках. Ціле число від 5 до 100.
+ *
+ * Людина просила «щоб приходило саме те, що найбільше підходить, а потім по
+ * спадаючій». Порядок це вже робить; відсоток робить його видимим — і чесно
+ * показує день, коли найкраще з знайденого тягне на шістдесят.
+ */
+export const matchPercent = (score: number): number =>
+  Math.max(5, Math.min(100, Math.round((score / STRONG_SCORE) * 100)));
+
+/**
+ * Спершу бал, і лише в нічию — дата.
+ *
+ * Досі нічия розв'язувалась порядком у масиві, тобто випадковістю запиту.
+ * Дата — не випадковість: із двох однаково доречних вакансій свіжіша краща,
+ * бо на неї менше подано.
+ */
+export const byScoreThenFresh = (a: ScoredJob, b: ScoredJob): number =>
+  b.score - a.score || (Date.parse(b.postedAt ?? "") || 0) - (Date.parse(a.postedAt ?? "") || 0);
+
 export function pickTop(jobs: CandidateJob[], p: Profile, limit = 5, now = new Date()): ScoredJob[] {
   // Порожній профіль — не «нічого не знайшлось», а «нема чого шукати».
   if (!hasSearchSignal(p)) return [];
@@ -532,7 +581,7 @@ export function pickTop(jobs: CandidateJob[], p: Profile, limit = 5, now = new D
     .map((j) => scoreJob(j, p, now))
     .filter((j) => j.score > 0)
     .filter((j) => onTopic(j, p))
-    .sort((a, b) => b.score - a.score);
+    .sort(byScoreThenFresh);
 
   const picked: ScoredJob[] = [];
   const seenCompanies = new Set<string>();
@@ -558,7 +607,7 @@ export function pickTop(jobs: CandidateJob[], p: Profile, limit = 5, now = new D
   }
 
   // Порядок у повідомленні — за силою збігу, а не за тим, як добирали.
-  return picked.sort((a, b) => b.score - a.score);
+  return picked.sort(byScoreThenFresh);
 }
 
 /**
