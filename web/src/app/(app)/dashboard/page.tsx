@@ -160,8 +160,24 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                           {m.applied_at && (
                             // div, не p: <form> усередині <p> — недійсний HTML,
                             // і React зривається на гідратації.
-                            <div className="mono mt-3 flex items-center gap-3 text-xs" style={{ color: "var(--ok)" }}>
+                            <div className="mono mt-3 flex flex-wrap items-center gap-3 text-xs" style={{ color: "var(--ok)" }}>
                               <span>✓ {t(locale, "dash.appliedOn").replace("{d}", m.applied_at.slice(0, 10))}</span>
+                              {/* Посилання лишається й після подачі.
+                                  Раніше воно жило лише в блоці «ще не подано»,
+                                  тож щойно людина відкривала вакансію, єдиний
+                                  шлях до неї зникав — повернутись можна було
+                                  тільки через «Скасувати», тобто стерши сам
+                                  факт, що вона подалась. Сіре мало означати
+                                  «ти це вже бачив», а означало «сюди більше
+                                  не можна».
+
+                                  Через /apply, а не прямо на m.url: той
+                                  маршрут перевіряє власність рядка й чистить
+                                  адресу (база наповнюється чужими стрічками),
+                                  а дату подачі не перезаписує — вона там під
+                                  COALESCE. */}
+                              <a href={`/apply/${m.id}`} target="_blank" rel="noreferrer"
+                                 className="link text-xs">{t(locale, "dash.openAgain")} ↗</a>
                               <form action={undoApplied}>
                                 <input type="hidden" name="id" value={m.id} />
                                 <button className="link text-xs">{t(locale, "dash.undo")}</button>

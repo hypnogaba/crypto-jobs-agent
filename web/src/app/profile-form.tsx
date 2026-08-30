@@ -17,6 +17,15 @@ export interface ProfilePre {
   customIndustry: string | null;
   /** Стек, роки, мови з резюме. Заповнює розбір, правити може людина. */
   cvHighlights: string | null;
+  /**
+   * Чи прийшла чернетка з резюме.
+   *
+   * Питання не косметичне: заголовок «З резюме» бачила КОЖНА людина, зокрема
+   * та, що написала одне речення й ніякого файлу не давала. Вона читала про
+   * своє резюме, якого не існує, і підказку «слова твої» про слова, яких не
+   * писала. Саме поле корисне всім — брехав лише підпис.
+   */
+  fromCv?: boolean;
   industries: string[];
   remoteMode: string | null;
   location: string | null;
@@ -271,7 +280,9 @@ export default function ProfileForm({ locale, pre, back, error, quote, evidence 
             стек, роки й мови не ловить жодна кнопка, а саме за ними
             відрізняються дві людини з однаковими галочками. Поле видиме й
             редаговане — це слова людини, а не наш висновок про неї. */}
-        <Question n={4} title={t(locale, "onboarding.fromCv")} hint={t(locale, "onboarding.fromCvHint")}>
+        <Question n={4}
+                  title={t(locale, pre.fromCv ? "onboarding.fromCv" : "onboarding.ownWords")}
+                  hint={t(locale, pre.fromCv ? "onboarding.fromCvHint" : "onboarding.ownWordsHint")}>
           <textarea name="cvHighlights" className="field" rows={2} maxLength={300}
             defaultValue={pre.cvHighlights ?? ""} placeholder={t(locale, "onboarding.fromCvPlaceholder")} />
         </Question>

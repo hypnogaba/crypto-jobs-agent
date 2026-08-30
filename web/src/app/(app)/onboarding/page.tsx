@@ -30,14 +30,14 @@ export default async function Onboarding({ searchParams }: { searchParams: Promi
   if (!pre && user) {
     const row = await one<{ spheres: string; industries: string;
       custom_role: string | null; custom_industry: string | null;
-      cv_highlights: string | null;
+      cv_highlights: string | null; mode: string | null;
       remote_mode: string; location: string | null; salary_min: number | null; salary_currency: string | null;
       wishes: string | null }>(
       "SELECT * FROM profiles WHERE user_id=?", user.id);
     if (row) pre = {
       spheres: parseList(row.spheres), industries: parseList(row.industries),
       customRole: row.custom_role, customIndustry: row.custom_industry,
-      cvHighlights: row.cv_highlights,
+      cvHighlights: row.cv_highlights, fromCv: row.mode === "cv",
       remoteMode: row.remote_mode, location: row.location,
       salaryMin: row.salary_min, salaryCurrency: row.salary_currency, wishes: row.wishes };
   }
