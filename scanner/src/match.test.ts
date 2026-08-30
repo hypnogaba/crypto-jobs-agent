@@ -602,3 +602,46 @@ describe("надто загальні слова не вважаються зб�
                      "no on-call")).toBeGreaterThan(0);
   });
 });
+
+describe("пам'ять про власні дії людини", () => {
+  const base = { userId: "u1", spheres: ["engineering"], industries: [],
+    remoteMode: "remote_only", location: null, salaryMin: null } as Profile;
+  const job = (companyKey: string) => ({
+    id: "1", url: "https://x/1", company: companyKey, companyKey,
+    title: "Backend Engineer", location: null, remote: true,
+    tags: ["engineering"], postedAt: new Date().toISOString(), source: "ats:x",
+    salaryMin: null, salaryMax: null, summary: null,
+  }) as CandidateJob;
+
+  /**
+   * Кнопка «не цікавить» писала рядок і не змінювала нічого: підбір таблицю
+   * feedback не читав жодного разу. Тепер сховане тягне компанію вниз.
+   */
+  it("сховане тягне компанію вниз", () => {
+    const plain = scoreJob(job("acme"), base).score;
+    const after = scoreJob(job("acme"), { ...base, companySignal: { acme: -1 } }).score;
+    expect(after).toBeLessThan(plain);
+  });
+
+  it("подане тягне компанію вгору", () => {
+    const plain = scoreJob(job("acme"), base).score;
+    const after = scoreJob(job("acme"), { ...base, companySignal: { acme: 1 } }).score;
+    expect(after).toBeGreaterThan(plain);
+  });
+
+  /**
+   * Одне «не цікавить» — про одну вакансію, а не вирок компанії. Стеля не дає
+   * кільком дотикам перекрити збіг за роллю.
+   */
+  it("десять дотиків важать не більше за шість балів", () => {
+    const plain = scoreJob(job("acme"), base).score;
+    const many = scoreJob(job("acme"), { ...base, companySignal: { acme: -10 } }).score;
+    expect(plain - many).toBe(6);
+  });
+
+  it("інші компанії не зачеплені", () => {
+    const plain = scoreJob(job("other"), base).score;
+    const after = scoreJob(job("other"), { ...base, companySignal: { acme: -5 } }).score;
+    expect(after).toBe(plain);
+  });
+});

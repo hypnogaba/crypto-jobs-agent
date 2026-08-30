@@ -474,9 +474,27 @@ export interface SendResult { ok: boolean; status: number | null }
 /** 403 від Telegram означає «людина заблокувала бота». Слати далі нікуди. */
 export const isBlocked = (r: SendResult): boolean => r.status === 403;
 
+/**
+ * Рядок «не цікавить» під конкретними номерами.
+ *
+ * «Не те» стосується всіх п'яти вакансій одразу й не каже, яка саме була
+ * зайвою. Дотик по номеру — каже: це та сама дія, що «Не цікавить» у кабінеті,
+ * і саме вона вже впливає на підбір через пам'ять про компанії. Досі вона була
+ * доступна лише тому, хто відкриє сайт, — тобто половині людей ніколи.
+ *
+ * Номери збігаються з нумерацією в тексті добірки.
+ */
+export function hideRow(sentIds: string[], locale: Locale): Array<Array<{ text: string; callback_data: string }>> {
+  if (sentIds.length === 0) return [];
+  return [[
+    { text: say(locale, "hideWhich"), callback_data: "noop" },
+    ...sentIds.map((id, i) => ({ text: String(i + 1), callback_data: `hd:${id}` })),
+  ]];
+}
+
 export async function sendTelegram(
   token: string, chatId: string, text: string, digestId: string, locale: Locale,
-  fetchImpl: typeof fetch = fetch
+  fetchImpl: typeof fetch = fetch, sentIds: string[] = []
 ): Promise<SendResult> {
   try {
     const res = await fetchImpl(`https://api.telegram.org/bot${token}/sendMessage`, {
@@ -486,10 +504,10 @@ export async function sendTelegram(
       body: JSON.stringify({
         chat_id: chatId, text: fitTelegram(text), disable_web_page_preview: true,
         parse_mode: "HTML",
-        reply_markup: { inline_keyboard: [[
+        reply_markup: { inline_keyboard: hideRow(sentIds, locale).concat([[
           { text: say(locale, "notRelevant"), callback_data: `fb:${digestId}:not_relevant` },
           { text: say(locale, "more"), callback_data: `fb:${digestId}:more` },
-        ]] },
+        ]]) },
       }),
     });
     if (!res.ok) {
@@ -612,6 +630,27 @@ export function onTopicSql(p: Pick<Profile, "spheres" | "customRole" | "customRo
 
   if (clauses.length === 0) return { sql: "0", params: [] };
   return { sql: `(CASE WHEN ${clauses.join(" OR ")} THEN 1 ELSE 0 END)`, params };
+}
+
+/**
+ * Що людина сказала про компанії власними діями.
+ *
+ * «Не цікавить» — мінус, «Податися» — плюс. Обидва сигнали однозначні: це
+ * дотик по конкретній вакансії, а не здогад про настрій. Реакцію на добірку
+ * цілком («не те») сюди НЕ беремо: вона стосується п'ятьох вакансій одразу й
+ * не каже, яка саме була зайвою.
+ *
+ * Рахуємо за company_key — тим самим, за яким схлопуються геоклони.
+ */
+export async function companySignals(d1: D1Client, userId: string): Promise<Record<string, number>> {
+  const rows = await d1.query<{ company_key: string; signal: number }>(
+    `SELECT j.company_key,
+            SUM(CASE WHEN s.applied_at IS NOT NULL THEN 1 ELSE 0 END)
+          - SUM(CASE WHEN s.hidden_at  IS NOT NULL THEN 1 ELSE 0 END) signal
+       FROM sent s JOIN jobs_cache j ON j.id = s.job_id
+      WHERE s.user_id = ? AND (s.applied_at IS NOT NULL OR s.hidden_at IS NOT NULL)
+      GROUP BY j.company_key HAVING signal <> 0`, [userId]);
+  return Object.fromEntries(rows.map((r) => [r.company_key, r.signal]));
 }
 
 /** Рядок бази -> профіль для оцінювання. Спільний з прогоном (replay.ts). */
@@ -832,7 +871,7 @@ export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
       botToken!, u.telegram_chat_id!,
       fitDigest(await localizeJobs(retry, locale, ctx), locale, DIGEST_MAX,
         { hour: hourIn(u.timezone, now) }),
-      digestId, locale);
+      digestId, locale, fetch, retry.map((j) => j.sentId).filter((x): x is string => Boolean(x)));
     if (sent.ok) {
       await d1.execute("UPDATE sent SET status='sent', sent_at=? WHERE digest_id=?", [now.toISOString(), digestId]);
       ctx.delivered++;
@@ -901,6 +940,9 @@ export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
   }
 
   const profile = profileOf(u);
+  // Пам'ять про власні дії людини — окремим запитом, бо profileOf працює з
+  // рядком, а не з базою (його ж використовує прогін replay.ts).
+  profile.companySignal = await companySignals(d1, u.id);
 
   // Вікно кандидатів. Спільне з прогоном (replay.ts): міряти треба рівно те,
   // що доставляємо, інакше «було/стало» нічого не доводить.
@@ -995,7 +1037,10 @@ export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
   const text = fitDigest(await localizeJobs(withWhy, locale, ctx), locale, DIGEST_MAX,
     { capped, trialWhen, hour: hourIn(u.timezone, now) });
   if (botToken && u.telegram_chat_id) {
-    const sent = await sendTelegram(botToken, u.telegram_chat_id, text, digestId, locale);
+    // Номери кнопок «не цікавить» мусять збігатися з нумерацією в тексті,
+    // тож беремо їх у тому самому порядку, у якому вакансії пішли в добірку.
+    const sent = await sendTelegram(botToken, u.telegram_chat_id, text, digestId, locale, fetch,
+      withWhy.map((j) => j.sentId));
     if (!sent.ok) {
       if (isBlocked(sent)) await pauseBlocked();
       else console.log(`  ${u.id.slice(0, 8)}: доставка не вдалась, спробуємо наступного прогону`);

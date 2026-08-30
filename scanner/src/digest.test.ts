@@ -107,7 +107,7 @@ describe("fillMissingSummaries", () => {
 });
 
 // ── Доставка в Telegram ───────────────────────────────────────
-import { clampSummary, fitTelegram, fitDigest, formatDigest, greetingFor, isBlocked, sendTelegram, TELEGRAM_MAX, DIGEST_MAX, describeError, escapeHtml, stripHtml } from "./digest.js";
+import { clampSummary, fitTelegram, fitDigest, formatDigest, greetingFor, hideRow, isBlocked, sendTelegram, TELEGRAM_MAX, DIGEST_MAX, describeError, escapeHtml, stripHtml } from "./digest.js";
 
 describe("sendTelegram", () => {
   it("обрив мережі — це false, а не виняток на весь прогін", async () => {
@@ -667,5 +667,25 @@ describe("привітання за часом доби", () => {
       why: "бо так", facts: [], summary: null, source: "x", score: 1 };
     expect(formatDigest([j as never], "uk", { hour: 15 })).toContain("Привіт");
     expect(formatDigest([j as never], "uk", { hour: 8 })).toContain("Доброго ранку");
+  });
+});
+
+describe("hideRow", () => {
+  /**
+   * «Не те» стосується всіх п'яти вакансій одразу й не каже, яка була зайвою.
+   * Дотик по номеру каже — і саме ця дія вже впливає на підбір через пам'ять
+   * про компанії.
+   */
+  it("робить кнопку на кожну вакансію, з номерами як у тексті", () => {
+    const rows = hideRow(["a1", "b2", "c3"], "uk");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.map((b) => b.text)).toEqual(["Не цікавить:", "1", "2", "3"]);
+    expect(rows[0]![1]!.callback_data).toBe("hd:a1");
+    expect(rows[0]![3]!.callback_data).toBe("hd:c3");
+  });
+
+  /** Порожня добірка не має малювати підпис без кнопок. */
+  it("без вакансій рядка немає", () => {
+    expect(hideRow([], "uk")).toEqual([]);
   });
 });

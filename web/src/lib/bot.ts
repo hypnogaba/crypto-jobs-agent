@@ -990,6 +990,26 @@ export async function continueBotOnboarding(
   const user = await one<{ id: string }>("SELECT id FROM users WHERE telegram_chat_id=?", String(chatId));
   if (!user) return;
 
+  /**
+   * «Не цікавить» по конкретній вакансії просто з добірки.
+   *
+   * Досі така дія жила лише в кабінеті, тобто була доступна половині людей
+   * ніколи: у бота є ті, хто сайт не відкриває взагалі. А саме вона й впливає
+   * на підбір — через пам'ять про компанії у scoreJob.
+   *
+   * Умова user_id — це перевірка власності: id рядка приходить із кнопки, і
+   * без неї чужий id ховав би чужу вакансію.
+   */
+  if (data.startsWith("hd:")) {
+    const sentId = data.slice(3);
+    await run(
+      "UPDATE sent SET hidden_at=COALESCE(hidden_at, datetime('now')) WHERE id=? AND user_id=?",
+      sentId, user.id);
+    await run("UPDATE users SET last_interaction_at=datetime('now') WHERE id=?", user.id);
+    await send(env, chatId, say("hidden", locale));
+    return;
+  }
+
   if (data.startsWith("fb:")) {
     const [, digestId, reaction] = data.split(":");
     if (digestId && (reaction === "not_relevant" || reaction === "more")) {

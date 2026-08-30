@@ -43,6 +43,14 @@ const P = {
   // Прив'язка через посилання з сайту — лише після підтвердження кнопкою:
   // інакше чуже посилання «отримай 5 вакансій» тихо переписувало б чат на
   // чужий акаунт, і все написане далі йшло б у чужий профіль.
+  /** Відповідь на «не цікавить» по конкретній вакансії. */
+  hidden: {
+    en: "Got it — fewer jobs from this company from now on.",
+    uk: "Зрозумів — далі менше вакансій від цієї компанії.",
+    fr: "Compris — moins d\u2019offres de cette entreprise désormais.",
+    ru: "Понял — дальше меньше вакансий от этой компании.",
+  },
+
   linkAsk: {
     en: "Link this Telegram to the nextrole.info account that opened this link?\n\nSay no if someone else sent you this link — your messages and CV would go to their profile.",
     uk: "Прив'язати цей Telegram до акаунта на nextrole.info, з якого відкрито це посилання?\n\nЯкщо посилання тобі надіслав хтось інший — відмовся: твої повідомлення і резюме йшли б у його профіль.",
