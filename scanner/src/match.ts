@@ -370,7 +370,10 @@ export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): Score
   const cityHit = cityMatches(job.location, cityText(p));
 
   if (remoteOnly(p.remoteMode)) {
-    if (job.remote) { add("remote", 3); facts.push({ k: "remote" }); }
+    if (job.remote) {
+      add("remote", 3);
+      facts.push({ k: "remote" });
+    }
     else add("onsite", -6);                       // майже завжди відсікає onsite
     // «Віддалено, але тільки в США» — це не віддалено для людини з Європи.
     // Прапорець remote про це мовчить, і саме такі вакансії заповнювали

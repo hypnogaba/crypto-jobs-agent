@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { companyKey, dedupeKey, isFresh, prepare, titleKey } from "./normalize.js";
+import { companyKey, dedupeKey, isFresh, officeOnly, prepare, titleKey } from "./normalize.js";
 import type { RawJob } from "./types.js";
 
 const raw = (o: Partial<RawJob> = {}): RawJob => ({
@@ -95,5 +95,44 @@ describe("дедуплікація за повнотою", () => {
     const withPay = job("board:pay", { salaryMin: 90000 });
     expect(prepare([withText, withPay], 14, new Date("2026-08-30T00:00:00Z"))[0]!.source)
       .toBe("board:pay");
+  });
+});
+
+describe("officeOnly", () => {
+  /** Справжні локації з кеша, у яких стоїть remote=1. */
+  it("забирає віддаленість там, де написано лише офіс", () => {
+    for (const loc of ["Tallinn Office", "NYC Office", "San Jose Office (HQ)",
+                       "Sofia Bulgaria or Milan Italy In office not remote"]) {
+      expect(officeOnly(loc), loc).toBe(true);
+    }
+  });
+
+  /**
+   * Ці пропонують ОБИДВА варіанти. Забрати в них віддаленість — помилка в
+   * гіршу сторону: сховати справді віддалену вакансію гірше, ніж показати
+   * зайву офісну.
+   */
+  it("лишає віддаленість там, де запропоновано вибір", () => {
+    for (const loc of ["Remote or In Office", "NY office OR Remote - US",
+                       "Office Location or Remote - USA", "Remote Home Office - United States"]) {
+      expect(officeOnly(loc), loc).toBe(false);
+    }
+  });
+
+  /**
+   * Здогадуватись за назвою місця ми НЕ беремось: перевірка на живих локаціях
+   * показала помилку на кожній четвертій. «Hamburg» може бути і офісом, і
+   * хабом віддаленої компанії — прапорцю тут віримо.
+   */
+  it("не чіпає звичайні назви місць", () => {
+    for (const loc of ["Hamburg", "United States", "LATAM", "New York, NY", "", null]) {
+      expect(officeOnly(loc), String(loc)).toBe(false);
+    }
+  });
+
+  it("у prepare прапорець джерела програє власній локації", () => {
+    const job = { url: "https://x/1", company: "ICEYE", title: "Manufacturing Engineer",
+      location: "Espoo Office", remote: true, postedAt: "2026-08-29T00:00:00Z", source: "ashby:iceye" };
+    expect(prepare([job], 14, new Date("2026-08-30T00:00:00Z"))[0]!.remote).toBe(false);
   });
 });

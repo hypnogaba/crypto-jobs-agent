@@ -67,6 +67,33 @@ function richness(j: RawJob): number {
        + (j.location?.trim() ? 1 : 0);
 }
 
+/**
+ * Локація, яка прямо заперечує прапорець «віддалено».
+ *
+ * Роботодавці ставлять `isRemote` роботам, які віддаленими не бувають: у кеші
+ * 3 019 із 6 719 віддалених вакансій називають конкретне місце. Здогадуватись
+ * за назвою місця ми НЕ беремось — перевірка на живих локаціях показала, що
+ * будь-яке таке правило помиляється на кожній четвертій: «United States» і
+ * «LATAM» це чесне «віддалено в межах регіону», Docker і n8n справді віддалені
+ * й теж пишуть місто.
+ *
+ * А от пряма суперечність однозначна: «Tallinn Office», «NYC Office», «In
+ * office not remote». Таких 79. Слово «remote» поруч скасовує правило —
+ * «Remote or In Office» і «NY office OR Remote - US» пропонують обидва
+ * варіанти, і забирати в них віддаленість було б помилкою в гіршу сторону:
+ * сховати справді віддалену вакансію гірше, ніж показати зайву офісну.
+ */
+export function officeOnly(location: string | null | undefined): boolean {
+  const s = (location ?? "").trim();
+  if (!s) return false;
+  // Заперечення перевіряємо ПЕРШИМ: «In office not remote» містить слово
+  // «remote», і перевірка на нього наосліп визнала б цю вакансію віддаленою —
+  // рівно всупереч тому, що там написано.
+  if (/\b(?:not|non-?|no)\s*remote\b/i.test(s)) return true;
+  if (/remote|anywhere|worldwide|télétravail|віддален|удалён/i.test(s)) return false;
+  return /\boffice\b|on-?\s?site/i.test(s);
+}
+
 /** Усі центральні правила за один прохід: живий URL → свіжість → дедуп. */
 export function prepare(jobs: RawJob[], freshnessDays: number, now = new Date()): NormalizedJob[] {
   const seen = new Set<string>();
@@ -78,7 +105,10 @@ export function prepare(jobs: RawJob[], freshnessDays: number, now = new Date())
     if (!hasLiveUrl(job)) continue;
     if (!job.title?.trim() || !job.company?.trim()) continue;
     if (!isFresh(job.postedAt, freshnessDays, now)) continue;
-    const n = normalizeJob(job, now);
+    // Прапорець джерела проти його ж локації: перемагає локація, бо вона
+    // написана словами, а прапорець — галочкою в чужій адмінці.
+    const n = normalizeJob(
+      officeOnly(job.location) ? { ...job, remote: false } : job, now);
     if (seen.has(n.dedupeKey)) continue;
     seen.add(n.dedupeKey);
     out.push(n);
