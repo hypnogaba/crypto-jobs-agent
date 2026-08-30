@@ -8,6 +8,7 @@ import {
 import { isLocale, LOCALES, toLocale } from "./i18n";
 import { CvError, extractCvText } from "./cv";
 import { parseProfile } from "./parse";
+import { yearlyFrom } from "./salary-period";
 import { t as say, tf, timeNow, timeSet } from "./bot-copy";
 import { parseModes, serializeModes, toggleMode, type Locale } from "./vocab";
 import { persistDerived } from "@/lib/profile-country";
@@ -278,8 +279,11 @@ export async function handleOnboardingButton(
         JSON.stringify(draft), id, String(chatId));
       return true;
     }
+    // Кнопки підписані «на місяць», а чернетка й база живуть у річній —
+    // одна одиниця виміру на всю систему. Перехід саме тут, а не в списку
+    // сум: тоді підпис кнопки й записане число не можуть розійтися.
     const n = Number.parseInt(value, 10);
-    draft.salaryMin = Number.isFinite(n) && n > 0 ? n : null;
+    draft.salaryMin = Number.isFinite(n) && n > 0 ? yearlyFrom(n) : null;
     draft.salaryCurrency = draft.salaryMin ? "EUR" : null;
   }
 
@@ -435,7 +439,8 @@ export async function handleOnboardingText(
   }
 
   const draft = readDraft(row.draft);
-  draft.salaryMin = amount;
+  // Написане число теж місячне: питання і приклад у підказці кажуть саме це.
+  draft.salaryMin = yearlyFrom(amount);
   const cur = (m?.[2] ?? "EUR").toUpperCase().replace("€", "EUR").replace("$", "USD").replace("£", "GBP");
   draft.salaryCurrency = cur.slice(0, 3);
   await finishOnboarding(env, chatId, draft, locale, row.message_id, true);
@@ -670,7 +675,7 @@ export async function handleEditButton(
       return true;
     }
     const n = Number.parseInt(value, 10);
-    draft.salaryMin = Number.isFinite(n) && n > 0 ? n : null;
+    draft.salaryMin = Number.isFinite(n) && n > 0 ? yearlyFrom(n) : null;
     draft.salaryCurrency = draft.salaryMin ? "EUR" : null;
   }
   if (step === "tz") {
@@ -726,7 +731,7 @@ async function handleEditText(
     const m = /(\d[\d\s.,]*)\s*([a-zA-Z€$£]{1,4})?/.exec(text);
     const amount = m ? Number.parseInt(m[1]!.replace(/[^\d]/g, ""), 10) : NaN;
     if (!Number.isFinite(amount) || amount <= 0) { await send(env, chatId, askOtherAmount(locale)); return true; }
-    draft.salaryMin = amount;
+    draft.salaryMin = yearlyFrom(amount);
     const cur = (m?.[2] ?? "EUR").toUpperCase().replace("€", "EUR").replace("$", "USD").replace("£", "GBP");
     draft.salaryCurrency = cur.slice(0, 3);
     await commitField(env, chatId, user.id, "salary", draft, locale, row.message_id);

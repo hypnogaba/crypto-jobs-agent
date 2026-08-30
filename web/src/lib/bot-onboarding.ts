@@ -16,6 +16,7 @@ import {
   serializeModes, type Locale,
 } from "./vocab";
 import { timezoneFromCity, timeOptions, zoneName } from "./tz";
+import { monthlyFrom } from "./salary-period";
 import { timezoneFor } from "./geo";
 
 export type Step = "spheres" | "wishes" | "industries" | "where" | "city" | "tz" | "salary";
@@ -149,10 +150,10 @@ const ASK: Record<Step, Phrase> = {
     ru: "Какой город?\nНапиши как удобно — Берлин, Киев, Париж. Это открывает местные доски вакансий.",
   },
   salary: {
-    en: "Last one · Salary floor, per year, before tax?\nA soft preference, not a hard filter — most postings show no range at all.",
-    uk: "Останнє · Зарплата від, за рік, до податків?\nМ'який пріоритет, не жорсткий фільтр — більшість вакансій вилку взагалі не вказує.",
-    fr: "Dernière · Salaire minimum, par an, avant impôts ?\nUne préférence, pas un filtre — la plupart des offres n'affichent aucune fourchette.",
-    ru: "Последнее · Зарплата от, за год, до налогов?\nМягкий приоритет, не жёсткий фильтр — большинство вакансий вилку не указывает.",
+    en: "Last one · Salary floor, per month, before tax?\nA soft preference, not a hard filter — most postings show no range at all.",
+    uk: "Останнє · Зарплата від, на місяць, до податків?\nМ'який пріоритет, не жорсткий фільтр — більшість вакансій вилку взагалі не вказує.",
+    fr: "Dernière · Salaire minimum, par mois, avant impôts ?\nUne préférence, pas un filtre — la plupart des offres n'affichent aucune fourchette.",
+    ru: "Последнее · Зарплата от, в месяц, до налогов?\nМягкий приоритет, не жёсткий фильтр — большинство вакансий вилку не указывает.",
   },
 };
 
@@ -163,12 +164,12 @@ const WORD = {
   pickOne:  { en: "Pick at least one", uk: "Обери хоча б одне", fr: "Choisissez au moins un", ru: "Выбери хотя бы одно" },
   noMatter: { en: "Does not matter", uk: "Не важливо", fr: "Peu importe", ru: "Не важно" },
   other:    { en: "Another amount", uk: "Інша сума", fr: "Autre montant", ru: "Другая сумма" },
-  perYear:  { en: "yr", uk: "рік", fr: "an", ru: "год" },
+  perMonth: { en: "mo", uk: "міс", fr: "mois", ru: "мес" },
   askOther: {
-    en: "Write the yearly amount and currency, for example: 90000 EUR",
-    uk: "Напиши річну суму й валюту, наприклад: 90000 EUR",
-    fr: "Écrivez le montant annuel et la devise, par exemple : 90000 EUR",
-    ru: "Напиши годовую сумму и валюту, например: 90000 EUR",
+    en: "Write the monthly amount and currency, for example: 3000 EUR",
+    uk: "Напиши місячну суму й валюту, наприклад: 3000 EUR",
+    fr: "Écrivez le montant mensuel et la devise, par exemple : 3000 EUR",
+    ru: "Напиши месячную сумму и валюту, например: 3000 EUR",
   },
   otherTime: { en: "Another time", uk: "Інша", fr: "Autre", ru: "Другое" },
   askTime: {
@@ -233,8 +234,14 @@ const WORD = {
 
 const say = (p: Phrase, locale: Locale): string => p[locale] ?? p.en;
 
-/** Звичайні суми в євро. Хто хоче іншу — напише сам. */
-const SALARY_STEPS = [40_000, 60_000, 80_000, 100_000, 120_000];
+/**
+ * Звичайні суми в євро НА МІСЯЦЬ. Хто хоче іншу — напише сам.
+ *
+ * Місячні, а не річні, бо так само підписане поле на сайті, і так думають
+ * і в Європі, і в Україні. У чернетці й у базі лежить річна: перехід робить
+ * yearlyFrom() у обробнику кнопки, а не цей список.
+ */
+const SALARY_STEPS = [2_000, 3_000, 4_000, 6_000, 8_000];
 
 export interface Button { text: string; callback_data: string }
 
@@ -328,7 +335,7 @@ export function keyboard(step: Step, draft: Draft, locale: Locale, opts: Keyboar
   }
 
   // salary
-  pair(SALARY_STEPS.map((n) => ({ text: `€${n / 1000}k / ${say(WORD.perYear, locale)}`, callback_data: `${pre}:salary:${n}` })));
+  pair(SALARY_STEPS.map((n) => ({ text: `€${n / 1000}k / ${say(WORD.perMonth, locale)}`, callback_data: `${pre}:salary:${n}` })));
   rows.push([{ text: say(WORD.noMatter, locale), callback_data: `${pre}:salary:0` }]);
   rows.push([{ text: say(WORD.other, locale), callback_data: `${pre}:salary:__other` }]);
   return rows;
@@ -402,8 +409,12 @@ export function summary(draft: Draft, locale: Locale): string {
     .map((id) => REMOTE_MODES.find((x) => x.id === id))
     .filter(Boolean)
     .map((x) => label(x!, locale)).join(" + ") || null;
-  const money = draft.salaryMin
-    ? `${draft.salaryMin.toLocaleString("uk-UA")} ${draft.salaryCurrency ?? "EUR"}`
+  // Місячна, бо саме її ми й питали. У чернетці лежить річна — одна одиниця
+  // виміру на всю систему, — тож показувати її як є означало б відповісти
+  // людині вдванадцятеро більшим числом, ніж вона щойно назвала.
+  const monthly = monthlyFrom(draft.salaryMin);
+  const money = monthly
+    ? `${monthly.toLocaleString("uk-UA")} ${draft.salaryCurrency ?? "EUR"} / ${say(WORD.perMonth, locale)}`
     : say(WORD.noMatter, locale);
 
   const both = (ids: string[], src: readonly { id: string; en: string; uk: string; fr: string; ru: string }[],
