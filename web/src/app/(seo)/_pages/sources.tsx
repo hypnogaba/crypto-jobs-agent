@@ -27,6 +27,13 @@ const ATTRIBUTED = [
   { name: "Cryptocurrency Jobs", url: "https://cryptocurrencyjobs.co", note: "web3" },
   { name: "Hacker News «Who is hiring»", url: "https://news.ycombinator.com", note: "HN" },
   { name: "Getro", url: "https://getro.com", note: "Getro" },
+  // Знайдені розвідкою по твіттеру 2026-08-30 і перевірені живим прогоном.
+  { name: "GermanTechJobs", url: "https://germantechjobs.de", note: "DE" },
+  { name: "Startups North", url: "https://startupsnorth.ca", note: "CA" },
+  { name: "Remotech", url: "https://remotech.ai", note: "remote" },
+  { name: "Remote Backend Jobs", url: "https://remotebackendjobs.com", note: "remote" },
+  { name: "Hireeing", url: "https://hireeing.com", note: "remote" },
+  { name: "We Love Product", url: "https://weloveproduct.co", note: "product" },
 ];
 
 export default async function SourcesBody({ locale }: { locale: Locale }) {

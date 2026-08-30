@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { cleanUrl, fetchBoard, parseBoardTitle } from "./boards.js";
+import { cleanUrl, fetchBoard, isJunk, parseBoardTitle } from "./boards.js";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -68,10 +68,70 @@ describe("parseBoardTitle", () => {
     expect(parseBoardTitle("Stripe: Backend Engineer")).toMatchObject({ company: "Stripe", title: "Backend Engineer" });
   });
 
+  // Живі заголовки з germantechjobs.de. Стрічка віддає 753 позиції, і до
+  // цього правила компанією ставало «IT-Service-Performance-Spezialist:in».
+  it("розбирає німецький формат «Роль @ Компанія [вилка €]»", () => {
+    expect(parseBoardTitle("SAP Entwickler / Consultant (RE-FX / FI-CO) (m/w/d) @ Vonovia [60.000 - 85.000 €]"))
+      .toMatchObject({
+        company: "Vonovia", title: "SAP Entwickler / Consultant (RE-FX / FI-CO) (m/w/d)",
+        salaryMin: 60000, salaryMax: 85000, salaryCurrency: "EUR",
+      });
+    // Крапка в німецькому числі — роздільник тисяч. «31.500» це не 31,5.
+    expect(parseBoardTitle("Cloud Data Architect AWS (all genders) - Düsseldorf @ adesso SE [31.500 - 52.500 €]"))
+      .toMatchObject({ company: "adesso SE", salaryMin: 31500, salaryMax: 52500 });
+    // Довга назва компанії з комами всередині — не привід ділити її далі.
+    expect(parseBoardTitle("Linux Systems Engineer (m/w/d) @ Lürssen Werft Bremen GmbH & Co. KG [55.000 - 85.000 €]"))
+      .toMatchObject({ company: "Lürssen Werft Bremen GmbH & Co. KG" });
+  });
+
+  it("розбирає формат «Роль job by Компанія | Місто | Дошка»", () => {
+    expect(parseBoardTitle("Senior Product Manager job by Bolt | Remote: Worldwide | Remotech"))
+      .toMatchObject({ company: "Bolt", title: "Senior Product Manager", location: null, remote: true });
+    expect(parseBoardTitle("Senior Data Engineer - Global Team (India) job by YipitData | India Remote | Remotech"))
+      .toMatchObject({ company: "YipitData", title: "Senior Data Engineer - Global Team (India)",
+                       location: "India Remote", remote: true });
+  });
+
+  // WeLoveProduct дописує «job» до кожної назви посади.
+  it("не лишає службове «job» у назві посади", () => {
+    expect(parseBoardTitle("Product Manager, Multi-Cloud Trust & Safety job at Anthropic"))
+      .toMatchObject({ company: "Anthropic", title: "Product Manager, Multi-Cloud Trust & Safety" });
+  });
+
+  // Живий рядок Remote3. Поділ по ПЕРШОМУ « at » давав компанію
+  // «Bybit at Bybit» — п'ять таких рядків лежали в кеші.
+  it("ділить по останньому « at » і не лишає компанію в назві двічі", () => {
+    expect(parseBoardTitle("Job Application for P2P BD Assistant at Bybit at Bybit"))
+      .toMatchObject({ company: "Bybit", title: "Job Application for P2P BD Assistant" });
+  });
+
   it("мовчить, коли компанії не видно", () => {
     expect(parseBoardTitle("Backend Engineer")).toBeNull();
     expect(parseBoardTitle("")).toBeNull();
     expect(parseBoardTitle("   ")).toBeNull();
+  });
+});
+
+describe("isJunk", () => {
+  // Усі приклади — зі справжньої стрічки https://remote3.co/api/rss,
+  // і два перші лежали в живому кеші, видимі людині.
+  it("впізнає службові записи чужої дошки", () => {
+    expect(isJunk("__probe_job__ at undefined", "https://remote3.co/remote-jobs/null")).toBe(true);
+    expect(isJunk("__repro2_job__ at undefined", "")).toBe(true);
+    expect(isJunk("__xsschain_job__ at __xsschain__", "")).toBe(true);
+    expect(isJunk("undefined", "")).toBe(true);
+    expect(isJunk("", "")).toBe(true);
+  });
+
+  it("впізнає посилання в нікуди", () => {
+    expect(isJunk("Backend Engineer at Acme", "https://remote3.co/remote-jobs/null")).toBe(true);
+  });
+
+  it("не чіпає справжні вакансії", () => {
+    expect(isJunk("Senior Designer at Figma", "https://figma.com/jobs/1")).toBe(false);
+    expect(isJunk("Розробник в Acme, Київ", "https://jobs.dou.ua/1")).toBe(false);
+    // Подвійне підкреслення всередині назви — не привід викидати рядок.
+    expect(isJunk("C++ Engineer (__init__ maintainer) at Acme", "https://acme.com/1")).toBe(false);
   });
 });
 

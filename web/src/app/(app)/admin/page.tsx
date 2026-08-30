@@ -41,6 +41,11 @@ const FAMILIES = [
   { key: "getro", label: "колекції Getro", note: "списки портфельних компаній фондів" },
 ] as const;
 
+/** Рід джерела одним словом — для щільної таблиці, де довгий підпис не влазить. */
+const FAMILY_WORD: Record<string, string> = {
+  board: "дошка", aggregator: "агрегатор", getro: "Getro", ats: "ATS",
+};
+
 /** Чим скінчилась спроба додати посилання. */
 const VERDICT: Record<string, { tag: string; text: string }> = {
   added:       { tag: "tag-ok",   text: "додано" },
@@ -335,18 +340,60 @@ export default async function Admin() {
            SUM(CASE WHEN fetched_at >= datetime('now','-3 day') THEN 1 ELSE 0 END) fresh
       FROM jobs_cache GROUP BY family ORDER BY jobs DESC`);
 
-  // Поіменно показуємо лише те, що можна назвати вголос: агрегатори й дошки.
-  // ATS-компаній тисяча з гаком — це довідник, а не панель, і в неї є свій
-  // блок нижче.
-  const feeds = await all<{ source: string; jobs: number; fresh: number;
-    status: string | null; last_ok: string | null }>(`
-    SELECT j.source,
-           COUNT(*) jobs,
-           SUM(CASE WHEN j.fetched_at >= datetime('now','-3 day') THEN 1 ELSE 0 END) fresh,
-           s.status, s.last_ok_at last_ok
+  /**
+   * Повний перелік того, звідки ми тягнемо дані, — одним списком.
+   *
+   * Попередній варіант рахував лише за `jobs_cache`, тобто показував тільки
+   * джерела, які щось привезли. Дошка, налаштована й мовчазна, не з'являлась
+   * ніде — а саме вона й потребує втручання: `board:global-web3career` стояв
+   * увімкненим зі стрічкою, що ніколи не віддавала жодного рядка, і побачити
+   * це в панелі було неможливо.
+   *
+   * Тому дошки беруться з `country_boards` (усі, і мовчазні теж), а решта —
+   * з кеша. ATS-компаній понад дві тисячі: поіменно вони тут не поміщаються
+   * і не потрібні, тож згортаються в один рядок на провайдера.
+   */
+  const feeds = await all<{ source: string; label: string; family: string;
+    country: string | null; jobs: number; fresh: number; status: string | null }>(`
+    SELECT b.name source, b.label, 'board' family,
+           b.country,
+           COALESCE(j.jobs, 0) jobs, COALESCE(j.fresh, 0) fresh,
+           CASE WHEN b.enabled = 0 THEN 'off' ELSE s.status END status
+      FROM country_boards b
+      LEFT JOIN sources_state s ON s.source_name = b.name
+      LEFT JOIN (SELECT source, COUNT(*) jobs,
+                        SUM(CASE WHEN fetched_at >= datetime('now','-3 day') THEN 1 ELSE 0 END) fresh
+                   FROM jobs_cache GROUP BY source) j ON j.source = b.name
+
+     UNION ALL
+    SELECT j.source, REPLACE(j.source, 'aggregator:', ''), 'aggregator', NULL,
+           COUNT(*), SUM(CASE WHEN j.fetched_at >= datetime('now','-3 day') THEN 1 ELSE 0 END),
+           s.status
       FROM jobs_cache j LEFT JOIN sources_state s ON s.source_name = j.source
-     WHERE j.source LIKE 'aggregator:%' OR j.source LIKE 'board:%'
-     GROUP BY j.source ORDER BY jobs DESC`);
+     WHERE j.source LIKE 'aggregator:%' GROUP BY j.source
+
+     UNION ALL
+    SELECT j.source, 'колекція ' || REPLACE(j.source, 'getro:', ''), 'getro', NULL,
+           COUNT(*), SUM(CASE WHEN j.fetched_at >= datetime('now','-3 day') THEN 1 ELSE 0 END),
+           s.status
+      FROM jobs_cache j LEFT JOIN sources_state s ON s.source_name = j.source
+     WHERE j.source LIKE 'getro:%' GROUP BY j.source
+
+     UNION ALL
+    SELECT 'ats:' || provider, provider || ' · ' || COUNT(DISTINCT company) || ' компаній',
+           'ats', NULL, SUM(n), SUM(fresh_n), NULL
+      FROM (SELECT SUBSTR(source, 1, INSTR(source, ':') - 1) provider,
+                   SUBSTR(source, INSTR(source, ':') + 1) company,
+                   COUNT(*) n,
+                   SUM(CASE WHEN fetched_at >= datetime('now','-3 day') THEN 1 ELSE 0 END) fresh_n
+              FROM jobs_cache
+             WHERE source LIKE '%:%'
+               AND source NOT LIKE 'aggregator:%' AND source NOT LIKE 'board:%'
+               AND source NOT LIKE 'getro:%'
+             GROUP BY source)
+     GROUP BY provider
+
+     ORDER BY jobs DESC`);
 
   const intake = await all<{ id: string; url: string; at: string; verdict: string;
     kind: string | null; target: string | null; note: string | null; found: number }>(
@@ -790,37 +837,55 @@ export default async function Admin() {
             </div>
 
             {feeds.length > 0 && (
-              <details className="card mt-3 px-6 py-5">
-                <summary className="flex cursor-pointer flex-wrap items-baseline justify-between gap-3">
-                  <span className="font-medium">Поіменно: стрічки й дошки · {feeds.length}</span>
-                  <span className="mono text-xs" style={{ color: "var(--ember)" }}>показати</span>
-                </summary>
-                <p className="mt-2 text-sm" style={{ color: "var(--ink-2)" }}>
-                  Компанії на ATS сюди не входять: їх понад тисяча, і це довідник, а не панель.
+              <div className="card mt-3 px-6 py-5">
+                <div className="flex flex-wrap items-baseline justify-between gap-3">
+                  <h3 className="font-medium">Поіменно · {feeds.length}</h3>
+                  <span className="mono text-xs"
+                        style={{ color: feeds.some((f) => f.jobs === 0) ? "var(--bad)" : "var(--muted)" }}>
+                    мовчазних: {feeds.filter((f) => f.jobs === 0).length}
+                  </span>
+                </div>
+                <p className="mt-1 max-w-prose text-sm" style={{ color: "var(--ink-2)" }}>
+                  Усе, звідки ми тягнемо дані, одним списком. Дошки — всі, і ті, що не дали
+                  жодного рядка, теж: мовчазну дошку не видно більше ніде. Компанії на ATS
+                  згорнуті по провайдеру — їх понад дві тисячі, поіменно це довідник, а не панель.
                 </p>
                 <div className="mt-3 overflow-x-auto">
                   <table className="board">
                     <thead>
-                      <tr><th>джерело</th><th>рід</th><th>стан</th>
+                      <tr><th>джерело</th><th>рід</th><th>кому</th><th>стан</th>
                           <th className="num">у кеші</th><th className="num">за 3 дні</th></tr>
                     </thead>
                     <tbody>
                       {feeds.map((f) => {
-                        const board = f.source.startsWith("board:");
-                        const st = f.status && f.status in STATE
-                          ? STATE[f.status as keyof typeof STATE] : null;
+                        const st = f.status === "off"
+                          ? { tag: "tag-flat", text: "вимкнено" }
+                          : f.status && f.status in STATE
+                            ? STATE[f.status as keyof typeof STATE]
+                            : null;
+                        // Порожнє джерело — не «свіжих нуль», а «не дало нічого
+                        // взагалі». Це різні хвороби, і без окремого кольору
+                        // такий рядок губиться серед просто несвіжих.
+                        const colour = f.jobs === 0 ? "var(--bad)"
+                                     : f.fresh > 0 ? "var(--ok)" : "var(--warn)";
                         return (
                           <tr key={f.source} className="stripe"
-                              style={{ "--c": f.fresh > 0 ? "var(--ok)" : "var(--warn)" } as React.CSSProperties}>
-                            <td className="mono text-xs">{f.source.replace(/^(aggregator|board):/, "")}</td>
+                              style={{ "--c": colour } as React.CSSProperties}>
+                            <td className="mono text-xs" title={f.source}>{f.label}</td>
                             <td className="text-xs" style={{ color: "var(--muted)" }}>
-                              {board ? "дошка" : "агрегатор"}
+                              {FAMILY_WORD[f.family] ?? f.family}
+                            </td>
+                            <td className="mono text-xs" style={{ color: "var(--muted)" }}>
+                              {f.country === "*" ? "всім" : f.country ?? "всім"}
                             </td>
                             <td className="text-xs">
                               {st ? <span className={`tag ${st.tag}`}>{st.text}</span>
                                   : <span className="tag tag-flat">не міряли</span>}
                             </td>
-                            <td className="num text-xs">{num(f.jobs)}</td>
+                            <td className="num text-xs"
+                                style={{ color: f.jobs === 0 ? "var(--bad)" : undefined }}>
+                              {f.jobs === 0 ? "нуль" : num(f.jobs)}
+                            </td>
                             <td className="num text-xs"
                                 style={{ color: f.fresh > 0 ? undefined : "var(--muted)" }}>
                               {f.fresh || "—"}
@@ -831,7 +896,7 @@ export default async function Admin() {
                     </tbody>
                   </table>
                 </div>
-              </details>
+              </div>
             )}
 
             <form action={addSources} className="card mt-3 flex flex-col gap-3 px-5 py-5">
