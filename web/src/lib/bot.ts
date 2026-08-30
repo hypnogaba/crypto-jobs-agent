@@ -50,6 +50,42 @@ async function editKeyboard(
 }
 
 /**
+ * Знімає кнопки з повідомлення, лишаючи його текст.
+ *
+ * Потрібно там, де питання переїжджає вниз: дві живі клавіатури в одному
+ * чаті — це два різні стани того самого кроку, і людина не може знати, який
+ * із них справжній.
+ */
+async function dropKeyboard(env: Env, chatId: number, messageId: number | null): Promise<void> {
+  if (!messageId) return;
+  await callTelegram(env.TELEGRAM_BOT_TOKEN, "editMessageReplyMarkup",
+    { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } });
+}
+
+/**
+ * Питання після написаного людиною — НОВИМ повідомленням, а не правкою старого.
+ *
+ * Ось як це виглядало доти. Людина тисне «Немає в списку», бот шле окреме
+ * повідомлення «напиши свою роль» БЕЗ кнопок, вона пише «Комуніті менеджер»,
+ * а бот редагує ЯКІР — повідомлення, яке її власний текст щойно виштовхнув
+ * угору за екран. Знизу не змінюється нічого: ні кнопок, ні підтвердження.
+ * На живому прогоні людина написала те саме двічі, вирішивши, що не дійшло,
+ * і другий раз ліг у побажання.
+ *
+ * Тому після кожної текстової відповіді якір переїжджає вниз, а старий
+ * лишається в чаті вже без кнопок.
+ */
+async function reanchor(
+  env: Env, chatId: number, oldId: number | null, step: Step, draft: Draft,
+  locale: Locale, prefix = ""
+): Promise<void> {
+  await dropKeyboard(env, chatId, oldId);
+  const id = await sendKeyboard(env, chatId,
+    `${prefix}${questionText(step, locale)}`, keyboard(step, draft, locale));
+  await saveState(chatId, step, draft, id);
+}
+
+/**
  * Повідомлення-якір: уся правка профілю живе в ОДНОМУ повідомленні.
  *
  * Раніше кожен дотик слав нове: /profile — меню, пункт — питання, відповідь —
@@ -194,9 +230,15 @@ export async function handleOnboardingButton(
   // «Немає в списку» — єдина кнопка, що веде до вільного тексту. Крок
   // запам'ятовуємо, щоб знати, куди покласти написане й куди повернутись.
   if (value === "__mine") {
-    await run("UPDATE bot_state SET step=?, updated_at=datetime('now') WHERE chat_id=?",
-      `own:${step}`, String(chatId));
-    await send(env, chatId, askCustomFor(step, locale));
+    // Прохання написати йде новим повідомленням і САМЕ ВОНО стає якорем: усе
+    // наступне — і підтвердження, і наступне питання — з'явиться там, куди
+    // людина дивиться. Кнопки на ньому ті самі, тож передумати можна дотиком.
+    await dropKeyboard(env, chatId, row.message_id);
+    const id = await sendKeyboard(env, chatId, askCustomFor(step, locale),
+      keyboard(step, draft, locale));
+    await run(
+      `UPDATE bot_state SET step=?, message_id=COALESCE(?, message_id), updated_at=datetime('now')
+        WHERE chat_id=?`, `own:${step}`, id, String(chatId));
     return true;
   }
 
@@ -226,8 +268,15 @@ export async function handleOnboardingButton(
   if (step === "seniority") draft.seniority = value;
   if (step === "salary") {
     if (value === "__other") {
-      await saveState(chatId, "salary", draft, null);
-      await send(env, chatId, askOtherAmount(locale));
+      // Окремий крок, а не той самий «salary»: інакше «90000 EUR» (дев'ять
+      // символів) перехоплював розбір вільного тексту нижче — він спрацьовує
+      // на будь-чому довшому за сім символів — і сума не записувалась зовсім.
+      await dropKeyboard(env, chatId, row.message_id);
+      const id = await sendKeyboard(env, chatId, askOtherAmount(locale), []);
+      await run(
+        `UPDATE bot_state SET step='salaryother', draft=?, message_id=COALESCE(?, message_id),
+                              updated_at=datetime('now') WHERE chat_id=?`,
+        JSON.stringify(draft), id, String(chatId));
       return true;
     }
     const n = Number.parseInt(value, 10);
@@ -272,7 +321,7 @@ export async function handleOnboardingText(
   if (row.step === "wishes") {
     const draft = readDraft(row.draft);
     draft.wishes = text.slice(0, 1000).trim() || null;
-    await advance(env, chatId, "wishes", draft, locale, row.message_id);
+    await advance(env, chatId, "wishes", draft, locale, row.message_id, true);
     return true;
   }
 
@@ -282,7 +331,7 @@ export async function handleOnboardingText(
     if (!zone) { await send(env, chatId, say("timeBadHour", locale)); return true; }
     const draft = readDraft(row.draft);
     draft.timezone = zone;
-    await advance(env, chatId, "tz", draft, locale, row.message_id);
+    await advance(env, chatId, "tz", draft, locale, row.message_id, true);
     return true;
   }
 
@@ -354,13 +403,13 @@ export async function handleOnboardingText(
     // вертатись до списку, з якого людина щойно відмовилась, безглуздо.
     const single = back === "seniority" || back === "where";
     const goto = single ? nextStep(back, draft) : back;
-    if (!goto) { await finishOnboarding(env, chatId, draft, locale, row.message_id); return true; }
+    if (!goto) { await finishOnboarding(env, chatId, draft, locale, row.message_id, true); return true; }
 
-    await saveState(chatId, goto, draft, null);
-    if (row.message_id) {
-      await editKeyboard(env, chatId, row.message_id,
-        questionText(goto, locale), keyboard(goto, draft, locale));
-    }
+    // Слова людини повертаються їй же. Мовчазне збереження — це те саме, що
+    // втрачене: побачити галочку на кнопці «Немає в списку» можна лише коли
+    // знаєш, що вона там з'явилась.
+    await reanchor(env, chatId, row.message_id, goto, draft, locale,
+      `${tf("ownSaved", locale, { value: own })}\n\n`);
     return true;
   }
 
@@ -373,15 +422,13 @@ export async function handleOnboardingText(
     if (!city) { await send(env, chatId, questionText("city", locale)); return true; }
     draft.location = city;
     const goto = nextStep("city", draft);
-    if (!goto) { await finishOnboarding(env, chatId, draft, locale, row.message_id); return true; }
-    await saveState(chatId, goto, draft, null);
-    if (row.message_id) {
-      await editKeyboard(env, chatId, row.message_id, questionText(goto, locale), keyboard(goto, draft, locale));
-    }
+    if (!goto) { await finishOnboarding(env, chatId, draft, locale, row.message_id, true); return true; }
+    await reanchor(env, chatId, row.message_id, goto, draft, locale,
+      `${tf("ownSaved", locale, { value: city })}\n\n`);
     return true;
   }
 
-  if (row.step !== "salary") return false;
+  if (row.step !== "salary" && row.step !== "salaryother") return false;
 
   const m = /(\d[\d\s.,]*)\s*([a-zA-Z€$£]{1,4})?/.exec(text);
   const amount = m ? Number.parseInt(m[1]!.replace(/[^\d]/g, ""), 10) : NaN;
@@ -394,16 +441,20 @@ export async function handleOnboardingText(
   draft.salaryMin = amount;
   const cur = (m?.[2] ?? "EUR").toUpperCase().replace("€", "EUR").replace("$", "USD").replace("£", "GBP");
   draft.salaryCurrency = cur.slice(0, 3);
-  await finishOnboarding(env, chatId, draft, locale, row.message_id);
+  await finishOnboarding(env, chatId, draft, locale, row.message_id, true);
   return true;
 }
 
 /** Перехід до наступного питання, або завершення, якщо воно було останнім. */
 async function advance(
-  env: Env, chatId: number, from: Step, draft: Draft, locale: Locale, messageId: number | null
+  env: Env, chatId: number, from: Step, draft: Draft, locale: Locale, messageId: number | null,
+  afterText = false
 ): Promise<void> {
   const goto = nextStep(from, draft);
-  if (!goto) { await finishOnboarding(env, chatId, draft, locale, messageId); return; }
+  if (!goto) { await finishOnboarding(env, chatId, draft, locale, messageId, afterText); return; }
+  // Після написаного людиною якір переїжджає вниз: її власне повідомлення
+  // щойно виштовхнуло старе за екран, і правка там нікому не видима.
+  if (afterText) { await reanchor(env, chatId, messageId, goto, draft, locale); return; }
   await saveState(chatId, goto, draft, null);
   if (messageId) {
     await editKeyboard(env, chatId, messageId, questionText(goto, locale), keyboard(goto, draft, locale));
@@ -411,7 +462,8 @@ async function advance(
 }
 
 async function finishOnboarding(
-  env: Env, chatId: number, draft: Draft, locale: Locale, messageId: number | null
+  env: Env, chatId: number, draft: Draft, locale: Locale, messageId: number | null,
+  afterText = false
 ): Promise<void> {
   const existing = await one<{ id: string }>("SELECT id FROM users WHERE telegram_chat_id=?", String(chatId));
   const userId = existing?.id ?? uuid();
@@ -458,7 +510,8 @@ async function finishOnboarding(
   const hour = (await one<{ delivery_hour: number }>(
     "SELECT delivery_hour FROM users WHERE id=?", userId))?.delivery_hour ?? 9;
   const done = `${summary(draft, locale)}\n\n${readyText(locale, firstOfferVars(timezone, hour, locale))}`;
-  if (messageId) await editKeyboard(env, chatId, messageId, done, FIRST_KEYS(locale));
+  if (afterText) await dropKeyboard(env, chatId, messageId);
+  if (messageId && !afterText) await editKeyboard(env, chatId, messageId, done, FIRST_KEYS(locale));
   else await sendKeyboard(env, chatId, done, FIRST_KEYS(locale));
 }
 
@@ -600,6 +653,9 @@ export async function handleEditButton(
   const draft = readDraft(row.draft);
 
   if (value === "__mine") {
+    // Тут якір і так стоїть під рукою — це те саме повідомлення /profile, у
+    // яке людина щойно тикала, — тож переносити його вниз нема потреби.
+    // «Назад» під ним додає showEdit.
     await showEdit(env, chatId, `editown:${step}`, draft, locale, at, askCustomFor(step, locale), []);
     return true;
   }

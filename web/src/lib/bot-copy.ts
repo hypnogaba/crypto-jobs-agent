@@ -327,6 +327,15 @@ const P = {
     fr: "Décrivez-vous en une phrase (poste, niveau, où, salaire minimum) — ou envoyez votre CV en fichier. Ou appuyez sur les boutons.",
     ru: "Опиши себя одним предложением (роль, уровень, где, от скольких) — или пришли CV файлом. Или жми кнопки.",
   },
+  // Слова людини повертаються їй же. Мовчазне збереження нічим не
+  // відрізняється від втраченого: на живому прогоні людина написала свою роль
+  // двічі, бо після першого разу в чаті не змінилось нічого.
+  ownSaved: {
+    en: "Noted: «{value}»",
+    uk: "Записав: «{value}»",
+    fr: "Noté : «{value}»",
+    ru: "Записал: «{value}»",
+  },
   prefilled: {
     en: "I ticked what I understood. Fix anything that is wrong.",
     uk: "Я проставив те, що зрозумів. Виправ те, що не так.",
