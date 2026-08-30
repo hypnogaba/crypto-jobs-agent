@@ -7,6 +7,7 @@ import { runR1, runR2, runR3, runR4, harvestAtsFromJobs } from "./rungs.js";
 import { prepare } from "./normalize.js";
 import type { RawJob, SourceResult } from "./types.js";
 import { fetchBoard } from "./sources/boards.js";
+import { fetchGetro } from "./sources/getro.js";
 import { mapLimit, runSource } from "./http.js";
 
 /**
@@ -128,6 +129,44 @@ async function main(): Promise<void> {
       console.log(`Дошки пропущено: ${e instanceof Error ? e.message : e}`);
     }
 
+    // ── Колекції Getro — теж поза драбиною ───────────────────
+    //
+    // Досі вони висіли сходинкою R3, і драбина не доходила до них ЖОДНОГО
+    // разу: вона спиняється, щойно компаній вистачає, а це завжди R2. У кеші
+    // було рівно нуль вакансій із Getro — при семи тисячах доступних.
+    //
+    // Аргумент той самий, що й для національних дошок: борд екосистеми фонду
+    // не про достатність. Це curated-список крипто- й web3-компаній, тобто
+    // рівно наша аудиторія, і він потрібен навіть у день, коли вакансій і так
+    // вистачило. Різниця лише в тому, що дошка дає країну, а Getro — нішу.
+    const getroResults: SourceResult[] = [];
+    try {
+      const active = getroCollections.filter((id) => !skip.has(`getro:${id}`));
+      if (active.length) {
+        const runs = await mapLimit(active, 4,
+          (id) => runSource(`getro:${id}`, () => fetchGetro(id)));
+        getroResults.push(...runs);
+        const raw = runs.flatMap((r) => r.jobs);
+        const jobs = prepare(raw, cfg.freshnessDays, now);
+        await repo.upsertJobs(jobs);
+
+        // Той самий врожай, що робив R3: 80% посилань Getro ведуть просто в
+        // ATS роботодавця, тож кожен прогін дарує нам компанії назавжди.
+        const harvested = harvestAtsFromJobs(raw);
+        for (const c of harvested) {
+          await repo.upsertCompany({
+            slug: c.slug, name: c.name, provider: c.provider, atsSlug: c.slug,
+            tags: c.tags, discoveredVia: "getro",
+          });
+        }
+        const alive = runs.filter((r) => r.ok).length;
+        console.log(`Колекції Getro: ${alive}/${active.length} відповіли, ` +
+                    `${jobs.length} вакансій, ${harvested.length} компаній із ATS-лінків`);
+      }
+    } catch (e) {
+      console.log(`Getro пропущено: ${e instanceof Error ? e.message : e}`);
+    }
+
     // ── Зростання окремо від достатності ─────────────────────
     // Драбина відповідає на питання «чи вистачило сьогодні». Але список компаній
     // мусить рости КОЖЕН день, а не лише в бідні: інакше щойно R1 стає багатим,
@@ -168,7 +207,8 @@ async function main(): Promise<void> {
       }
     }
 
-    const { deprecated } = await applySourceOutcomes([...outcome.results, ...boardResults], repo, prior);
+    const { deprecated } = await applySourceOutcomes(
+      [...outcome.results, ...boardResults, ...getroResults], repo, prior);
     if (deprecated.length) console.log(`Позначено мертвими: ${deprecated.join(", ")}`);
 
     const status = outcome.distinctCompanies >= cfg.distinctCompanyTarget ? "ok" : "short";
