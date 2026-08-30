@@ -604,10 +604,20 @@ describe("onTopicSql", () => {
     expect(r.params).toEqual(['%"qa"%', '%"design"%']);
   });
 
-  it("своя роль — усі слова разом, як у matchesCustomRole", () => {
+  it("своя роль — усі слова разом, і кожне значуще окремо", () => {
+    // Повний збіг і частковий — це два різні бали (role+12 і rolePart+5), тож
+    // у вікно мають заходити обидва. «auditor» тут значуще, «solidity» теж.
     const r = onTopicSql({ spheres: [], customRole: "solidity auditor" });
-    expect(r.sql).toBe("(CASE WHEN (LOWER(j.title) LIKE ? AND LOWER(j.title) LIKE ?) THEN 1 ELSE 0 END)");
-    expect(r.params).toEqual(["%solidity%", "%auditor%"]);
+    expect(r.sql).toBe("(CASE WHEN (LOWER(j.title) LIKE ? AND LOWER(j.title) LIKE ?)" +
+      " OR LOWER(j.title) LIKE ? OR LOWER(j.title) LIKE ? THEN 1 ELSE 0 END)");
+    expect(r.params).toEqual(["%solidity%", "%auditor%", "%solidity%", "%auditor%"]);
+  });
+
+  it("загальне слово окремо у вікно не тягне", () => {
+    // «manager» саме по собі затягнув би половину кеша, тож окремим АБО він
+    // не стає — лишається тільки в парі з «community».
+    const r = onTopicSql({ spheres: [], customRole: "community manager" });
+    expect(r.params).toEqual(["%community%", "%manager%", "%community%"]);
   });
 
   it("короткі слова відкидаються так само, як у матчері", () => {
@@ -622,6 +632,7 @@ describe("onTopicSql", () => {
   it("сфери й роль разом — це АБО, а не І", () => {
     const r = onTopicSql({ spheres: ["devrel"], customRole: "community lead" });
     expect(r.sql).toMatch(/j\.tags LIKE \? OR \(LOWER/);
-    expect(r.params).toEqual(['%"devrel"%', "%community%", "%lead%"]);
+    // «lead» — загальне слово, тож окремим АБО стає лише «community».
+    expect(r.params).toEqual(['%"devrel"%', "%community%", "%lead%", "%community%"]);
   });
 });

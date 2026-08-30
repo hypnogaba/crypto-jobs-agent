@@ -12,7 +12,7 @@
  */
 import { loadConfig } from "./config.js";
 import { D1Client } from "./d1.js";
-import { explainWithClaude, hasSearchSignal, pickTop, roleText, roleWords,
+import { explainWithClaude, hasSearchSignal, meaningfulRoleWords, pickTop, roleText, roleWords,
          type CandidateJob, type Profile } from "./match.js";
 import { asLocale, formatWhen, nextDelivery, salaryLine, say, thin, type Locale } from "./digest-copy.js";
 import { summarize } from "./summary.js";
@@ -563,6 +563,18 @@ export function onTopicSql(p: Pick<Profile, "spheres" | "customRole" | "customRo
   if (words.length > 0) {
     clauses.push(`(${words.map(() => "LOWER(j.title) LIKE ?").join(" AND ")})`);
     params.push(...words.map((w) => `%${w}%`));
+  }
+
+  // І окремо — значуще слово ролі саме по собі, щоб у вікно заходили часткові
+  // збіги: «Community Growth Coordinator» для «комуніті менеджера». Без цього
+  // partiallyMatchesRole не мав би на чому спрацювати: вікно наповнюється
+  // сферами, а вузька роль у них не вміщається.
+  //
+  // Слова беруться вже без загальних («manager», «senior»): інакше один
+  // «менеджер» затягнув би у вікно половину кеша.
+  for (const w of meaningfulRoleWords(roleText(p)).slice(0, ROLE_WORDS_IN_SQL)) {
+    clauses.push("LOWER(j.title) LIKE ?");
+    params.push(`%${w}%`);
   }
 
   if (clauses.length === 0) return { sql: "0", params: [] };

@@ -143,6 +143,16 @@ export interface ScoredJob extends CandidateJob {
 const SENIORITY_ORDER = ["junior", "middle", "senior", "lead"];
 
 /**
+ * Теги індустрій, які взагалі вміє ставити сканер (див. INDUSTRY_RULES).
+ *
+ * Потрібні, щоб відрізнити «вакансія з іншої галузі» від «галузь невідома».
+ * Другого в кеші 41%, і карати його було б покаранням за наше незнання.
+ */
+const INDUSTRY_TAGS = [
+  "web3", "ai", "fintech", "health", "games", "ecommerce", "defence", "nonprofit",
+];
+
+/**
  * Збіг своєї ролі з назвою вакансії.
  *
  * Слова довші за два символи, усі мають бути в назві. Так «технічний рекрутер»
@@ -159,6 +169,38 @@ export function matchesCustomRole(title: string, role: string | null | undefined
   if (words.length === 0) return false;
   const t = title.toLowerCase();
   return words.every((w) => t.includes(w));
+}
+
+/**
+ * Слова, які самі по собі не називають роботу.
+ *
+ * «Community manager» і «Account manager» мають спільне слово, і без цього
+ * списку друге вважалося б половиною збігу з першим. Спільне тут — граматика,
+ * а не професія: значуще слово — «community».
+ */
+const GENERIC_ROLE_WORDS = new Set([
+  "manager", "engineer", "specialist", "lead", "leader", "head", "director",
+  "senior", "junior", "middle", "staff", "principal", "chief", "officer",
+  "associate", "coordinator", "executive", "consultant", "analyst", "assistant",
+  "developer", "designer", "expert", "professional", "intern", "trainee",
+]);
+
+/**
+ * Часткове влучання: збіглося не все, але збіглося головне.
+ *
+ * «Комуніті менеджер» проти «Community Growth Coordinator» — це не повний
+ * збіг, але й не чужа вакансія. Раніше між цими двома станами різниці не
+ * було: або всі слова, або нічого.
+ */
+export function meaningfulRoleWords(role: string | null | undefined): string[] {
+  return roleWords(role).filter((w) => !GENERIC_ROLE_WORDS.has(w));
+}
+
+export function partiallyMatchesRole(title: string, role: string | null | undefined): boolean {
+  const meaningful = meaningfulRoleWords(role);
+  if (meaningful.length === 0) return false;
+  const t = title.toLowerCase();
+  return meaningful.some((w) => t.includes(w));
 }
 
 /** Скільки додає одне слово з побажань і де стеля. */
@@ -234,23 +276,60 @@ export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): Score
   // маркетолог у потрібній індустрії це не те, що просила людина зі сфери
   // «партнерства». Тому робота без жодного збігу за сферою сильно штрафується
   // і спливає тільки тоді, коли нічого кращого немає.
+  //
+  // Стеля тут не для краси. Сфери широкі й перекриваються: «Graphic Designer
+  // (Brand)» збігається з дизайном, продуктом і маркетингом одразу й давав
+  // +18 — більше, ніж точний збіг за назвою ролі. «Account Manager, Provider
+  // & Community Partnerships» так само брав +12 за партнерства й продажі.
+  // Одна вакансія не може бути вдвічі доречнішою за саму себе, тож перша
+  // сфера коштує шість, кожна наступна — по два, і разом не більше десяти.
   const sphereHits = p.spheres.filter((s) => tags.has(s));
-  add("sphere", sphereHits.length * 6);
+  if (sphereHits.length) add("sphere", Math.min(6 + (sphereHits.length - 1) * 2, 10));
   for (const s of sphereHits) facts.push({ k: "sphere", v: s });
 
   // Своя назва ролі шукається в НАЗВІ вакансії, бо тегів під неї не існує.
   // Це і є те, що робить кнопку «мій варіант» справжньою, а не декоративною.
-  const roleHit = matchesCustomRole(job.title, roleText(p));
-  if (roleHit) { add("role", 6); facts.push({ k: "role", v: p.customRole ?? roleText(p)! }); }
+  //
+  // Роль важить більше за сферу, і навмисно. Сфера — це одна з одинадцяти
+  // кнопок, тобто найгрубший опис роботи, який у нас є: «Продажі» однаково
+  // накриває Account Executive, Customer Success і Solutions Engineer.
+  // Названа роль — це те, що людина написала про себе сама, коли жодна
+  // кнопка їй не підійшла. Поки роль коштувала стільки ж, скільки сфера,
+  // добірка була про кнопку, а не про людину: комуніті-менеджер із Парижа
+  // отримав п'ять Account Executive, і всі вони чесно збігалися за сферою.
+  const named = roleText(p);
+  const roleHit = matchesCustomRole(job.title, named);
+  const rolePart = !roleHit && partiallyMatchesRole(job.title, named);
+  if (roleHit) { add("role", 12); facts.push({ k: "role", v: p.customRole ?? named! }); }
+  else if (rolePart) { add("rolePart", 5); facts.push({ k: "role", v: p.customRole ?? named! }); }
+  // Названа роль, яка не збіглася зовсім, — це сигнал, а не мовчання. Штраф
+  // м'який: людина обрала ще й сферу, і забирати в неї всю сферу через одне
+  // слово було б грубіше за проблему.
+  else if (named && sphereHits.length) add("roleMiss", -3);
 
   // Штраф лише тоді, коли людина щось назвала й нічого не збіглося.
-  if (!sphereHits.length && !roleHit && (p.spheres.length > 0 || roleText(p))) add("offTopic", -8);
+  if (!sphereHits.length && !roleHit && !rolePart && (p.spheres.length > 0 || named)) add("offTopic", -8);
 
   add("wishes", wishBonus(job, wishesText(p)));
 
+  // Індустрія тепер працює в обидва боки.
+  //
+  // Досі збіг давав +2, а розбіжність — нічого. Через це людина, яка обрала
+  // «Web3 і крипта», отримувала чотири вакансії без жодного стосунку до
+  // крипти й одну з ним, і модель під ними чесно писала «далеко від web3».
+  //
+  // Але «не збіглося» і «не знаємо» — різні речі, як і з географією. Тег
+  // індустрії має лише 59% вакансій; карати решту за наше незнання означало
+  // б викинути 41% кеша ні за що.
   const industryHits = p.industries.filter((i) => tags.has(i));
-  add("industry", industryHits.length * 2);
-  for (const i of industryHits) facts.push({ k: "industry", v: i });
+  const jobHasIndustry = INDUSTRY_TAGS.some((i) => tags.has(i));
+  if (industryHits.length) {
+    // Стеля на двох: три галочки не мають важити як пів сфери.
+    add("industry", Math.min(industryHits.length, 2) * 3);
+    for (const i of industryHits) facts.push({ k: "industry", v: i });
+  } else if (p.industries.length > 0 && jobHasIndustry) {
+    add("industryMiss", -3);
+  }
 
   // Своя індустрія працює поруч із галочками, а не замість них.
   const ownIndustry = customIndustryBonus(job, industryText(p));
@@ -308,7 +387,7 @@ export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): Score
       // Офіс на іншому континенті — не «менш доречно», а неможливо. Готовність
       // переїхати робить це незручністю; віддаленість — обмеженням у праві
       // на роботу, а не в географії, тож теж м'якше за офіс.
-      const cost = job.remote ? 4 : willRelocate(p.remoteMode) ? 2 : 8;
+      const cost = job.remote ? 5 : willRelocate(p.remoteMode) ? 3 : 12;
       add("placeMiss", -cost * w.location);
     }
     if (job.remote) add("remote", 1);
@@ -417,6 +496,31 @@ export function onTopic(job: Pick<ScoredJob, "facts">, p: Pick<Profile, "spheres
   return job.facts.some((f) => f.k === "sphere" || f.k === "role");
 }
 
+/**
+ * Чи людина взагалі може взяти цю роботу.
+ *
+ * Одне-єдине правило, і воно не про доречність, а про можливість: офіс у
+ * країні, якої людина не називала, коли вона не готова переїжджати. Це не
+ * «менш підходить» — туди неможливо ходити.
+ *
+ * Балами це не лікується. Точний збіг за роллю дає +12, дві сфери — ще +10, і
+ * будь-який штраф, менший за їхню суму, лишає вакансію в п'ятірці: живий
+ * прогін показав Account Manager в Індіанаполісі першим номером у людини з
+ * Парижа саме так.
+ *
+ * Вимикається трьома способами, і кожен — це слова самої людини: «тільки
+ * віддалено» (тоді працює власний штраф за onsite), «готовий переїхати», або
+ * вакансія віддалена. Плюс четвертий, наш: місце, якого ми не розібрали,
+ * лишається дозволеним — placeFit поверне «не знаємо», і правило мовчить.
+ */
+export function reachable(job: CandidateJob, p: Profile): boolean {
+  if (job.remote) return true;
+  if (remoteOnly(p.remoteMode)) return true;   // там свій штраф, -6 за onsite
+  if (willRelocate(p.remoteMode)) return true;
+  const myCountry = p.country ?? placeOf(cityText(p)).countries[0] ?? null;
+  return placeFit(placeOf(job.location), myCountry) !== "miss";
+}
+
 export function pickTop(jobs: CandidateJob[], p: Profile, limit = 5, now = new Date()): ScoredJob[] {
   // Порожній профіль — не «нічого не знайшлось», а «нема чого шукати».
   if (!hasSearchSignal(p)) return [];
@@ -424,6 +528,7 @@ export function pickTop(jobs: CandidateJob[], p: Profile, limit = 5, now = new D
   const scored = jobs
     .filter((j) => !linksToAggregator(j.url))
     .filter((j) => fitsCountry(j, p))
+    .filter((j) => reachable(j, p))
     .map((j) => scoreJob(j, p, now))
     .filter((j) => j.score > 0)
     .filter((j) => onTopic(j, p))
