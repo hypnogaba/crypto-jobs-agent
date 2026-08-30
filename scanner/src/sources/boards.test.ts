@@ -319,3 +319,73 @@ describe("parseNextPayload", () => {
       .toEqual([]);
   });
 });
+
+describe("розбір списку web3.career", () => {
+  const wrap = (o: unknown) => `<script type="application/ld+json">${JSON.stringify(o)}</script>`;
+  const post = (title: string, org: string, extra: Record<string, unknown> = {}) => ({
+    "@type": "JobPosting", title,
+    hiringOrganization: { "@type": "Organization", name: org },
+    datePosted: "2026-08-29", ...extra,
+  });
+  const link = (path: string) => `<a href="${path}">x</a>`;
+
+  /**
+   * Живий випадок: розмітка в списку адрес не має, але адреса складається з
+   * назви вакансії та компанії. Зшивання за слагом дає повну вакансію без
+   * ЖОДНОГО додаткового запиту — сторінка коштує один запит замість вісімнадцяти.
+   */
+  it("зшиває розмітку з посиланням за слагом", async () => {
+    const html = wrap(post("Investment Analyst", "Kakao Ventures"))
+               + link("/investment-analyst-kakao-ventures/153281");
+    const jobs = await fetchBoard(
+      { name: "b", label: "L", country: "*", feedUrl: "https://web3.career/", kind: "jsonld" },
+      { fetchImpl: async () => new Response(html, { status: 200 }) });
+    expect(jobs[0]).toMatchObject({
+      url: "https://web3.career/investment-analyst-kakao-ventures/153281",
+      company: "Kakao Ventures", title: "Investment Analyst",
+    });
+  });
+
+  /**
+   * Дві вакансії з однаковою назвою в різних компаній — саме тому правило
+   * вимагає збігу И назви, И компанії. Інакше людина пішла б за чужим
+   * посиланням.
+   */
+  it("не плутає однакові назви в різних компаній", async () => {
+    const html = wrap(post("Founding Engineer", "Ihsan")) + wrap(post("Founding Engineer", "Fomo"))
+               + link("/founding-engineer-ihsan/1111") + link("/founding-engineer-fomo/2222");
+    const jobs = await fetchBoard(
+      { name: "b", label: "L", country: "*", feedUrl: "https://web3.career/", kind: "jsonld" },
+      { fetchImpl: async () => new Response(html, { status: 200 }) });
+    const byCompany = Object.fromEntries(jobs.map((j) => [j.company, j.url]));
+    expect(byCompany["Ihsan"]).toContain("founding-engineer-ihsan");
+    expect(byCompany["Fomo"]).toContain("founding-engineer-fomo");
+  });
+
+  /** У живих назвах трапляється «&amp;», а в адресі його немає взагалі. */
+  it("зшиває назву із сутністю HTML", async () => {
+    const html = wrap(post("Payments Engineer &amp; Backend", "Ihsan"))
+               + link("/payments-engineer-backend-ihsan/153410");
+    const jobs = await fetchBoard(
+      { name: "b", label: "L", country: "*", feedUrl: "https://web3.career/", kind: "jsonld" },
+      { fetchImpl: async () => new Response(html, { status: 200 }) });
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]!.title).toBe("Payments Engineer & Backend");
+  });
+
+  it("бере річну вилку й ігнорує погодинну", async () => {
+    const yearly = { baseSalary: { "@type": "MonetaryAmount", currency: "USD",
+      value: { minValue: 135050, maxValue: 300000, unitText: "YEAR" } } };
+    const hourly = { baseSalary: { "@type": "MonetaryAmount", currency: "USD",
+      value: { minValue: 45, maxValue: 70, unitText: "HOUR" } } };
+    const html = wrap(post("Analyst", "Ondo", yearly)) + link("/analyst-ondo/1001")
+               + wrap(post("Designer", "Fomo", hourly)) + link("/designer-fomo/1002");
+    const jobs = await fetchBoard(
+      { name: "b", label: "L", country: "*", feedUrl: "https://web3.career/", kind: "jsonld" },
+      { fetchImpl: async () => new Response(html, { status: 200 }) });
+    const a = jobs.find((j) => j.title === "Analyst")!;
+    const d = jobs.find((j) => j.title === "Designer")!;
+    expect(a).toMatchObject({ salaryMin: 135050, salaryMax: 300000, salaryCurrency: "USD" });
+    expect(d.salaryMin ?? null).toBeNull();
+  });
+});
