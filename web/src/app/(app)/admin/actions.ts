@@ -16,8 +16,9 @@ import { requireAdmin } from "@/lib/auth";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { all, one, run } from "@/lib/db";
 import { safeJobUrl } from "@/lib/safe-url";
-import { INTAKE_LIMIT, atsApi, atsListInPage, boardName, classify, countJobs, feedInPage,
-         labelOf, tidy, type Provider } from "@/lib/source-link";
+import { INTAKE_LIMIT, atsApi, atsListInPage, boardName, classify, countJobs, diagnose,
+         diagnoseHttp, feedInPage, getroIdInPage, jobPostingCount, labelOf, tidy,
+         type Provider } from "@/lib/source-link";
 
 /** Перевірка джерела живцем — не чекаючи ранкового прогону. */
 export async function checkSource(formData: FormData): Promise<void> {
@@ -344,11 +345,12 @@ async function probe(url: string): Promise<{ ok: boolean; body: string; note: st
   }
 }
 
-async function record(url: string, verdict: string, kind: string | null,
-                      target: string | null, note: string, found: number): Promise<void> {
+async function record(url: string, verdict: string, kind: string | null, target: string | null,
+                      note: string, found: number, fix?: string): Promise<void> {
   await run(
-    "INSERT INTO source_intake (id,url,verdict,kind,target,note,found) VALUES (?,?,?,?,?,?,?)",
-    crypto.randomUUID(), url.slice(0, 500), verdict, kind, target, note.slice(0, 300), found);
+    "INSERT INTO source_intake (id,url,verdict,kind,target,note,found,fix) VALUES (?,?,?,?,?,?,?,?)",
+    crypto.randomUUID(), url.slice(0, 500), verdict, kind, target,
+    note.slice(0, 300), found, fix?.slice(0, 300) ?? null);
 }
 
 /** Компанія на ATS: перевіряємо її відкритий API тим самим викликом, що й сканер. */
@@ -430,9 +432,37 @@ async function intake(url: string): Promise<void> {
   // каже: посилання на свій ATS або оголошену в <head> стрічку. Глибше не
   // йдемо — обхід сайту з адмінки перетворився б на павука.
   const r = await probe(g.url);
-  if (!r.ok) { await record(g.url, "unreachable", null, null, r.note, 0); return; }
+  if (!r.ok) {
+    const d = diagnoseHttp(r.note);
+    await record(g.url, "unreachable", null, null, d?.cause ?? r.note, 0, d?.fix);
+    return;
+  }
 
-  // Стрічка йде першою: вона дає ВСІ вакансії дошки й оновлюється сама,
+  /**
+   * Борд Getro — найцінніше, що можна додати одним посиланням, тому питаємо
+   * про нього першим. У колекції фонду сотні компаній, і 80% посилань там
+   * ведуть просто в ATS роботодавця: додати такий борд означає отримати не
+   * стрічку вакансій, а постачальника НОВИХ компаній для всієї системи.
+   */
+  const getro = getroIdInPage(r.body);
+  if (getro !== null) {
+    const dup = await one<{ label: string }>(
+      "SELECT label FROM getro_collections WHERE collection_id=?", getro);
+    if (dup) {
+      await record(g.url, "duplicate", "getro", String(getro),
+        `колекція Getro ${getro} («${dup.label}») уже читається`, 0);
+      return;
+    }
+    await run(
+      `INSERT INTO getro_collections (id,collection_id,label,url) VALUES (?,?,?,?)
+       ON CONFLICT(collection_id) DO NOTHING`,
+      crypto.randomUUID(), getro, labelOf(g.url, g.host), g.url);
+    await record(g.url, "added", "getro", String(getro),
+      `борд Getro, колекція ${getro} — сотні компаній екосистеми`, 0);
+    return;
+  }
+
+  // Стрічка йде другою: вона дає ВСІ вакансії дошки й оновлюється сама,
   // тоді як список компаній зі сторінки — лише те, що вмістилось на перший
   // екран.
   const feed = feedInPage(r.body, g.url);
@@ -472,8 +502,33 @@ async function intake(url: string): Promise<void> {
     return;
   }
 
-  await record(g.url, "unknown", null, null,
-    "сторінка відкрилась, але ні ATS, ні стрічки в ній не оголошено — найпевніше вона малюється скриптом, і ми бачимо порожній каркас", 0);
+  /**
+   * Розмітка schema.org — остання й найширша спроба. Дошки ставлять її самі,
+   * щоб потрапити в Google Jobs, тож вона є там, де немає ні RSS, ні ATS.
+   * Адрес у ній зазвичай немає (перевірено на восьми дошках), тому сканер
+   * читає таку дошку двома кроками — див. fetchJsonLd у boards.ts.
+   */
+  const postings = jobPostingCount(r.body);
+  if (postings > 0) {
+    const label = labelOf(g.url, g.host);
+    const name = boardName(g.country, label);
+    const dup = await one<{ id: string }>(
+      "SELECT id FROM country_boards WHERE feed_url=? OR name=?", g.url, name);
+    if (dup) {
+      await record(g.url, "duplicate", "jsonld", name, "ця дошка вже читається", postings);
+      return;
+    }
+    await run(
+      `INSERT INTO country_boards (id,country,name,label,feed_url,kind)
+       VALUES (?,?,?,?,?,'jsonld') ON CONFLICT(name) DO NOTHING`,
+      crypto.randomUUID(), g.country, name, label, g.url);
+    await record(g.url, "added", "jsonld", name,
+      `${label} · розмітка schema.org · ${postings} вакансій на сторінці`, postings);
+    return;
+  }
+
+  const d = diagnose(r.body);
+  await record(g.url, "unknown", null, null, d.cause, 0, d.fix);
 }
 
 /**

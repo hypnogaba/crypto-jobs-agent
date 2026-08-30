@@ -9,8 +9,14 @@ import type { RawJob, SourceResult } from "./types.js";
 import { fetchBoard } from "./sources/boards.js";
 import { mapLimit, runSource } from "./http.js";
 
-/** Колекції Getro, підтверджені живими. Перебір нових — окремою командою. */
-const GETRO_COLLECTIONS = [100, 150, 200, 250, 300, 400, 550, 800, 858, 950, 1000, 1100, 1200, 1300, 1500];
+/**
+ * Колекції Getro, підтверджені живими.
+ *
+ * Тепер це лише запас на випадок порожньої таблиці: справжній список лежить
+ * у `getro_collections` і поповнюється з адмінки посиланням на борд. Досі
+ * додати колекцію можна було тільки правкою цього рядка й деплоєм сканера.
+ */
+const GETRO_FALLBACK = [100, 150, 200, 250, 300, 400, 550, 800, 858, 950, 1000, 1100, 1200, 1300, 1500];
 
 async function main(): Promise<void> {
   const cfg = loadConfig();
@@ -23,6 +29,18 @@ async function main(): Promise<void> {
   await repo.startRun(runId, now.toISOString());
   const prior = await repo.listSourceStates();
   const skip = skipSet(prior);
+
+  // Порожня таблиця означає «міграцію ще не накотили», а не «колекцій немає»:
+  // мовчки прочитати нуль колекцій означало б втратити головне джерело нових
+  // компаній і не сказати про це нікому.
+  let getroCollections = GETRO_FALLBACK;
+  try {
+    const fromDb = await repo.listGetroCollections();
+    if (fromDb.length) getroCollections = fromDb;
+    else console.log("   getro_collections порожня — беру зашитий список");
+  } catch (e) {
+    console.log(`   getro_collections недоступна (${e instanceof Error ? e.message : e}) — беру зашитий список`);
+  }
 
   // Агрегатори — єдине джерело НЕВІДОМИХ компаній, тому саме вони сіють зростання
   let r2Jobs: RawJob[] = [];
@@ -47,7 +65,7 @@ async function main(): Promise<void> {
     },
 
     R3: async () => {
-      const run = await runR3(GETRO_COLLECTIONS, skip);
+      const run = await runR3(getroCollections, skip);
       // 80% вакансій Getro ведуть прямо в ATS — забираємо ці компанії собі назавжди
       const harvested = harvestAtsFromJobs(run.jobs);
       for (const c of harvested) {

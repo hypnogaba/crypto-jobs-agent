@@ -9,7 +9,7 @@
  * Дошка описується рядком у таблиці country_boards, а не кодом: адреса, країна
  * й формат. Тому нова країна додається з адмінки, без деплою.
  */
-import { fetchXml, type FetchOptions } from "../http.js";
+import { fetchXml, mapLimit, type FetchOptions } from "../http.js";
 import type { RawJob } from "../types.js";
 
 export interface Board {
@@ -173,6 +173,10 @@ export function cleanUrl(raw: string): string {
  * тож перекладаємо тут, а не тримаємо ще одну колонку-прапорець.
  */
 export async function fetchBoard(board: Board, o: FetchOptions = {}): Promise<RawJob[]> {
+  const country = board.country === "*" ? null : board.country;
+
+  if (board.kind === "jsonld") return fetchJsonLd(board, country, o);
+
   if (board.kind !== "rss") throw new Error(`формат «${board.kind}» ще не вміємо: ${board.name}`);
 
   const xml = await fetchXml(board.feedUrl, {}, o);
@@ -185,8 +189,178 @@ export async function fetchBoard(board: Board, o: FetchOptions = {}): Promise<Ra
       url: cleanUrl(it.link), company: p.company, title: p.title,
       location: p.location, remote: p.remote, postedAt: iso(it.date),
       salaryMin: p.salaryMin, salaryMax: p.salaryMax, salaryCurrency: p.salaryCurrency,
-      source: board.name, country: board.country === "*" ? null : board.country,
+      source: board.name, country,
     });
   }
   return out;
+}
+
+/**
+ * Дошка, яка віддає вакансії розміткою JobPosting.
+ *
+ * Це не милиця під один сайт. `JobPosting` — стандарт schema.org, і дошки
+ * ставлять його самі, щоб потрапити в Google Jobs: там лежать назва, компанія,
+ * місто й дата в однакових полях у всіх. Саме тому воно надійніше за розбір
+ * верстки, яка змінюється щомісяця.
+ *
+ * Знадобилось воно на живому прикладі: web3.career не має ні RSS, ні посилань
+ * на ATS — сторінка виглядала порожньою, і ми чесно писали «не розпізнано».
+ * Насправді вісімнадцять вакансій лежали в ній відкритим текстом.
+ */
+export function parseJobPostings(html: string, source: string, country: string | null,
+                                 pageUrl?: string): RawJob[] {
+  const out: RawJob[] = [];
+  const seen = new Set<string>();
+
+  for (const m of html.matchAll(
+    /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
+    let parsed: unknown;
+    // Один зіпсований блок не має валити решту сторінки: розмітку пишуть
+    // люди, і серед двадцяти блоків один із комою наприкінці — норма.
+    try { parsed = JSON.parse(m[1]!); } catch { continue; }
+
+    for (const node of flatten(parsed)) {
+      if (node["@type"] !== "JobPosting") continue;
+      // Адреса сторінки як запасна — і це не здогад, а те, як розмітку
+      // пишуть насправді: на сторінці однієї вакансії `url` опускають, бо
+      // вакансія і є ця сторінка. На жодній із восьми перевірених дошок
+      // JobPosting свого `url` не мав.
+      const url = pickUrl(node) ?? pageUrl ?? null;
+      const title = str(node.title);
+      if (!url || !title || seen.has(url)) continue;
+      seen.add(url);
+
+      const org = node.hiringOrganization;
+      const company = str(typeof org === "object" && org !== null
+        ? (org as Record<string, unknown>).name : org);
+      const loc = jobLocation(node);
+      out.push({
+        url, company: company || "Unknown company", title,
+        location: loc,
+        remote: isRemote(node, loc),
+        postedAt: iso(str(node.datePosted)),
+        source, country,
+        description: str(node.description).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() || null,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Віддалена чи ні, коли розмітка суперечить сама собі.
+ *
+ * `jobLocationType: TELECOMMUTE` самого по собі мало. web3.career ставить
+ * його ВСІМ вакансіям поспіль — включно з «Office Manager» за конкретною
+ * адресою в Нью-Йорку, у якої тут-таки вказано addressLocality. Офіс-менеджер
+ * в офісі віддаленим не буває; прапорець просто проставлено скопом.
+ *
+ * Тому конкретне місто важить більше за прапорець. Ціна помилки несиметрична:
+ * зайве «віддалено» шле людині в Києві вакансію, на яку треба ходити ногами в
+ * Нью-Йорк, а зайве «не віддалено» лише сховає її від тих, хто й так шукає
+ * деінде.
+ */
+function isRemote(node: Record<string, unknown>, loc: string | null): boolean {
+  if (loc && REMOTE_ANYWHERE.test(loc)) return true;
+  if (loc) return false;   // є конкретне місто — вірю місту
+  return node.jobLocationType === "TELECOMMUTE";
+}
+
+/**
+ * Позначка віддаленості всередині рядка локації — «Remote, USA».
+ * `REMOTE_TAIL` вище на це не годиться: він прив'язаний до цілого слова,
+ * бо там розбирається хвіст заголовка, а не вільний текст адреси.
+ */
+const REMOTE_ANYWHERE = /remote|anywhere|distributed|télétravail|worldwide/i;
+
+/** Розмітку кладуть і масивом, і в `@graph`, і в `itemListElement`. */
+function flatten(v: unknown, depth = 0): Array<Record<string, unknown>> {
+  if (depth > 4 || v === null || typeof v !== "object") return [];
+  if (Array.isArray(v)) return v.flatMap((x) => flatten(x, depth + 1));
+  const node = v as Record<string, unknown>;
+  return [node, ...flatten(node["@graph"], depth + 1),
+          ...flatten(node.itemListElement, depth + 1), ...flatten(node.item, depth + 1)];
+}
+
+const str = (v: unknown): string =>
+  typeof v === "string" ? v.trim() : typeof v === "number" ? String(v) : "";
+
+/** Адреса оголошення: `url`, а якщо його немає — той, куди подаються. */
+function pickUrl(node: Record<string, unknown>): string | null {
+  for (const key of ["url", "sameAs"]) {
+    const v = str(node[key]);
+    if (/^https?:\/\//i.test(v)) return v;
+  }
+  const id = str(node["@id"]);
+  return /^https?:\/\//i.test(id) ? id : null;
+}
+
+/** Місто зі вкладеної адреси; порожнє краще за «[object Object]». */
+function jobLocation(node: Record<string, unknown>): string | null {
+  const first = Array.isArray(node.jobLocation) ? node.jobLocation[0] : node.jobLocation;
+  if (!first || typeof first !== "object") return null;
+  const addr = (first as Record<string, unknown>).address;
+  if (!addr || typeof addr !== "object") return null;
+  const a = addr as Record<string, unknown>;
+  const parts = [str(a.addressLocality), str(a.addressRegion), str(a.addressCountry)];
+  return parts.filter(Boolean).join(", ") || null;
+}
+
+
+/** Скільки сторінок вакансій відкриваємо за прогін на одну таку дошку. */
+const JSONLD_PAGES = 40;
+
+/**
+ * Дошка, яку читаємо розміткою.
+ *
+ * Двома кроками, бо саме так влаштовані живі дошки. У списку розмітка є, але
+ * БЕЗ адрес — а вакансія без адреси нікому не потрібна, людину нікуди вести.
+ * На сторінці ж окремої вакансії адреса відома: це сама сторінка. Перший
+ * блок JobPosting там належить їй, решта — «схожі вакансії» збоку (перевірено
+ * на web3.career: слаг адреси збігається саме з першим блоком).
+ *
+ * Тому: беремо список, збираємо з нього посилання на вакансії, відкриваємо
+ * кожне. Сорок за прогін — дошка не мусить коштувати дорожче за сорок
+ * запитів на добу.
+ */
+async function fetchJsonLd(board: Board, country: string | null, o: FetchOptions): Promise<RawJob[]> {
+  const page = await fetchXml(board.feedUrl, {}, o);
+
+  // Якщо дошці пощастило мати повну розмітку прямо в списку — на цьому все.
+  const direct = parseJobPostings(page, board.name, country);
+  if (direct.length) return direct;
+
+  const links = jobLinks(page, board.feedUrl).slice(0, JSONLD_PAGES);
+  const out: RawJob[] = [];
+  await mapLimit(links, 4, async (u) => {
+    try {
+      const first = parseJobPostings(await fetchXml(u, {}, o), board.name, country, u)[0];
+      if (first) out.push(first);
+    } catch {
+      // Одна сторінка з чотирьох десятків не вирок дошці.
+    }
+  });
+  return out;
+}
+
+/**
+ * Посилання, які схожі на окремі вакансії.
+ *
+ * Ознака навмисно вузька: свій домен і числовий хвіст у шляху. Числом
+ * закінчуються посилання на вакансію майже скрізь, бо це її id, — а от
+ * «/about» чи «/pricing» так не виглядають ніколи. Ширша ознака означала б
+ * сорок запитів у сторінки «Про нас».
+ */
+export function jobLinks(html: string, base: string): string[] {
+  let host: string;
+  try { host = new URL(base).hostname; } catch { return []; }
+  const out = new Set<string>();
+  for (const m of html.matchAll(/href=["']([^"'#?]{6,200})["']/gi)) {
+    let u: URL;
+    try { u = new URL(m[1]!, base); } catch { continue; }
+    if (u.hostname !== host) continue;
+    if (!/\/[a-z0-9][a-z0-9-]{5,}\/\d{3,}\/?$/i.test(u.pathname)) continue;
+    out.add(u.toString());
+  }
+  return [...out];
 }
