@@ -375,22 +375,27 @@ async function takeFeed(feedUrl: string, country: string, host: string, from: st
   const label = labelOf(feedUrl, host);
   const name = boardName(country, label);
 
-  // Ім'я стає відоме лише тут, після запиту: воно збирається з країни й
-  // рубрики. `ON CONFLICT DO NOTHING` мовчки не вставив би нічого, а журнал
-  // сказав би «додано» — тому питаємо ще раз саме про ім'я.
-  const taken = await one<{ feed_url: string }>(
-    "SELECT feed_url FROM country_boards WHERE name=?", name);
-  if (taken) {
-    await record(from, "duplicate", "board", name,
-      `${label} вже є в списку (${taken.feed_url})`, n);
-    return;
+  /**
+   * Ім'я стає відоме лише тут, після запиту, і воно може бути зайняте іншою
+   * стрічкою: слаг збирається з латиниці, тож «DOU · Пайтон» і «DOU» дають
+   * однакове `board:ua-dou`. Адреса вже перевірена вище — отже, ця стрічка
+   * нова, і відмовити їй було б помилкою. Тому шукаємо вільне ім'я.
+   *
+   * `ON CONFLICT DO NOTHING` тут не рятує: він мовчки не вставив би нічого,
+   * а журнал сказав би «додано».
+   */
+  let unique = name;
+  for (let i = 2; i <= 9; i++) {
+    const taken = await one<{ id: string }>("SELECT id FROM country_boards WHERE name=?", unique);
+    if (!taken) break;
+    unique = `${name}-${i}`;
   }
 
   await run(
     `INSERT INTO country_boards (id,country,name,label,feed_url,kind)
      VALUES (?,?,?,?,?,'rss') ON CONFLICT(name) DO NOTHING`,
-    crypto.randomUUID(), country, name, label, feedUrl);
-  await record(from, "added", "board", name,
+    crypto.randomUUID(), country, unique, label, feedUrl);
+  await record(from, "added", "board", unique,
     `${label} · ${country === "*" ? "глобальна" : country} · ${n} вакансій зараз`, n);
 }
 
