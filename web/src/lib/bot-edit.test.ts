@@ -23,7 +23,7 @@ vi.mock("./telegram-send", () => ({
   sendText: (...a: unknown[]) => sendText(...a),
   callTelegram: (...a: unknown[]) => callTelegram(...a),
 }));
-vi.mock("@/lib/profile-country", () => ({ persistCountry: vi.fn() }));
+vi.mock("@/lib/profile-country", () => ({ persistDerived: vi.fn() }));
 
 import { handleEditButton } from "./bot";
 

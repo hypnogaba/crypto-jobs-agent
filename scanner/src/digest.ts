@@ -12,7 +12,7 @@
  */
 import { loadConfig } from "./config.js";
 import { D1Client } from "./d1.js";
-import { explainWithClaude, hasSearchSignal, pickTop, roleWords,
+import { explainWithClaude, hasSearchSignal, pickTop, roleText, roleWords,
          type CandidateJob, type Profile } from "./match.js";
 import { asLocale, formatWhen, nextDelivery, salaryLine, say, thin, type Locale } from "./digest-copy.js";
 import { summarize } from "./summary.js";
@@ -37,6 +37,10 @@ export interface UserRow {
   custom_role: string | null;
   custom_industry: string | null;
   custom_seniority: string | null;
+  custom_role_en: string | null;
+  custom_industry_en: string | null;
+  wishes_en: string | null;
+  location_en: string | null;
   cv_highlights: string | null;
   wishes: string | null;
   seniority_weight: number | null;
@@ -540,7 +544,7 @@ const ROLE_WORDS_IN_SQL = 5;
  *
  * Порожньо, коли шукати нема за чим: тоді вікно поводиться точно як раніше.
  */
-export function onTopicSql(p: Pick<Profile, "spheres" | "customRole">): {
+export function onTopicSql(p: Pick<Profile, "spheres" | "customRole" | "customRoleEn">): {
   sql: string; params: unknown[];
 } {
   const clauses: string[] = [];
@@ -555,7 +559,7 @@ export function onTopicSql(p: Pick<Profile, "spheres" | "customRole">): {
 
   // Своя роль — ті самі слова й те саме правило «всі разом», що в
   // matchesCustomRole. Одне джерело правди: roleWords.
-  const words = roleWords(p.customRole).slice(0, ROLE_WORDS_IN_SQL);
+  const words = roleWords(roleText(p)).slice(0, ROLE_WORDS_IN_SQL);
   if (words.length > 0) {
     clauses.push(`(${words.map(() => "LOWER(j.title) LIKE ?").join(" AND ")})`);
     params.push(...words.map((w) => `%${w}%`));
@@ -570,10 +574,13 @@ export function profileOf(u: UserRow): Profile {
   return {
     userId: u.id, spheres: list(u.spheres), industries: list(u.industries),
     customRole: u.custom_role,
+    customRoleEn: u.custom_role_en,
     customIndustry: u.custom_industry,
+    customIndustryEn: u.custom_industry_en,
     customSeniority: u.custom_seniority,
     cvHighlights: u.cv_highlights,
     wishes: u.wishes,
+    wishesEn: u.wishes_en,
     // Вивчене зі скарг. Немає рядка — усі ваги одиничні, поведінка як була.
     tuning: {
       seniority: u.seniority_weight ?? 1,
@@ -581,6 +588,7 @@ export function profileOf(u: UserRow): Profile {
       salary: u.salary_weight ?? 1,
     },
     seniority: u.seniority, remoteMode: u.remote_mode, location: u.location, salaryMin: u.salary_min,
+    locationEn: u.location_en,
     country: u.country,
   };
 }
@@ -589,6 +597,7 @@ export function profileOf(u: UserRow): Profile {
 export const PROFILE_COLUMNS =
   `u.*, p.spheres,p.industries,p.seniority,p.remote_mode,p.location,p.salary_min,p.custom_role,p.country,
         p.wishes,p.custom_industry,p.custom_seniority,p.cv_highlights,
+        p.custom_role_en,p.custom_industry_en,p.wishes_en,p.location_en,
         t.seniority_weight,t.location_weight,t.salary_weight
    FROM users u JOIN profiles p ON p.user_id = u.id
    LEFT JOIN user_tuning t ON t.user_id = u.id`;

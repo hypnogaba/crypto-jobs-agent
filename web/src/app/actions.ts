@@ -11,7 +11,7 @@ import { DEFAULT_LOCALE, isLocale } from "@/lib/i18n";
 import { safeTimezone } from "@/lib/digest-time";
 import { FEEDBACK_LIMITS, ONBOARD_LIMITS, checkRate, recordFailure } from "@/lib/ratelimit";
 import { INDUSTRIES, SENIORITY, SPHERES, needsCity, parseModes, serializeModes, type Locale } from "@/lib/vocab";
-import { persistCountry } from "@/lib/profile-country";
+import { persistDerived } from "@/lib/profile-country";
 import { pathFor } from "@/lib/seo";
 import { sendText } from "@/lib/telegram-send";
 
@@ -321,7 +321,7 @@ async function persistProfile(
     JSON.stringify(p.industries), p.customIndustry,
     p.seniority, p.customSeniority,
     p.remoteMode, p.location, p.salaryMin, p.salaryCurrency, p.wishes, p.cvHighlights);
-  await persistCountry(userId, p.location);
+  await persistDerived(userId, (await env()).ANTHROPIC_API_KEY ?? null);
 
 }
 

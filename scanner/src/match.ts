@@ -44,12 +44,23 @@ export interface Profile {
   industries: string[];
   /** Своя назва ролі, якщо жодна сфера зі словника не підійшла. */
   customRole?: string | null;
+  /**
+   * Те саме англійською — і саме воно йде в порівняння з назвами вакансій.
+   *
+   * Слова людини лишаються в customRole, бо їх показують їй же: рядок
+   * «чому підходить» має цитувати те, що вона написала, а не наш переклад.
+   * Порівнювати ж треба англійською, інакше «Комуніті менеджер» не збігається
+   * ні з чим ніколи. Переклад робить веб при збереженні профілю.
+   */
+  customRoleEn?: string | null;
   /** Своя індустрія: «climate tech», «esports». Того ж роду, що customRole. */
   customIndustry?: string | null;
+  customIndustryEn?: string | null;
   /** Свій рівень: «head of BD», «founder». Стоїть замість seniority, не поруч. */
   customSeniority?: string | null;
   /** Вільні побажання людини: «тільки стартапи, без банків, 4-денний тиждень». */
   wishes?: string | null;
+  wishesEn?: string | null;
   /** Стек, роки, мови з резюме. У бали не йде — лише в промпт пояснень. */
   cvHighlights?: string | null;
   seniority: string | null;
@@ -61,6 +72,8 @@ export interface Profile {
    */
   remoteMode: string;
   location: string | null;
+  /** Місто канонічною англійською: «Париж» -> «Paris». Порівнюється саме воно. */
+  locationEn?: string | null;
   salaryMin: number | null;
   /** Країна людини, виведена з локації або часового поясу. Може бути порожня. */
   country?: string | null;
@@ -194,6 +207,21 @@ export function customIndustryBonus(
   return wordBonus(hay, own, INDUSTRY_WORD_BONUS, INDUSTRY_MAX_BONUS);
 }
 
+/**
+ * Слова, за якими шукаємо: англійський варіант, а як його немає — вихідний.
+ *
+ * Запасний варіант тут не косметика: профілі, збережені до появи стовпців
+ * `*_en`, інакше втратили б свою роль зовсім, а вони вже є в базі.
+ */
+export const roleText = (p: Pick<Profile, "customRole" | "customRoleEn">): string | null =>
+  p.customRoleEn ?? p.customRole ?? null;
+export const wishesText = (p: Pick<Profile, "wishes" | "wishesEn">): string | null =>
+  p.wishesEn ?? p.wishes ?? null;
+export const industryText = (p: Pick<Profile, "customIndustry" | "customIndustryEn">): string | null =>
+  p.customIndustryEn ?? p.customIndustry ?? null;
+export const cityText = (p: Pick<Profile, "location" | "locationEn">): string | null =>
+  p.locationEn ?? p.location ?? null;
+
 export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): ScoredJob {
   let score = 0;
   const facts: MatchFact[] = [];
@@ -212,20 +240,20 @@ export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): Score
 
   // Своя назва ролі шукається в НАЗВІ вакансії, бо тегів під неї не існує.
   // Це і є те, що робить кнопку «мій варіант» справжньою, а не декоративною.
-  const roleHit = matchesCustomRole(job.title, p.customRole);
-  if (roleHit) { add("role", 6); facts.push({ k: "role", v: p.customRole! }); }
+  const roleHit = matchesCustomRole(job.title, roleText(p));
+  if (roleHit) { add("role", 6); facts.push({ k: "role", v: p.customRole ?? roleText(p)! }); }
 
   // Штраф лише тоді, коли людина щось назвала й нічого не збіглося.
-  if (!sphereHits.length && !roleHit && (p.spheres.length > 0 || p.customRole)) add("offTopic", -8);
+  if (!sphereHits.length && !roleHit && (p.spheres.length > 0 || roleText(p))) add("offTopic", -8);
 
-  add("wishes", wishBonus(job, p.wishes));
+  add("wishes", wishBonus(job, wishesText(p)));
 
   const industryHits = p.industries.filter((i) => tags.has(i));
   add("industry", industryHits.length * 2);
   for (const i of industryHits) facts.push({ k: "industry", v: i });
 
   // Своя індустрія працює поруч із галочками, а не замість них.
-  const ownIndustry = customIndustryBonus(job, p.customIndustry);
+  const ownIndustry = customIndustryBonus(job, industryText(p));
   if (ownIndustry > 0) { add("ownIndustry", ownIndustry); facts.push({ k: "industry", v: p.customIndustry! }); }
 
   // Рівень: збіг тягне вгору, розрив у два щаблі — сильно вниз
@@ -261,9 +289,9 @@ export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): Score
   // Країна людини береться з профілю, а як її там немає — виводиться з
   // написаного міста тим самим розбором. Профілі, збережені до появи
   // стовпця `country`, інакше лишились би без географії назавжди.
-  const myCountry = p.country ?? placeOf(p.location).countries[0] ?? null;
+  const myCountry = p.country ?? placeOf(cityText(p)).countries[0] ?? null;
   const fit = placeFit(place, myCountry);
-  const cityHit = cityMatches(job.location, p.location);
+  const cityHit = cityMatches(job.location, cityText(p));
 
   if (remoteOnly(p.remoteMode)) {
     if (job.remote) { add("remote", 3); facts.push({ k: "remote" }); }
@@ -274,7 +302,7 @@ export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): Score
     if (fit === "miss" && job.remote) add("placeMiss", -4 * w.location);
   } else {
     // Людина згодна на офіс — отже, місце має значення, а не лише прапорець.
-    if (cityHit) { add("place", 4); facts.push({ k: "place", v: p.location! }); }
+    if (cityHit) { add("place", 4); facts.push({ k: "place", v: p.location ?? cityText(p)! }); }
     else if (fit === "hit") { add("place", 3); facts.push({ k: "place", v: p.location ?? myCountry! }); }
     else if (fit === "miss") {
       // Офіс на іншому континенті — не «менш доречно», а неможливо. Готовність
@@ -363,8 +391,8 @@ export function fitsCountry(job: CandidateJob, p: Profile): boolean {
  * Індустрія й рівень сюди не рахуються: «senior у фінтеху» — це не пошук,
  * це два прикметники без іменника.
  */
-export function hasSearchSignal(p: Pick<Profile, "spheres" | "customRole">): boolean {
-  return p.spheres.length > 0 || roleWords(p.customRole).length > 0;
+export function hasSearchSignal(p: Pick<Profile, "spheres" | "customRole" | "customRoleEn">): boolean {
+  return p.spheres.length > 0 || roleWords(roleText(p)).length > 0;
 }
 
 /**
@@ -384,7 +412,7 @@ export function hasSearchSignal(p: Pick<Profile, "spheres" | "customRole">): boo
  * Дві доречні вакансії кращі за дві доречні й три, під якими написано, що
  * вони не підходять.
  */
-export function onTopic(job: Pick<ScoredJob, "facts">, p: Pick<Profile, "spheres" | "customRole">): boolean {
+export function onTopic(job: Pick<ScoredJob, "facts">, p: Pick<Profile, "spheres" | "customRole" | "customRoleEn">): boolean {
   if (!hasSearchSignal(p)) return false;
   return job.facts.some((f) => f.k === "sphere" || f.k === "role");
 }
@@ -436,10 +464,10 @@ export function explainLocally(job: ScoredJob, p: Profile, locale: Locale = "en"
   const bits: WhyBit[] = [];
   const sphere = p.spheres.find((s) => job.tags.includes(s));
   if (sphere) bits.push({ k: "sphere", v: sphere });
-  else if (matchesCustomRole(job.title, p.customRole)) bits.push({ k: "role", v: p.customRole! });
+  else if (matchesCustomRole(job.title, roleText(p))) bits.push({ k: "role", v: p.customRole ?? roleText(p)! });
   const industry = p.industries.find((i) => job.tags.includes(i));
   if (industry) bits.push({ k: "industry", v: industry });
-  else if (customIndustryBonus(job, p.customIndustry) > 0) bits.push({ k: "industry", v: p.customIndustry! });
+  else if (customIndustryBonus(job, industryText(p)) > 0) bits.push({ k: "industry", v: p.customIndustry ?? industryText(p)! });
   if (job.remote && remoteOnly(p.remoteMode)) bits.push({ k: "remote" });
   if (p.salaryMin && job.salaryMin && job.salaryMin >= p.salaryMin) bits.push({ k: "salary" });
   if (bits.length === 0) bits.push({ k: "title" });

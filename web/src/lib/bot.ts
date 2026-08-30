@@ -10,7 +10,7 @@ import { CvError, extractCvText } from "./cv";
 import { parseProfile } from "./parse";
 import { t as say, tf, timeNow, timeSet } from "./bot-copy";
 import { parseModes, serializeModes, toggleMode, type Locale } from "./vocab";
-import { persistCountry } from "@/lib/profile-country";
+import { persistDerived } from "@/lib/profile-country";
 import { timezoneFor } from "./geo";
 import { isKnownZone, timezoneFromCity, zoneForHour, zoneName } from "./tz";
 import { formatWhen, nextDelivery } from "./digest-time";
@@ -447,7 +447,7 @@ async function finishOnboarding(
     serializeModes(parseModes(draft.remoteMode)) || "remote_only", draft.location ?? null,
     draft.salaryMin, draft.salaryCurrency, draft.wishes?.trim() || null);
 
-  await persistCountry(userId, draft.location ?? null);
+  await persistDerived(userId, env.ANTHROPIC_API_KEY ?? null);
 
   await run("DELETE FROM bot_state WHERE chat_id=?", String(chatId));
 
@@ -556,7 +556,7 @@ async function commitField(
   const upd = profileUpdateFor(step, draft);
   if (upd) {
     await run(`UPDATE profiles SET ${upd.set}, updated_at=datetime('now') WHERE user_id=?`, ...upd.params, userId);
-    if (step === "where" || step === "city") await persistCountry(userId, draft.location ?? null);
+    if (step === "where" || step === "city") await persistDerived(userId, env.ANTHROPIC_API_KEY ?? null);
   }
   // Не прощаємось: люди правлять кілька пунктів поспіль, тож той самий якір
   // одразу повертається в меню — з підсумком, уже зі свіжим полем.
@@ -895,7 +895,7 @@ export async function handleDocument(
       parsed.customRole, parsed.customIndustry, parsed.customSeniority,
       parsed.cvHighlights, parsed.leftover);
 
-    await persistCountry(userId, parsed.location);
+    await persistDerived(userId, env.ANTHROPIC_API_KEY ?? null);
 
     await run("DELETE FROM bot_state WHERE chat_id=?", String(chatId));
       await send(env, chatId, `${say("cvDone", locale)}\n\n${summary({
