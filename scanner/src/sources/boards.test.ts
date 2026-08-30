@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest";
-import { cleanUrl, parseBoardTitle } from "./boards.js";
+import { describe, expect, it, vi, afterEach } from "vitest";
+import { cleanUrl, fetchBoard, parseBoardTitle } from "./boards.js";
+
+afterEach(() => vi.restoreAllMocks());
 
 describe("parseBoardTitle", () => {
   // Справжні заголовки з DOU, узяті зі стрічки під час розвідки.
@@ -101,5 +103,35 @@ describe("захист від чужої стрічки", () => {
     const t0 = Date.now();
     parseTitleGuard(`Роль в Компанія, ${evil}`);
     expect(Date.now() - t0).toBeLessThan(200);
+  });
+});
+
+describe("fetchBoard", () => {
+  const FEED = `<rss><channel>
+    <item><title>QA Engineer в SoftServe, Львів</title>
+          <link>https://dou.ua/vacancies/1/</link><pubDate>Mon, 25 Aug 2026 10:00:00 +0300</pubDate></item>
+  </channel></rss>`;
+
+  const serve = () =>
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(FEED, { status: 200, headers: { "content-type": "application/xml" } }) as Response);
+
+  it("ставить країну дошки кожній вакансії", async () => {
+    serve();
+    const jobs = await fetchBoard(
+      { name: "board:ua-dou", label: "DOU", country: "UA", feedUrl: "https://dou.ua/f", kind: "rss" });
+    expect(jobs[0]!.country).toBe("UA");
+  });
+
+  /**
+   * Зірочка — домовленість адмінки: «стрічка є, країни немає». Порожня країна
+   * у вакансії означає «видно всім». Якби зірочка доїхала до бази як є, такі
+   * вакансії не побачив би НІХТО: жодна людина не має країни «*».
+   */
+  it("глобальна стрічка лишає країну порожньою, а не зірочкою", async () => {
+    serve();
+    const jobs = await fetchBoard(
+      { name: "board:global-remoteok", label: "RemoteOK", country: "*", feedUrl: "https://remoteok.com/f", kind: "rss" });
+    expect(jobs[0]!.country).toBeNull();
   });
 });

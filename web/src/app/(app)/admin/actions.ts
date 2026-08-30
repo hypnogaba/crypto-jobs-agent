@@ -4,6 +4,9 @@ import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { all, one, run } from "@/lib/db";
+import { safeJobUrl } from "@/lib/safe-url";
+import { INTAKE_LIMIT, atsApi, atsInPage, boardName, classify, countJobs, feedInPage,
+         labelOf, tidy, type Provider } from "@/lib/source-link";
 
 /** Перевірка джерела живцем — не чекаючи ранкового прогону. */
 export async function checkSource(formData: FormData): Promise<void> {
@@ -302,5 +305,185 @@ export async function toggleBoardGroup(formData: FormData): Promise<void> {
             ) THEN 0 ELSE 1 END
       WHERE country=?1 AND (label=?2 OR label LIKE ?2 || ' · %')`,
     country, board);
+  revalidatePath("/admin");
+}
+
+// ── джерела зі вставленого посилання ─────────────────────────
+
+/** Один запит із коротким терпінням: мертвий хост не має тримати всю форму. */
+async function probe(url: string): Promise<{ ok: boolean; body: string; note: string }> {
+  // Той самий захист, що й на редиректах: адресу вставляє людина, а йде за
+  // нею наш Worker зсередини мережі Cloudflare.
+  const safe = safeJobUrl(url);
+  if (!safe) return { ok: false, body: "", note: "адреса не https або веде на локальний хост" };
+  try {
+    const res = await fetch(safe, {
+      signal: AbortSignal.timeout(8000),
+      headers: {
+        Accept: "application/json, application/rss+xml, application/xml, text/html",
+        // Без пізнаваного клієнта частина дошок віддає 403, і живе джерело
+        // виглядало б мертвим.
+        "User-Agent": "NextRoleBot/1.0 (+https://nextrole.info)",
+      },
+    });
+    if (!res.ok) return { ok: false, body: "", note: `HTTP ${res.status}` };
+    return { ok: true, body: (await res.text()).slice(0, 500_000), note: "" };
+  } catch (e) {
+    return { ok: false, body: "", note: e instanceof Error ? e.message.slice(0, 120) : "не відповідає" };
+  }
+}
+
+async function record(url: string, verdict: string, kind: string | null,
+                      target: string | null, note: string, found: number): Promise<void> {
+  await run(
+    "INSERT INTO source_intake (id,url,verdict,kind,target,note,found) VALUES (?,?,?,?,?,?,?)",
+    crypto.randomUUID(), url.slice(0, 500), verdict, kind, target, note.slice(0, 300), found);
+}
+
+/** Компанія на ATS: перевіряємо її відкритий API тим самим викликом, що й сканер. */
+async function takeAts(provider: Provider, slug: string, from: string): Promise<void> {
+  const dup = await one<{ slug: string }>("SELECT slug FROM companies WHERE slug=?", slug);
+  if (dup) { await record(from, "duplicate", "ats", slug, `${provider} вже у списку`, 0); return; }
+
+  const r = await probe(atsApi(provider, slug));
+  const n = r.ok ? countJobs(r.body) : 0;
+  if (n === 0) {
+    await record(from, r.ok ? "empty" : "unreachable", "ats", slug,
+      r.ok ? `${provider}/${slug} відповів, але вакансій нуль` : `${provider}: ${r.note}`, 0);
+    return;
+  }
+  await run(
+    `INSERT INTO companies (slug,name,ats_provider,ats_slug,tags,discovered_via,added_at)
+     VALUES (?,?,?,?,'[]','link',datetime('now'))
+     ON CONFLICT(slug) DO UPDATE SET ats_provider=excluded.ats_provider, ats_slug=excluded.ats_slug`,
+    slug, slug, provider, slug);
+  await record(from, "added", "ats", slug, `${provider} · ${n} вакансій зараз`, n);
+}
+
+/** Стрічка: назву й країну беремо з неї самої, щоб не питати їх окремо. */
+async function takeFeed(feedUrl: string, country: string, host: string, from: string): Promise<void> {
+  const dup = await one<{ name: string }>("SELECT name FROM country_boards WHERE feed_url=?", feedUrl);
+  if (dup) { await record(from, "duplicate", "board", dup.name, "ця стрічка вже читається", 0); return; }
+
+  const r = await probe(feedUrl);
+  const n = r.ok ? countJobs(r.body) : 0;
+  if (n === 0) {
+    await record(from, r.ok ? "empty" : "unreachable", "board", null,
+      r.ok ? "стрічка відкрилась, але вакансій у ній нуль" : r.note, 0);
+    return;
+  }
+  const label = labelOf(feedUrl, host);
+  const name = boardName(country, label);
+
+  // Ім'я стає відоме лише тут, після запиту: воно збирається з країни й
+  // рубрики. `ON CONFLICT DO NOTHING` мовчки не вставив би нічого, а журнал
+  // сказав би «додано» — тому питаємо ще раз саме про ім'я.
+  const taken = await one<{ feed_url: string }>(
+    "SELECT feed_url FROM country_boards WHERE name=?", name);
+  if (taken) {
+    await record(from, "duplicate", "board", name,
+      `${label} вже є в списку (${taken.feed_url})`, n);
+    return;
+  }
+
+  await run(
+    `INSERT INTO country_boards (id,country,name,label,feed_url,kind)
+     VALUES (?,?,?,?,?,'rss') ON CONFLICT(name) DO NOTHING`,
+    crypto.randomUUID(), country, name, label, feedUrl);
+  await record(from, "added", "board", name,
+    `${label} · ${country === "*" ? "глобальна" : country} · ${n} вакансій зараз`, n);
+}
+
+/**
+ * Одне посилання → джерело в базі.
+ *
+ * Порядок навмисний: спершу дешеве (чи не додано вже), потім один запит, і
+ * лише тоді запис. Джерело, додане без перевірки, живе в списку тижнями й
+ * мовчки нічого не дає — саме так у нас з'явилось півтори тисячі мертвих
+ * рядків. Тому те, що не віддало жодної вакансії, у базу не потрапляє; але,
+ * на відміну від старої форми, тепер про це лишається слід із причиною.
+ */
+async function intake(url: string): Promise<void> {
+  const g = classify(url);
+  if (!g) { await record(url, "unknown", null, null, "не схоже на адресу", 0); return; }
+
+  if (g.kind === "ats" && g.provider && g.slug) return takeAts(g.provider, g.slug, g.url);
+  if (g.kind === "feed") return takeFeed(g.url, g.country, g.host, g.url);
+
+  // Звичайна сторінка. Відкриваємо один раз і читаємо, що вона про себе
+  // каже: посилання на свій ATS або оголошену в <head> стрічку. Глибше не
+  // йдемо — обхід сайту з адмінки перетворився б на павука.
+  const r = await probe(g.url);
+  if (!r.ok) { await record(g.url, "unreachable", null, null, r.note, 0); return; }
+
+  const ats = atsInPage(r.body);
+  if (ats) return takeAts(ats.provider, ats.slug, g.url);
+
+  const feed = feedInPage(r.body, g.url);
+  if (feed) return takeFeed(feed, g.country, g.host, g.url);
+
+  await record(g.url, "unknown", null, null,
+    "сторінка відкрилась, але ні ATS, ні стрічки в ній не оголошено", 0);
+}
+
+/**
+ * Вставлені посилання. Одне на рядок або просто через пробіл: люди копіюють
+ * як вийде, і розділяти це має програма, а не людина.
+ */
+export async function addSources(formData: FormData): Promise<void> {
+  await requireAdmin();
+  const raw = String(formData.get("links") ?? "");
+  const urls = [...new Set(
+    raw.split(/[\s,;]+/).map((x) => tidy(x)).filter((x): x is string => Boolean(x)))]
+    .slice(0, INTAKE_LIMIT);
+
+  for (const u of urls) await intake(u);
+  revalidatePath("/admin");
+}
+
+/** Прибрати рядок із журналу — розібрався й не хочеш його більше бачити. */
+export async function forgetIntake(formData: FormData): Promise<void> {
+  await requireAdmin();
+  await run("DELETE FROM source_intake WHERE id=?", String(formData.get("id") ?? ""));
+  revalidatePath("/admin");
+}
+
+/**
+ * Підтягнути ніки тих, хто прив'язав Telegram до появи цього поля.
+ *
+ * Нові беруться самі з кожного оновлення у вебхуку. Але шестеро перших
+ * писали боту раніше, і для них у базі порожньо, поки вони не напишуть ще
+ * раз, — а саме їх власник і хоче впізнати сьогодні. `getChat` віддає нік
+ * за chat_id, і це рівно один запит на людину.
+ */
+export async function refreshTelegramNames(): Promise<void> {
+  await requireAdmin();
+  const { env } = getCloudflareContext();
+  const token = (env as unknown as Record<string, string | undefined>).TELEGRAM_BOT_TOKEN;
+  if (!token) return;
+
+  // Ліміт підзапитів Worker'а той самий, що й у прийманні посилань.
+  const rows = await all<{ id: string; telegram_chat_id: string }>(
+    `SELECT id, telegram_chat_id FROM users
+      WHERE telegram_chat_id IS NOT NULL AND telegram_username IS NULL AND telegram_name IS NULL
+      LIMIT 20`);
+
+  for (const u of rows) {
+    try {
+      const res = await fetch(`https://api.telegram.org/bot${token}/getChat`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(8000),
+        body: JSON.stringify({ chat_id: u.telegram_chat_id }),
+      });
+      const body = await res.json() as { ok?: boolean;
+        result?: { username?: string; first_name?: string; last_name?: string } };
+      if (!body.ok || !body.result) continue;
+      const name = [body.result.first_name, body.result.last_name].filter(Boolean).join(" ") || null;
+      await run("UPDATE users SET telegram_username=?, telegram_name=? WHERE id=?",
+        body.result.username ?? null, name, u.id);
+    } catch {
+      // Людина могла заблокувати бота — це не привід валити всю кнопку.
+    }
+  }
   revalidatePath("/admin");
 }
