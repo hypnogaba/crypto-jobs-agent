@@ -12,6 +12,7 @@
  */
 import { loadConfig } from "./config.js";
 import { D1Client } from "./d1.js";
+import { affected, notifyOwner } from "./notify.js";
 import { explainWithClaude, hasSearchSignal, matchPercent, meaningfulRoleWords, pickTop, roleText, roleWords,
          type CandidateJob, type Profile } from "./match.js";
 import { asLocale, formatWhen, matchLine, nextDelivery, salaryLine, say, thin, type Locale } from "./digest-copy.js";
@@ -444,7 +445,7 @@ export async function localizeJobs(jobs: DigestJob[], locale: Locale, ctx: RunCo
   const tr = await translateJobs(
     jobs.map((j) => ({ id: j.id, title: j.title, summary: j.summary ?? null })),
     locale, ctx.cfg.anthropicApiKey, d1Store(ctx.d1),
-    { onUsage: (u) => logUsage(ctx.d1, "translate", u) });
+    { onUsage: (u) => { if (!u.ok) ctx.modelFails++; return logUsage(ctx.d1, "translate", u); } });
   return applyTranslations(jobs, tr);
 }
 
@@ -572,6 +573,8 @@ export interface RunContext {
   force: boolean;
   requested: Set<string>;
   delivered: number;
+  /** Скільки викликів моделі впало за прогін. Ключ скінчився — це видно тут. */
+  modelFails: number;
 }
 
 /** Закрити всі відкриті запити «ще» цієї людини. */
@@ -994,7 +997,7 @@ export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
   }
 
   const why = await explainWithClaude(top, profile, cfg.anthropicApiKey, undefined,
-    (u) => logUsage(d1, "match_reason", u), locale);
+    (u) => { if (!u.ok) ctx.modelFails++; return logUsage(d1, "match_reason", u); }, locale);
   const digestId = crypto.randomUUID();
 
   // Вилка з повного тексту — лише для тих, у кого її ще немає: повний текст
@@ -1116,17 +1119,40 @@ async function main(): Promise<void> {
   const users = await d1.query<UserRow>(
     `SELECT ${PROFILE_COLUMNS} WHERE ${where.join(" AND ")}`, params);
 
-  const ctx: RunContext = { d1, cfg, now, botToken, force, requested, delivered: 0 };
+  const ctx: RunContext = { d1, cfg, now, botToken, force, requested, delivered: 0, modelFails: 0 };
+  const broke: string[] = [];
   for (const u of users) {
     // Одна людина не має права зупинити решту: збій — у журнал і далі.
     try {
       await deliverTo(u, ctx);
     } catch (e) {
-      console.log(`  ${u.id.slice(0, 8)}: збій, пропускаю — ${describeError(e)}`);
+      const why = describeError(e);
+      console.log(`  ${u.id.slice(0, 8)}: збій, пропускаю — ${why}`);
+      broke.push(`${u.id.slice(0, 8)}: ${why}`);
     }
   }
 
   console.log(`Добірка: оброблено ${users.length} профілів, доставлено ${ctx.delivered}.`);
+
+  // Досі все це лишалось у журналі на сервері. На шести тестових акаунтах
+  // цього досить — власник і так дивиться. На ста живих людях мовчазний збій
+  // означає сто людей без добірки й нікого, хто про це знає: скаржиться
+  // одиниця, решта просто йде.
+  if (broke.length > 0) {
+    await notifyOwner(
+      `NextRole: добірка впала в ${affected(broke.length, users.length)} людей.\n\n`
+      + `${broke.slice(0, 8).join("\n")}`
+      + (broke.length > 8 ? `\n…та ще ${broke.length - 8}` : ""));
+  }
+
+  // Тихе псування, найгірший рід збою: усе «працює», але рядок «чому ти
+  // підходиш» у всіх раптом шаблонний, бо скінчився ключ або гроші.
+  if (ctx.modelFails > 0) {
+    await notifyOwner(
+      `NextRole: модель не відповіла ${ctx.modelFails} раз(и) за прогін.\n\n`
+      + `Добірки пішли, але пояснення в них шаблонні, а описи вакансій — мовою оригіналу.\n`
+      + `Найчастіша причина — ключ Anthropic або ліміт витрат.`);
+  }
 }
 
 if (process.argv[1]?.endsWith("digest.js")) await main();

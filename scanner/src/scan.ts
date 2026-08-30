@@ -9,6 +9,7 @@ import type { RawJob, SourceResult } from "./types.js";
 import { fetchBoard } from "./sources/boards.js";
 import { fetchGetro } from "./sources/getro.js";
 import { mapLimit, runSource } from "./http.js";
+import { notifyOwner } from "./notify.js";
 
 /**
  * Колекції Getro, підтверджені живими.
@@ -247,6 +248,7 @@ async function main(): Promise<void> {
     await repo.finishRun(runId, {
       distinctCompanies: 0, jobsFound: 0, ladderReached: "none", status: "failed", notes: msg });
     console.error(`Прогін ${runId.slice(0, 8)} впав: ${msg}`);
+    await notifyOwner(`NextRole: скан упав.\n\n${msg}\n\nЯкщо це повториться завтра — кеш почне старіти, і добірки поменшають.`);
     process.exitCode = 1;
   }
 }

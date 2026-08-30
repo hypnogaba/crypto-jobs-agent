@@ -2,6 +2,7 @@ import { loadConfig } from "./config.js";
 import { D1Client } from "./d1.js";
 import { Repo } from "./repo.js";
 import { spawnSync } from "node:child_process";
+import { notifyOwner } from "./notify.js";
 
 export interface RunSummary { id: string; distinctCompanies: number; status: string }
 export interface Verdict { rerun: boolean; reason: string }
@@ -43,8 +44,15 @@ async function main(): Promise<void> {
   const rerun = spawnSync(process.execPath, ["dist/scan.js"], { stdio: "inherit", env: process.env });
   if (rerun.status !== 0) {
     console.error(`Повторний скан завершився зі статусом ${rerun.status}`);
+    // Тут кінець лінії: watchdog — остання перевірка дня, і якщо навіть його
+    // повторний скан не вдався, більше нічого не спрацює саме собою.
+    await notifyOwner(
+      `NextRole: день без вакансій.\n\n${verdict.reason}.\nПовторний скан теж упав (код ${rerun.status}).\n\n`
+      + `Добірки сьогодні або не підуть, або підуть зі старого кеша.`);
     process.exitCode = 1;
+    return;
   }
+  await notifyOwner(`NextRole: watchdog рятував день.\n\n${verdict.reason}.\nПовторний скан пройшов, кеш поповнено.`);
 }
 
 if (process.argv[1]?.endsWith("watchdog.js")) await main();
