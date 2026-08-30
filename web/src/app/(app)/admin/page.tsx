@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import Nav from "@/app/nav";
 import { detectLocale } from "@/app/actions";
-import { addCompany, reviveSource, replyToFeedback, dismissFeedback, purgeNeverWorked, recheckSome, applyProposal, dismissProposal, applyAllProposals, addBoard, toggleBoard, toggleBoardGroup, addSources, forgetIntake, refreshTelegramNames } from "./actions";
+import { addCompany, reviveSource, replyToFeedback, dismissFeedback, purgeNeverWorked, recheckSome, applyProposal, dismissProposal, applyAllProposals, addBoard, toggleBoard, toggleBoardGroup, addSources, forgetIntake, retryIntake, refreshTelegramNames } from "./actions";
 import { currentUser } from "@/lib/auth";
 import { all, one } from "@/lib/db";
 import { RELEASES } from "@/lib/releases";
@@ -98,6 +98,83 @@ function Person({ nick, name, id }: { nick: string | null; name: string | null; 
   return <span className="mono text-xs" style={{ color: "var(--muted)" }} title={id ?? undefined}>
     {id ? id.slice(0, 8) : "без акаунту"}
   </span>;
+}
+
+/**
+ * Один розділ таблиці джерел.
+ *
+ * Винесено в компонент, бо розділів два — загальні й регіональні, — і вони
+ * мусять виглядати однаково: різниця між ними в тому, КОМУ видно вакансію,
+ * а не в тому, як її показувати власникові.
+ */
+function FeedTable({ rows, title }: {
+  rows: Array<{ source: string; label: string; family: string; country: string | null;
+                jobs: number; fresh: number; status: string | null; parts: number }>;
+  title: string;
+}) {
+  if (rows.length === 0) return null;
+  const total = rows.reduce((s, r) => s + r.jobs, 0);
+  return (
+    <div className="mt-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-3">
+        <h4 className="eyebrow">{title} · {rows.length}</h4>
+        <span className="mono text-xs" style={{ color: "var(--muted)" }}>
+          {num(total)} вакансій
+        </span>
+      </div>
+      <div className="mt-2 overflow-x-auto">
+        <table className="board">
+          <thead>
+            <tr><th>джерело</th><th>рід</th><th>кому</th><th>стан</th>
+                <th className="num">у кеші</th><th className="num">за 3 дні</th></tr>
+          </thead>
+          <tbody>
+            {rows.map((f) => {
+              const st = f.status === "off"
+                ? { tag: "tag-flat", text: "вимкнено" }
+                : f.status && f.status in STATE
+                  ? STATE[f.status as keyof typeof STATE]
+                  : null;
+              // Порожнє джерело — не «свіжих нуль», а «не дало нічого взагалі».
+              // Це різні хвороби, і без окремого кольору такий рядок губиться
+              // серед просто несвіжих.
+              const colour = f.jobs === 0 ? "var(--bad)"
+                           : f.fresh > 0 ? "var(--ok)" : "var(--warn)";
+              return (
+                <tr key={`${f.family}-${f.country}-${f.label}`} className="stripe"
+                    style={{ "--c": colour } as React.CSSProperties}>
+                  <td className="mono text-xs" title={f.source}>
+                    {f.label}
+                    {f.parts > 1 && (
+                      <span style={{ color: "var(--muted)" }}> · {f.parts} рубрик</span>
+                    )}
+                  </td>
+                  <td className="text-xs" style={{ color: "var(--muted)" }}>
+                    {FAMILY_WORD[f.family] ?? f.family}
+                  </td>
+                  <td className="mono text-xs" style={{ color: "var(--muted)" }}>
+                    {f.country && f.country !== "*" ? f.country : "всім"}
+                  </td>
+                  <td className="text-xs">
+                    {st ? <span className={`tag ${st.tag}`}>{st.text}</span>
+                        : <span className="tag tag-flat">не міряли</span>}
+                  </td>
+                  <td className="num text-xs"
+                      style={{ color: f.jobs === 0 ? "var(--bad)" : undefined }}>
+                    {f.jobs === 0 ? "нуль" : num(f.jobs)}
+                  </td>
+                  <td className="num text-xs"
+                      style={{ color: f.fresh > 0 ? undefined : "var(--muted)" }}>
+                    {f.fresh || "—"}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 }
 
 function Tile({ n, label, accent = false }: { n: number | string; label: string; accent?: boolean }) {
@@ -396,6 +473,45 @@ export default async function Admin() {
 
      ORDER BY jobs DESC`);
 
+  /**
+   * Рубрики однієї дошки — це одна дошка.
+   *
+   * DOU займав двадцять чотири рядки з двадцяти дев'яти: «DOU · Java»,
+   * «DOU · DevOps», «DOU · HR». За фактом це одне джерело з рубриками, і в
+   * такому вигляді таблиця відповідала на питання «скільки в нас стрічок»,
+   * а не «звідки ми беремо дані». Групуємо за тим самим правилом, що й блок
+   * «Національні дошки» нижче: усе до « · » — назва дошки.
+   */
+  const grouped = [...feeds.reduce((acc, f) => {
+    const brand = f.family === "board" ? f.label.split(" · ")[0]! : f.label;
+    const key = `${f.family}|${f.country ?? ""}|${brand}`;
+    const g = acc.get(key);
+    if (g) {
+      g.jobs += f.jobs;
+      g.fresh += f.fresh;
+      g.parts += 1;
+      // Дошка жива, якщо жива хоч одна рубрика: «вимкнено» на одній із
+      // двадцяти чотирьох не робить мовчазним усе джерело.
+      if (f.status === "ok") g.status = "ok";
+      else g.status ??= f.status;
+    } else {
+      acc.set(key, { ...f, label: brand, parts: 1 });
+    }
+    return acc;
+  }, new Map<string, typeof feeds[number] & { parts: number }>()).values()]
+    .sort((a, b) => b.jobs - a.jobs);
+
+  /**
+   * Регіональне окремо від загального.
+   *
+   * Це не косметика: від країни залежить, кому вакансія взагалі покажеться
+   * (digest.ts: `country IS NULL OR country = ?`). Одним списком німецька
+   * дошка стоїть поряд із глобальним агрегатором, хоча її 582 вакансії
+   * бачить лише людина з Німеччини, а не всі.
+   */
+  const regional = grouped.filter((f) => f.country && f.country !== "*");
+  const general = grouped.filter((f) => !f.country || f.country === "*");
+
   const intake = await all<{ id: string; url: string; at: string; verdict: string;
     kind: string | null; target: string | null; note: string | null; found: number;
     fix: string | null }>(
@@ -660,17 +776,30 @@ export default async function Admin() {
                               <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                                 <h4 className="font-medium">{r.title}</h4>
                                 {r.kind === "notice" && <span className="tag tag-flat">до відома</span>}
+                                {r.kind === "add_source" && <span className="tag tag-ok">нове джерело</span>}
                               </div>
                               <p className="mt-1 text-sm" style={{ color: "var(--ink-2)" }}>{r.detail}</p>
                               {r.evidence && (
                                 <p className="mono mt-2 text-xs" style={{ color: "var(--muted)" }}>{r.evidence}</p>
+                              )}
+                              {/* Рішення «брати чи ні» приймається очима, а не
+                                  за числом. Без посилання власник мусив би
+                                  копіювати адресу з тексту в браузер. */}
+                              {r.kind === "add_source" && r.target && (
+                                <a href={r.target} target="_blank" rel="noopener noreferrer"
+                                   className="mono mt-2 inline-block text-xs hover:underline"
+                                   style={{ color: "var(--ember)" }}>
+                                  подивитись стрічку ↗
+                                </a>
                               )}
                             </div>
                             <div className="flex gap-2">
                               {r.kind !== "notice" && (
                                 <form action={applyProposal}>
                                   <input type="hidden" name="id" value={r.id} />
-                                  <button className="btn px-3 py-2 text-xs">Застосувати</button>
+                                  <button className="btn px-3 py-2 text-xs">
+                                    {r.kind === "add_source" ? "Додати" : "Застосувати"}
+                                  </button>
                                 </form>
                               )}
                               <form action={dismissProposal}>
@@ -846,66 +975,24 @@ export default async function Admin() {
               })}
             </div>
 
-            {feeds.length > 0 && (
+            {grouped.length > 0 && (
               <div className="card mt-3 px-6 py-5">
                 <div className="flex flex-wrap items-baseline justify-between gap-3">
-                  <h3 className="font-medium">Поіменно · {feeds.length}</h3>
+                  <h3 className="font-medium">Поіменно · {grouped.length}</h3>
                   <span className="mono text-xs"
-                        style={{ color: feeds.some((f) => f.jobs === 0) ? "var(--bad)" : "var(--muted)" }}>
-                    мовчазних: {feeds.filter((f) => f.jobs === 0).length}
+                        style={{ color: grouped.some((f) => f.jobs === 0) ? "var(--bad)" : "var(--muted)" }}>
+                    мовчазних: {grouped.filter((f) => f.jobs === 0).length}
                   </span>
                 </div>
                 <p className="mt-1 max-w-prose text-sm" style={{ color: "var(--ink-2)" }}>
-                  Усе, звідки ми тягнемо дані, одним списком. Дошки — всі, і ті, що не дали
-                  жодного рядка, теж: мовчазну дошку не видно більше ніде. Компанії на ATS
-                  згорнуті по провайдеру — їх понад дві тисячі, поіменно це довідник, а не панель.
+                  Усе, звідки ми тягнемо дані. Рубрики однієї дошки згорнуті в неї саму —
+                  «DOU · Java» і «DOU · HR» це один DOU. Компанії на ATS згорнуті по
+                  провайдеру. Джерело, що не дало жодного рядка, лишається у списку: мовчазну
+                  дошку не видно більше ніде.
                 </p>
-                <div className="mt-3 overflow-x-auto">
-                  <table className="board">
-                    <thead>
-                      <tr><th>джерело</th><th>рід</th><th>кому</th><th>стан</th>
-                          <th className="num">у кеші</th><th className="num">за 3 дні</th></tr>
-                    </thead>
-                    <tbody>
-                      {feeds.map((f) => {
-                        const st = f.status === "off"
-                          ? { tag: "tag-flat", text: "вимкнено" }
-                          : f.status && f.status in STATE
-                            ? STATE[f.status as keyof typeof STATE]
-                            : null;
-                        // Порожнє джерело — не «свіжих нуль», а «не дало нічого
-                        // взагалі». Це різні хвороби, і без окремого кольору
-                        // такий рядок губиться серед просто несвіжих.
-                        const colour = f.jobs === 0 ? "var(--bad)"
-                                     : f.fresh > 0 ? "var(--ok)" : "var(--warn)";
-                        return (
-                          <tr key={f.source} className="stripe"
-                              style={{ "--c": colour } as React.CSSProperties}>
-                            <td className="mono text-xs" title={f.source}>{f.label}</td>
-                            <td className="text-xs" style={{ color: "var(--muted)" }}>
-                              {FAMILY_WORD[f.family] ?? f.family}
-                            </td>
-                            <td className="mono text-xs" style={{ color: "var(--muted)" }}>
-                              {f.country === "*" ? "всім" : f.country ?? "всім"}
-                            </td>
-                            <td className="text-xs">
-                              {st ? <span className={`tag ${st.tag}`}>{st.text}</span>
-                                  : <span className="tag tag-flat">не міряли</span>}
-                            </td>
-                            <td className="num text-xs"
-                                style={{ color: f.jobs === 0 ? "var(--bad)" : undefined }}>
-                              {f.jobs === 0 ? "нуль" : num(f.jobs)}
-                            </td>
-                            <td className="num text-xs"
-                                style={{ color: f.fresh > 0 ? undefined : "var(--muted)" }}>
-                              {f.fresh || "—"}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+
+                <FeedTable rows={general} title="Загальні — бачать усі" />
+                <FeedTable rows={regional} title="Регіональні — бачить лише своя країна" />
               </div>
             )}
 
@@ -968,6 +1055,16 @@ export default async function Admin() {
 
             {intake.length > 0 && (
               <div className="ruled card mt-3">
+                <div className="px-6 pb-1 pt-5">
+                  <h3 className="font-medium">Що сталось із вставленими посиланнями</h3>
+                  <p className="mt-1 max-w-prose text-sm" style={{ color: "var(--ink-2)" }}>
+                    Кожна спроба лишає слід — і вдала, і ні. Це єдине місце, де видно, ЧОМУ
+                    посилання не прийнялось: раніше воно просто мовчки не додавалось. Рядок,
+                    що не вдався, можна перевірити ще раз — половина відмов тимчасова
+                    (дошка віддала 403 під навантаженням, стрічка була порожня між
+                    публікаціями). Розібрався — прибери, список не мусить рости вічно.
+                  </p>
+                </div>
                 {intake.map((x) => {
                   const v = VERDICT[x.verdict] ?? { tag: "tag-flat", text: x.verdict };
                   return (
@@ -978,8 +1075,18 @@ export default async function Admin() {
                         </span>
                         <span className={`tag ${v.tag}`}>{v.text}</span>
                         <span className="mono min-w-0 flex-1 truncate text-xs" title={x.url}>{x.url}</span>
+                        {/* Повторювати вдалу спробу нема сенсу: джерело вже
+                            в базі, і друга спроба дасть лише «вже було». */}
+                        {x.verdict !== "added" && (
+                          <form action={retryIntake}>
+                            <button className="mono text-xs hover:underline" style={{ color: "var(--ember)" }}>
+                              спробувати ще
+                            </button>
+                            <input type="hidden" name="id" value={x.id} />
+                          </form>
+                        )}
                         <form action={forgetIntake}>
-                          <button className="mono text-xs hover:underline" style={{ color: "var(--ember)" }}>
+                          <button className="mono text-xs hover:underline" style={{ color: "var(--muted)" }}>
                             прибрати
                           </button>
                           <input type="hidden" name="id" value={x.id} />

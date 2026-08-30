@@ -1,0 +1,11 @@
+[Unit]
+Description=NextRole — розвідка джерел щонеділі
+
+[Timer]
+# Після самоперегляду (06:00): обидва пишуть у proposals, і власник читає
+# їх за один захід у понеділок.
+OnCalendar=Sun *-*-* 07:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

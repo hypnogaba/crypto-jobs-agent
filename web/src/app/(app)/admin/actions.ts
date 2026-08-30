@@ -203,6 +203,20 @@ async function execute(kind: string, target: string | null): Promise<void> {
   } else if (kind === "drop_dry_companies") {
     const limit = Number.parseInt(target ?? "30", 10) || 30;
     await run("DELETE FROM companies WHERE dry_scans >= ?", limit);
+  } else if (kind === "add_source" && target) {
+    /**
+     * Джерело, знайдене щотижневою розвідкою по твіттеру.
+     *
+     * Навмисно проходить через той самий `intake`, що й вставлене руками
+     * посилання, а не пише в `country_boards` напряму. Розвідка перевіряла
+     * стрічку у себе, але між тією перевіркою і цим натиском минув тиждень:
+     * дошка могла лягти, закритись за 403 чи спорожніти. Перевірка тут — це
+     * не дублювання, це різні моменти часу.
+     *
+     * Побічно це лишає рядок у `source_intake`, тож у журналі видно, що саме
+     * сталось після натиску, — а не тільки те, що пропозицію закрито.
+     */
+    await intake(target);
   }
   // notice виконувати нічого — його лише закривають
 }
@@ -543,6 +557,29 @@ export async function addSources(formData: FormData): Promise<void> {
     .slice(0, INTAKE_LIMIT);
 
   for (const u of urls) await intake(u);
+  refresh();
+}
+
+/**
+ * Спробувати те саме посилання ще раз.
+ *
+ * Журнал досі лише розповідав, що сталось, і єдиною дією було «прибрати».
+ * Але половина невдач тимчасова: дошка віддала 403 під навантаженням,
+ * стрічка була порожня між публікаціями. Щоб перевірити ще раз, доводилось
+ * копіювати адресу назад у форму — тобто журнал показував проблему й не
+ * давав нічого з нею зробити.
+ *
+ * Стара спроба видаляється: два рядки про одну адресу — це не історія, а
+ * шум. Лишається останній вирок, який і є відповіддю на питання «то що з
+ * цим посиланням?».
+ */
+export async function retryIntake(formData: FormData): Promise<void> {
+  await requireAdmin();
+  const id = String(formData.get("id") ?? "");
+  const row = await one<{ url: string }>("SELECT url FROM source_intake WHERE id=?", id);
+  if (!row) return;
+  await run("DELETE FROM source_intake WHERE id=?", id);
+  await intake(row.url);
   refresh();
 }
 

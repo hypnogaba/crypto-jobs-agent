@@ -1,0 +1,16 @@
+[Unit]
+Description=NextRole — щотижнева розвідка джерел по твіттеру
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/nextrole-scanner
+EnvironmentFile=/etc/nextrole-scanner.env
+ExecStart=/usr/bin/node dist/discover-twitter.js
+StandardOutput=journal
+StandardError=journal
+# Збір іде послідовно з паузою в 4 с на запит — інакше API віддає порожньо
+# і ми приймаємо ліміт частоти за «нічого не знайшлось». 31 запит ≈ 3 хв,
+# перевірка кандидатів стрічками ще стільки ж.
+TimeoutStartSec=2700
