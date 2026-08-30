@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { isLocale } from "@/lib/i18n";
+import { localeForSegment } from "@/lib/seo";
 import type { Locale } from "@/lib/vocab";
 
 /**
@@ -14,6 +14,10 @@ export async function localeParam(
   params: Promise<{ locale: string }>,
 ): Promise<Locale> {
   const { locale } = await params;
-  if (!isLocale(locale) || locale === "en") notFound();
-  return locale;
+  // Тут саме ВІДРІЗОК адреси, а не код мови: українська живе на /ua, а
+  // зветься uk. Приймати обидва не можна — дві адреси на одну сторінку самі
+  // собі дублікат у пошуку, і canonical показував би на іншу з них.
+  const l = localeForSegment(locale);
+  if (!l || l === "en") notFound();
+  return l;
 }

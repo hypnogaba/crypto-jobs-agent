@@ -67,6 +67,21 @@ const nextConfig: NextConfig = {
    * працює на повну: жодних плагінів, фреймів, чужих form-action і base.
    * Наступний крок — nonce через proxy.ts і прибрати 'unsafe-inline'.
    */
+  /**
+   * Стара адреса української версії.
+   *
+   * Мова в адресі жила під `/uk` — код мови, — а людині всюди підписана «UA».
+   * Адреси вже віддані в sitemap і встигли потрапити в обхід, тож просто
+   * перейменувати означало б лишити по собі 404 там, де пошук уже щось знає.
+   * 301 переносить і вагу сторінки, і людину зі збереженого посилання.
+   */
+  redirects() {
+    return [
+      { source: "/uk", destination: "/ua", permanent: true },
+      { source: "/uk/:path*", destination: "/ua/:path*", permanent: true },
+    ];
+  },
+
   headers() {
     const csp = [
       "default-src 'self'",

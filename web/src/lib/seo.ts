@@ -30,7 +30,7 @@ export type PublicPath = (typeof PUBLIC_PATHS)[number];
 /**
  * Мови, які мають власну адресу.
  *
- * Англійська лежить у корені (`/faq`), решта — з префіксом (`/uk/faq`).
+ * Англійська лежить у корені (`/faq`), решта — з префіксом (`/ua/faq`).
  * Англійська без префікса тому, що ці адреси вже в індексі, і переїзд на
  * `/en/faq` коштував би 301 на кожній та просідання видачі ні за що.
  *
@@ -40,13 +40,39 @@ export type PublicPath = (typeof PUBLIC_PATHS)[number];
  */
 export const URL_LOCALES: readonly Locale[] = ["en", "uk", "fr", "ru"];
 
+/**
+ * Відрізок адреси для мови — і чому він не завжди дорівнює коду мови.
+ *
+ * Українська має код `uk` (ISO 639-1) і адресу `/ua`. Розбіжність навмисна й
+ * лежить рівно на межі двох різних читачів:
+ *
+ *   • людина. Перемикач у шапці підписаний «UA», бот приймає `/lang ua` —
+ *     і саме `ua` вона бачить на кожній українській вивісці в мережі. `/uk`
+ *     читається як Великобританія, тобто адреса казала протилежне до змісту.
+ *   • пошук. hreflang і <html lang> лишаються `uk`: там потрібен код МОВИ, а
+ *     `ua` — це код країни, і Google такий hreflang просто відкидає.
+ *
+ * Тому мапа одна й тут: скрізь у коді мова зветься `uk`, а `ua` існує лише як
+ * відрізок адреси, і перетворення живе в pathFor() та localeForSegment().
+ */
+const URL_SEGMENTS: Partial<Record<Locale, string>> = { uk: "ua" };
+
+/** Відрізок адреси для мови. */
+export const segmentFor = (locale: Locale): string => URL_SEGMENTS[locale] ?? locale;
+
+/** Мова за відрізком адреси, або нічого, якщо такого відрізка в нас немає. */
+export function localeForSegment(segment: string): Locale | null {
+  return URL_LOCALES.find((l) => segmentFor(l) === segment) ?? null;
+}
+
 /** Мови з префіксом — усе, крім англійської. Це і є набір для [locale]. */
 export const PREFIXED_LOCALES = URL_LOCALES.filter((l) => l !== "en");
 
 /** Адреса сторінки в конкретній мові. Англійська — без префікса. */
 export function pathFor(locale: Locale, path: PublicPath): string {
   if (locale === "en") return path;
-  return path === "/" ? `/${locale}` : `/${locale}${path}`;
+  const seg = segmentFor(locale);
+  return path === "/" ? `/${seg}` : `/${seg}${path}`;
 }
 
 /**
@@ -246,7 +272,7 @@ export function breadcrumbLd(locale: Locale, name: string, path: PublicPath) {
     "@type": "BreadcrumbList",
     itemListElement: [
       // Крихта веде на головну тією ж мовою, що й сама сторінка: посилання
-      // з /uk/faq на англійську головну — це обірваний ланцюжок.
+      // з /ua/faq на англійську головну — це обірваний ланцюжок.
       { "@type": "ListItem", position: 1, name: "NextRole", item: home === "/" ? SITE : `${SITE}${home}` },
       { "@type": "ListItem", position: 2, name, item: `${SITE}${pathFor(locale, path)}` },
     ],
