@@ -52,6 +52,30 @@ export class Repo {
     return rows.map((r) => ({ id: r.collection_id, tags: parseTags(r.tags) }));
   }
 
+  /**
+   * Записати знайдену розвідкою колекцію.
+   *
+   * INSERT OR IGNORE, і це не дрібниця. У таблиці вже є рядки, вимкнені
+   * руками: власник подивився на колекцію й вирішив її не читати. Звичайний
+   * upsert повертав би їх до життя щотижня, і рішення людини скасовувала б
+   * розвідка. Тому наявний рядок не чіпаємо взагалі — ні мітку, ні enabled.
+   *
+   * Нове йде ВИМКНЕНИМ. Живих колекцій сотні, а двадцять у щоденному скані
+   * коштують кілька хвилин; увімкнути всі означало б розтягнути скан на
+   * години. Розвідка тут не для щоденного читання, а для збору компаній:
+   * 80% вакансій колекції ведуть прямо в ATS, і далі ті компанії обходить
+   * R1 сам. Що вмикати — рішення людини в панелі, і тепер у неї є назва,
+   * за якою це рішення можна ухвалити.
+   */
+  async rememberGetroCollection(
+    collectionId: number, label: string | null, url: string | null,
+  ): Promise<void> {
+    await this.d1.execute(
+      `INSERT OR IGNORE INTO getro_collections (id, collection_id, label, url, enabled)
+       VALUES (?, ?, ?, ?, 0)`,
+      [`getro-${collectionId}`, collectionId, label ?? `Колекція ${collectionId}`, url]);
+  }
+
   // ── вакансії ───────────────────────────────────────────────
   async upsertJobs(jobs: NormalizedJob[]): Promise<void> {
     if (jobs.length === 0) return;

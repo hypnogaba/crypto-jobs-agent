@@ -52,3 +52,42 @@ describe("startRun", () => {
     expect(execute.mock.calls[0]![0]).toMatch(/INSERT OR IGNORE INTO scan_runs/);
   });
 });
+
+describe("rememberGetroCollection", () => {
+  /**
+   * Найважливіше тут — не перезаписати. У таблиці лежать колекції, вимкнені
+   * руками: людина подивилась і вирішила їх не читати. Розвідка ходить
+   * щотижня й побачить їх знову — звичайний upsert повертав би їх до життя,
+   * і рішення людини скасовувалось би саме собою.
+   */
+  it("не чіпає наявний рядок — ні мітку, ні enabled", async () => {
+    const execute = vi.fn().mockResolvedValue(undefined);
+    const repo = new Repo({ execute } as never);
+    await repo.rememberGetroCollection(858, "Solana Network Opportunities", "https://jobs.solana.com");
+
+    const [sql] = execute.mock.calls[0]! as [string, unknown[]];
+    expect(sql).toMatch(/INSERT OR IGNORE/);
+    expect(sql).not.toMatch(/ON CONFLICT/);
+    expect(sql).not.toMatch(/UPDATE/);
+  });
+
+  it("нова колекція записується вимкненою", async () => {
+    const execute = vi.fn().mockResolvedValue(undefined);
+    const repo = new Repo({ execute } as never);
+    await repo.rememberGetroCollection(619, "Basis Set", null);
+
+    const [sql, params] = execute.mock.calls[0]! as [string, unknown[]];
+    // Живих колекцій сотні; увімкнути всі означало б розтягнути щоденний
+    // скан на години. Вмикає людина, і тепер вона бачить назву.
+    expect(sql).toMatch(/enabled\)\s*\n?\s*VALUES \(\?, \?, \?, \?, 0\)/);
+    expect(params).toEqual(["getro-619", 619, "Basis Set", null]);
+  });
+
+  it("без назви лишає впізнаваний підпис, а не порожнечу", async () => {
+    const execute = vi.fn().mockResolvedValue(undefined);
+    const repo = new Repo({ execute } as never);
+    await repo.rememberGetroCollection(321, null, null);
+    const [, params] = execute.mock.calls[0]! as [string, unknown[]];
+    expect(params[2]).toBe("Колекція 321");
+  });
+});

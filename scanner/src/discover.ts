@@ -9,7 +9,7 @@ import { loadConfig } from "./config.js";
 import { D1Client } from "./d1.js";
 import { Repo } from "./repo.js";
 import { discoverGetroCollections, harvestAtsFromJobs } from "./rungs.js";
-import { fetchGetro } from "./sources/getro.js";
+import { fetchCollectionMeta, fetchGetro } from "./sources/getro.js";
 import { mapLimit } from "./http.js";
 
 async function main(): Promise<void> {
@@ -29,6 +29,9 @@ async function main(): Promise<void> {
   console.log(`Живих колекцій: ${live.length} → ${live.join(", ")}`);
 
   let added = 0;
+  let remembered = 0;
+  const yields: Array<{ id: number; name: string; jobs: number; companies: number }> = [];
+
   await mapLimit(live, 4, async (id) => {
     try {
       const jobs = await fetchGetro(id, { retries: 0 }, 2);
@@ -40,16 +43,34 @@ async function main(): Promise<void> {
         });
         added++;
       }
+
+      // Досі саме тут знайдене й губилось: компанії лишались, а список живих
+      // колекцій розвідка друкувала в журнал і забувала. Через це в базі
+      // тримався той самий десяток рядків, а кожен наступний тиждень
+      // відкривав ті самі колекції заново.
+      const meta = await fetchCollectionMeta(id, { retries: 1 });
+      await repo.rememberGetroCollection(id, meta.name, meta.url);
+      remembered++;
+
       const niches = [...new Set(companies.flatMap((c) => c.tags))];
-      console.log(`  колекція ${id}: ${jobs.length} вакансій → ${companies.length} компаній` +
+      yields.push({ id, name: meta.name ?? `Колекція ${id}`, jobs: jobs.length, companies: companies.length });
+      console.log(`  ${id} ${meta.name ?? "(без назви)"}: ${jobs.length} вакансій → ${companies.length} компаній` +
                   (niches.length ? ` · ${niches.join(", ")}` : ""));
     } catch (e) {
       console.log(`  колекція ${id}: помилка — ${e instanceof Error ? e.message : e}`);
     }
   });
 
+  // Найврожайніші — щоб було видно, які колекції варто увімкнути руками.
+  const top = [...yields].sort((a, b) => b.companies - a.companies).slice(0, 15);
+  if (top.length) {
+    console.log(`\nНайбільше компаній дали:`);
+    for (const t of top) console.log(`  ${String(t.companies).padStart(3)} компаній · ${t.id} ${t.name}`);
+  }
+
   const all = await repo.listCompanies();
-  console.log(`\nДодано записів компаній: ${added}. Усього в списку: ${all.length}.`);
+  console.log(`\nДодано записів компаній: ${added}. Записано колекцій: ${remembered}. ` +
+              `Усього компаній у списку: ${all.length}.`);
 }
 
 await main();

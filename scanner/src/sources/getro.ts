@@ -93,6 +93,35 @@ export async function fetchGetro(collectionId: number, o: FetchOptions = {}, pag
   return jobs;
 }
 
+/**
+ * Опис колекції — те, що бачить людина на самому борді.
+ *
+ * `858` це «Solana Network Opportunities», `390` — «Multicoin Capital»,
+ * `619` — «Basis Set». Без цього в базі й у панелі лишаються голі номери, і
+ * власник не може вирішити, яку колекцію вмикати: між «390» і «Multicoin
+ * Capital» різниця саме в тому, чи можна тут щось вирішити.
+ *
+ * Один запит на колекцію, і лише під час розвідки — у щоденному скані назва
+ * вже лежить у базі. Не відповіли або відповіли не тим — повертаємо null,
+ * і колекція просто лишається без мітки. Розвідка через це не падає.
+ */
+export interface CollectionMeta { name: string | null; url: string | null }
+
+export async function fetchCollectionMeta(
+  collectionId: number, o: FetchOptions = {},
+): Promise<CollectionMeta> {
+  try {
+    const p = await fetchJson<{ data?: { attributes?: { name?: unknown; domain?: unknown } } }>(
+      `https://api.getro.com/api/v2/collections/${collectionId}`, {}, o);
+    const a = p.data?.attributes;
+    const name = typeof a?.name === "string" ? a.name.replace(/\s+/g, " ").trim() : "";
+    const domain = typeof a?.domain === "string" ? a.domain.trim() : "";
+    return { name: name ? name.slice(0, 120) : null, url: domain ? `https://${domain}` : null };
+  } catch {
+    return { name: null, url: null };
+  }
+}
+
 /** Витягує ATS-слаг із посилання на вакансію — так росте список компаній. */
 const ATS_PATTERNS: Array<[string, RegExp]> = [
   ["greenhouse", /(?:boards|job-boards)\.greenhouse\.io\/([a-z0-9_-]+)/i],
