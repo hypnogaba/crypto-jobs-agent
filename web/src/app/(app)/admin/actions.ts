@@ -17,7 +17,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { all, one, run } from "@/lib/db";
 import { safeJobUrl } from "@/lib/safe-url";
 import { INTAKE_LIMIT, atsApi, atsListInPage, boardName, classify, countJobs, diagnose,
-         diagnoseHttp, feedInPage, getroIdInPage, jobPostingCount, labelOf, tidy,
+         diagnoseHttp, feedInPage, getroIdInPage, jobPostingCount, labelOf, nextPayloadJobs, tidy,
          type Provider } from "@/lib/source-link";
 
 /** Перевірка джерела живцем — не чекаючи ранкового прогону. */
@@ -427,6 +427,27 @@ async function takeFeed(feedUrl: string, country: string, host: string, from: st
 }
 
 /**
+ * Сторінка, яку сканер уміє прочитати сам, — розміткою або потоком.
+ *
+ * Обидва види лягають у ту саму таблицю дошок і різняться лише `kind`:
+ * сканеру достатньо цього, щоб знати, як її читати.
+ */
+async function takePage(g: { url: string; host: string; country: string },
+                        kind: "jsonld" | "nextjs", found: number, note: string): Promise<void> {
+  const label = labelOf(g.url, g.host);
+  const name = boardName(g.country, label);
+  const dup = await one<{ id: string }>(
+    "SELECT id FROM country_boards WHERE feed_url=? OR name=?", g.url, name);
+  if (dup) { await record(g.url, "duplicate", kind, name, "ця дошка вже читається", found); return; }
+
+  await run(
+    `INSERT INTO country_boards (id,country,name,label,feed_url,kind)
+     VALUES (?,?,?,?,?,?) ON CONFLICT(name) DO NOTHING`,
+    crypto.randomUUID(), g.country, name, label, g.url, kind);
+  await record(g.url, "added", kind, name, `${label} · ${note}`, found);
+}
+
+/**
  * Одне посилання → джерело в базі.
  *
  * Порядок навмисний: спершу дешеве (чи не додано вже), потім один запит, і
@@ -522,24 +543,19 @@ async function intake(url: string): Promise<void> {
    * Адрес у ній зазвичай немає (перевірено на восьми дошках), тому сканер
    * читає таку дошку двома кроками — див. fetchJsonLd у boards.ts.
    */
+  /**
+   * Записи в потоці Next.js — остання спроба перед тим, як здатись.
+   *
+   * Саме тут ми раніше писали «малюється скриптом» і зупинялись. Дані для
+   * малювання сервер надсилає разом зі сторінкою; сканер уміє їх прочитати.
+   */
+  const inStream = nextPayloadJobs(r.body);
+  if (inStream > 0) return takePage(g, "nextjs", inStream,
+    `потік Next.js · ${inStream} вакансій на сторінці`);
+
   const postings = jobPostingCount(r.body);
-  if (postings > 0) {
-    const label = labelOf(g.url, g.host);
-    const name = boardName(g.country, label);
-    const dup = await one<{ id: string }>(
-      "SELECT id FROM country_boards WHERE feed_url=? OR name=?", g.url, name);
-    if (dup) {
-      await record(g.url, "duplicate", "jsonld", name, "ця дошка вже читається", postings);
-      return;
-    }
-    await run(
-      `INSERT INTO country_boards (id,country,name,label,feed_url,kind)
-       VALUES (?,?,?,?,?,'jsonld') ON CONFLICT(name) DO NOTHING`,
-      crypto.randomUUID(), g.country, name, label, g.url);
-    await record(g.url, "added", "jsonld", name,
-      `${label} · розмітка schema.org · ${postings} вакансій на сторінці`, postings);
-    return;
-  }
+  if (postings > 0) return takePage(g, "jsonld", postings,
+    `розмітка schema.org · ${postings} вакансій на сторінці`);
 
   const d = diagnose(r.body);
   await record(g.url, "unknown", null, null, d.cause, 0, d.fix);
