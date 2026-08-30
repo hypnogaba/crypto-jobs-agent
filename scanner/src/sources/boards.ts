@@ -330,19 +330,28 @@ export function parseJobPostings(html: string, source: string, country: string |
       // JobPosting свого `url` не мав.
       const url = pickUrl(node) ?? pageUrl ?? null;
       const title = str(node.title);
-      if (!url || !title || seen.has(url)) continue;
-      seen.add(url);
+      if (!url || !title) continue;
 
-      const org = node.hiringOrganization;
-      const company = str(typeof org === "object" && org !== null
-        ? (org as Record<string, unknown>).name : org);
+      const org0 = node.hiringOrganization;
+      const company0 = str(typeof org0 === "object" && org0 !== null
+        ? (org0 as Record<string, unknown>).name : org0);
+
+      // Ключ ширший за адресу, і це не дрібниця: у списку адреси ще немає, і
+      // всі вісімнадцять вакансій сторінки мають однакову заглушку. За самою
+      // адресою вони схлопувались би в одну — саме так ми й брали з дошки на
+      // сорок одну тисячу вакансій по одній зі сторінки.
+      const key = `${url}|${title}|${company0}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
       const loc = jobLocation(node);
       out.push({
-        url, company: company || "Unknown company", title,
+        url, company: company0 || "Unknown company", title: decode(decode(title)),
         location: loc,
         remote: isRemote(node, loc),
         postedAt: iso(str(node.datePosted)),
         source, country,
+        ...salaryOf(node),
         description: str(node.description).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() || null,
       });
     }
@@ -398,6 +407,35 @@ function pickUrl(node: Record<string, unknown>): string | null {
   return /^https?:\/\//i.test(id) ? id : null;
 }
 
+/**
+ * Вилка з розмітки.
+ *
+ * Беремо лише річну: погодинна чи місячна поруч із річними читалась би як
+ * помилка — «45» замість «135 000». Те саме правило вже діє на Lever.
+ */
+function salaryOf(node: Record<string, unknown>): {
+  salaryMin?: number; salaryMax?: number; salaryCurrency?: string;
+} {
+  const base = node.baseSalary;
+  if (!base || typeof base !== "object") return {};
+  const b = base as Record<string, unknown>;
+  const v = b.value;
+  if (!v || typeof v !== "object") return {};
+  const q = v as Record<string, unknown>;
+  if (String(q.unitText ?? "").toUpperCase() !== "YEAR") return {};
+
+  const num = (x: unknown): number | undefined =>
+    typeof x === "number" && Number.isFinite(x) && x > 0 ? Math.round(x) : undefined;
+  const min = num(q.minValue) ?? num(q.value);
+  const max = num(q.maxValue);
+  if (min === undefined && max === undefined) return {};
+  return {
+    ...(min !== undefined ? { salaryMin: min } : {}),
+    ...(max !== undefined ? { salaryMax: max } : {}),
+    ...(typeof b.currency === "string" && b.currency ? { salaryCurrency: b.currency } : {}),
+  };
+}
+
 /** Місто зі вкладеної адреси; порожнє краще за «[object Object]». */
 function jobLocation(node: Record<string, unknown>): string | null {
   const first = Array.isArray(node.jobLocation) ? node.jobLocation[0] : node.jobLocation;
@@ -410,10 +448,25 @@ function jobLocation(node: Record<string, unknown>): string | null {
 }
 
 
-/** Скільки сторінок СПИСКУ гортаємо. */
-const JSONLD_LIST_PAGES = 10;
-/** Скільки сторінок ВАКАНСІЙ відкриваємо за прогін на одну дошку. */
-const JSONLD_JOBS = 120;
+/**
+ * Скільки сторінок списку гортаємо, коли розмітка зшивається з посиланнями.
+ *
+ * Сторінка коштує ОДИН запит і дає близько двох десятків вакансій, тож
+ * шістдесят сторінок — це приблизно тисяча вакансій за шістдесят запитів.
+ * Раніше стелею була ціна: кожна вакансія коштувала окрему сторінку, і зі
+ * сорока однієї тисячі ми брали сотню.
+ */
+const JSONLD_LIST_PAGES = 60;
+/** Скільки вакансій беремо з дошки за прогін. */
+const JSONLD_JOBS = 1000;
+
+/**
+ * Скільки сторінок гортаємо, коли зшити не вдалось.
+ *
+ * Тоді кожна вакансія знову коштує окремий запит, і глибина мусить бути
+ * інша: п'ять сторінок — це близько сотні запитів, а не тисячі.
+ */
+const JSONLD_SLOW_PAGES = 5;
 
 /**
  * Дошка, яку читаємо розміткою.
@@ -431,46 +484,124 @@ const JSONLD_JOBS = 120;
  * це щоденний зріз, а не спроба скачати сайт.
  */
 async function fetchJsonLd(board: Board, country: string | null, o: FetchOptions): Promise<RawJob[]> {
-  const first = await fetchXml(board.feedUrl, {}, o);
-
-  // Якщо дошці пощастило мати повну розмітку прямо в списку — на цьому все.
-  const direct = parseJobPostings(first, board.name, country);
-  if (direct.length) return direct;
-
-  const links = new Set(jobLinks(first, board.feedUrl));
-
-  /**
-   * Наступні сторінки. `?page=N` — найпоширеніший вигляд, і спроба безпечна
-   * сама собою: дошка, яка про такий параметр не знає, віддасть ту саму
-   * першу сторінку, нових посилань не буде, і цикл спиниться після одного
-   * зайвого запиту.
-   */
-  for (let n = 2; n <= JSONLD_LIST_PAGES && links.size < JSONLD_JOBS; n++) {
-    let next: string;
-    try {
-      const u = new URL(board.feedUrl);
-      u.searchParams.set("page", String(n));
-      next = u.toString();
-    } catch { break; }
-
-    let more: string[];
-    try { more = jobLinks(await fetchXml(next, {}, o), board.feedUrl); }
-    catch { break; }
-
-    const before = links.size;
-    for (const l of more) links.add(l);
-    if (links.size === before) break;   // та сама сторінка — гортати нікуди
-  }
-
   const out: RawJob[] = [];
-  await mapLimit([...links].slice(0, JSONLD_JOBS), 4, async (u) => {
+  const seen = new Set<string>();
+
+  let budget = JSONLD_LIST_PAGES;
+  for (let page = 1; page <= budget && seen.size < JSONLD_JOBS; page++) {
+    let url = board.feedUrl;
+    if (page > 1) {
+      try {
+        const u = new URL(board.feedUrl);
+        u.searchParams.set("page", String(page));
+        url = u.toString();
+      } catch { break; }
+    }
+
+    let html: string;
+    try { html = await fetchXml(url, {}, o); } catch { break; }
+
+    const { jobs: batch, stitched } = await jobsFromListing(html, board, country, o);
+    // Дошка, яку не вдалось зшити, коштує запит на кожну вакансію — глибше
+    // за п'ять сторінок такої ціни ми не платимо.
+    if (!stitched) budget = Math.min(budget, JSONLD_SLOW_PAGES);
+    const before = seen.size;
+    for (const j of batch) {
+      if (seen.has(j.url)) continue;
+      seen.add(j.url);
+      out.push(j);
+    }
+    // Сторінка не додала нічого нового: або список скінчився, або дошка не
+    // знає параметра `page` й віддала ту саму. Розрізняти нема потреби.
+    if (seen.size === before) break;
+  }
+  return out.slice(0, JSONLD_JOBS);
+}
+
+/**
+ * Вакансії з однієї сторінки списку.
+ *
+ * Спершу пробуємо зшити розмітку з посиланнями просто тут, БЕЗ жодного
+ * додаткового запиту. Це можливо тому, що адреса вакансії складається з її ж
+ * назви та компанії: «Investment Analyst» у «Kakao Ventures» лежить за
+ * `/investment-analyst-kakao-ventures/153281`. Тобто розмітка й посилання
+ * описують те саме різними словами, і зіставити їх можна за слагом.
+ *
+ * Різниця в ціні величезна: сторінка коштує ОДИН запит замість вісімнадцяти.
+ * Саме через ці вісімнадцять ми брали з дошки на сорок одну тисячу вакансій
+ * заледве сотню.
+ *
+ * Якщо зшити не вдалось — падаємо на старий шлях і відкриваємо сторінки
+ * вакансій поодинці. Він повільний, але працює там, де назва в адресі не
+ * повторює назву вакансії.
+ */
+async function jobsFromListing(html: string, board: Board, country: string | null,
+                               o: FetchOptions): Promise<{ jobs: RawJob[]; stitched: boolean }> {
+  // Дошці могло пощастити мати повну розмітку з адресами.
+  const complete = parseJobPostings(html, board.name, country);
+  if (complete.length) return { jobs: complete, stitched: true };
+
+  const links = jobLinks(html, board.feedUrl);
+  const stitched = stitchBySlug(parseJobPostings(html, board.name, country, PLACEHOLDER), links);
+  if (stitched.length) return { jobs: stitched, stitched: true };
+
+  const jobs: RawJob[] = [];
+  await mapLimit(links, 4, async (u) => {
     try {
       const job = parseJobPostings(await fetchXml(u, {}, o), board.name, country, u)[0];
-      if (job) out.push(job);
+      if (job) jobs.push(job);
     } catch {
-      // Одна сторінка зі ста двадцяти не вирок дошці.
+      // Одна сторінка зі списку не вирок дошці.
     }
   });
+  return { jobs, stitched: false };
+}
+
+/**
+ * Адреса-заглушка для розбору списку.
+ *
+ * `parseJobPostings` навмисно викидає вакансію без адреси — людину нікуди
+ * вести. Але тут адреса ще попереду, тож підставляємо позначку, яку зараз же
+ * замінимо справжньою.
+ */
+const PLACEHOLDER = "https://nextrole.invalid/unmatched";
+
+/** Слаг так, як його робить сама дошка в адресі. */
+function slugify(text: string): string {
+  return decode(decode(text)).toLowerCase()
+    .replace(/[\u2019'`]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+/**
+ * Зшиває розмітку з посиланнями за слагом.
+ *
+ * Правило вимагає збігу И назви, И компанії: сама назва не годиться, бо
+ * «Founding Engineer» буває у двох компаній одразу, і ми б дали людині
+ * посилання не на ту вакансію. Компанія в адресі пишеться без дефісів
+ * («ondofinance»), тому порівнюємо, прибравши їх з обох боків.
+ *
+ * Неоднозначний збіг відкидаємо мовчки: краще не взяти вакансію, ніж
+ * повести людину до чужої.
+ */
+function stitchBySlug(postings: RawJob[], links: string[]): RawJob[] {
+  if (postings.length === 0 || links.length === 0) return [];
+  const paths = links.map((l) => {
+    let seg = "";
+    try { seg = new URL(l).pathname.split("/").filter(Boolean)[0] ?? ""; } catch { /* лишиться порожнім */ }
+    return { url: l, seg, flat: seg.replace(/-/g, "") };
+  });
+
+  const out: RawJob[] = [];
+  for (const j of postings) {
+    const title = slugify(j.title);
+    const company = slugify(j.company).replace(/-/g, "");
+    if (!title || !company) continue;
+    const hit = paths.filter((p) => p.seg.startsWith(title) && p.flat.includes(company));
+    if (hit.length !== 1) continue;
+    out.push({ ...j, url: hit[0]!.url });
+  }
   return out;
 }
 
