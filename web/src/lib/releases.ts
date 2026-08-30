@@ -13,6 +13,10 @@ export const RELEASES: Release[] = [
     "date": "2026-08-30",
     "changes": [
       {
+        "hash": "142c4e8",
+        "subject": "Розвідка мусить питати сторінку, а не лише вгадувати адресу"
+      },
+      {
         "hash": "8814396",
         "subject": "web3.career: 115 вакансій → 874, і сторінка коштує один запит замість вісімнадцяти"
       },
@@ -649,4 +653,4 @@ export const RELEASES: Release[] = [
   }
 ];
 
-export const GENERATED_AT = "2026-08-30 14:08";
+export const GENERATED_AT = "2026-08-30 14:12";
