@@ -6,6 +6,7 @@ import { currentUser } from "@/lib/auth";
 import { all, one } from "@/lib/db";
 import { RELEASES } from "@/lib/releases";
 import { INTAKE_LIMIT } from "@/lib/source-link";
+import { SubmitButton } from "./submit";
 
 /**
  * Панель власника.
@@ -518,9 +519,9 @@ export default async function Admin() {
                  lede="Де вони застрягли. Кожен щабель, який людина не пройшла, — це наша недоробка, а не її неуважність."
                  right={nameless > 0 ? (
                    <form action={refreshTelegramNames}>
-                     <button className="btn btn-quiet px-3 py-2 text-xs">
+                     <SubmitButton busy="Питаю Telegram…" className="btn btn-quiet px-3 py-2 text-xs">
                        Підтягнути ніки · {nameless}
-                     </button>
+                     </SubmitButton>
                    </form>
                  ) : undefined}>
             <div className="grid gap-6 lg:grid-cols-[minmax(0,22rem)_1fr]">
@@ -847,7 +848,7 @@ export default async function Admin() {
                         className="field mono w-full text-xs"
                         placeholder={"https://boards.greenhouse.io/deepl\nhttps://dou.ua/vacancies/feeds/?category=Python"} />
               <div className="flex flex-wrap items-center gap-3">
-                <button className="btn px-4 py-2 text-sm">Додати</button>
+                <SubmitButton busy="Перевіряю…">Додати</SubmitButton>
                 <p className="text-xs" style={{ color: "var(--muted)" }}>
                   Не більше {INTAKE_LIMIT} за раз. Кожне перевіряємо до запису: адреса, що не
                   віддає жодної вакансії, у базу не потрапляє — але внизу буде видно чому.

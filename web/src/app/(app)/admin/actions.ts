@@ -1,6 +1,17 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+/**
+ * `refresh`, а не `revalidatePath`.
+ *
+ * У Next 16 це дві різні речі, і ми довго тиснули не ту. `revalidatePath`
+ * чистить КЕШ маршруту; сторінка адмінки динамічна (`ƒ` у збірці), кешу в неї
+ * немає взагалі, тож виклик чистив порожнє місце. Роутер на клієнті лишався
+ * зі старим RSC — і кнопка виглядала мертвою, хоча дія в базі відпрацювала.
+ *
+ * Це стосувалось УСІХ кнопок панелі, а не лише приймання посилань; на ньому
+ * просто стало видно, бо саме воно мало щось домалювати.
+ */
+import { refresh } from "next/cache";
 import { requireAdmin } from "@/lib/auth";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { all, one, run } from "@/lib/db";
@@ -31,7 +42,7 @@ export async function checkSource(formData: FormData): Promise<void> {
     await run("UPDATE sources_state SET status='degraded', last_error=?, checked_at=datetime('now') WHERE source_name=?",
       (e instanceof Error ? e.message : String(e)).slice(0, 200), source);
   }
-  revalidatePath("/admin");
+  refresh();
 }
 
 /** Воскресити джерело, яке позначили мертвим помилково. */
@@ -39,7 +50,7 @@ export async function reviveSource(formData: FormData): Promise<void> {
   await requireAdmin();
   await run("UPDATE sources_state SET status='ok', consecutive_fail_days=0, last_error=NULL WHERE source_name=?",
     String(formData.get("source") ?? ""));
-  revalidatePath("/admin");
+  refresh();
 }
 
 /** Ключ доступу. Вставив токен — джерело оживає без деплою. */
@@ -56,7 +67,7 @@ export async function saveSourceKey(formData: FormData): Promise<void> {
        ON CONFLICT(source_name) DO UPDATE SET key_value=excluded.key_value, updated_at=datetime('now')`,
       source, value);
   }
-  revalidatePath("/admin");
+  refresh();
 }
 
 /** Додати компанію вручну в постійний список. */
@@ -71,7 +82,7 @@ export async function addCompany(formData: FormData): Promise<void> {
      VALUES (?,?,?,?,'[]','manual',datetime('now'))
      ON CONFLICT(slug) DO UPDATE SET name=excluded.name, ats_provider=excluded.ats_provider`,
     slug, name, provider, slug);
-  revalidatePath("/admin");
+  refresh();
 }
 
 /**
@@ -108,7 +119,7 @@ export async function replyToFeedback(formData: FormData): Promise<void> {
   // Позначаємо розібраним у будь-якому разі: якщо контакту немає, власник
   // усе одно прочитав і вирішив.
   await run("UPDATE site_feedback SET handled_at=datetime('now') WHERE id=?", id);
-  revalidatePath("/admin");
+  refresh();
 }
 
 /** Прочитано й нічого відповідати. */
@@ -117,7 +128,7 @@ export async function dismissFeedback(formData: FormData): Promise<void> {
   const id = String(formData.get("id") ?? "");
   if (!id) return;
   await run("UPDATE site_feedback SET handled_at=datetime('now') WHERE id=?", id);
-  revalidatePath("/admin");
+  refresh();
 }
 
 /**
@@ -132,7 +143,7 @@ export async function purgeNeverWorked(): Promise<void> {
   await run(
     `UPDATE sources_state SET status='deprecated'
       WHERE status<>'ok' AND status<>'deprecated' AND last_ok_at IS NULL`);
-  revalidatePath("/admin");
+  refresh();
 }
 
 /**
@@ -170,7 +181,7 @@ export async function recheckSome(formData: FormData): Promise<void> {
       // мережа підвела — лишаємо як було, це не вирок джерелу
     }
   }
-  revalidatePath("/admin");
+  refresh();
 }
 
 /**
@@ -215,7 +226,7 @@ export async function applyProposal(formData: FormData): Promise<void> {
   // notice виконувати нічого — його лише закривають
 
   await run("UPDATE proposals SET status='applied', resolved_at=datetime('now') WHERE id=?", id);
-  revalidatePath("/admin");
+  refresh();
 }
 
 export async function dismissProposal(formData: FormData): Promise<void> {
@@ -223,7 +234,7 @@ export async function dismissProposal(formData: FormData): Promise<void> {
   const id = String(formData.get("id") ?? "");
   if (!id) return;
   await run("UPDATE proposals SET status='dismissed', resolved_at=datetime('now') WHERE id=?", id);
-  revalidatePath("/admin");
+  refresh();
 }
 
 /** «Застосувати все» для одного рівня важливості — щоб не тиснути тридцять разів. */
@@ -240,7 +251,7 @@ export async function applyAllProposals(formData: FormData): Promise<void> {
     await execute(r.kind, r.target);
     await run("UPDATE proposals SET status='applied', resolved_at=datetime('now') WHERE id=?", r.id);
   }
-  revalidatePath("/admin");
+  refresh();
 }
 
 // ── національні дошки ────────────────────────────────────────
@@ -272,7 +283,7 @@ export async function addBoard(formData: FormData): Promise<void> {
     `INSERT INTO country_boards (id,country,name,label,feed_url,kind)
      VALUES (?,?,?,?,?,'rss') ON CONFLICT(name) DO NOTHING`,
     crypto.randomUUID(), country, `board:${country.toLowerCase()}-${slug}`, label, url);
-  revalidatePath("/admin");
+  refresh();
 }
 
 /** Вимкнути або ввімкнути дошку, не втрачаючи її адреси. */
@@ -280,7 +291,7 @@ export async function toggleBoard(formData: FormData): Promise<void> {
   await requireAdmin();
   await run("UPDATE country_boards SET enabled = 1 - enabled WHERE id=?",
     String(formData.get("id") ?? ""));
-  revalidatePath("/admin");
+  refresh();
 }
 
 /**
@@ -305,7 +316,7 @@ export async function toggleBoardGroup(formData: FormData): Promise<void> {
             ) THEN 0 ELSE 1 END
       WHERE country=?1 AND (label=?2 OR label LIKE ?2 || ' · %')`,
     country, board);
-  revalidatePath("/admin");
+  refresh();
 }
 
 // ── джерела зі вставленого посилання ─────────────────────────
@@ -477,14 +488,14 @@ export async function addSources(formData: FormData): Promise<void> {
     .slice(0, INTAKE_LIMIT);
 
   for (const u of urls) await intake(u);
-  revalidatePath("/admin");
+  refresh();
 }
 
 /** Прибрати рядок із журналу — розібрався й не хочеш його більше бачити. */
 export async function forgetIntake(formData: FormData): Promise<void> {
   await requireAdmin();
   await run("DELETE FROM source_intake WHERE id=?", String(formData.get("id") ?? ""));
-  revalidatePath("/admin");
+  refresh();
 }
 
 /**
@@ -524,5 +535,5 @@ export async function refreshTelegramNames(): Promise<void> {
       // Людина могла заблокувати бота — це не привід валити всю кнопку.
     }
   }
-  revalidatePath("/admin");
+  refresh();
 }
