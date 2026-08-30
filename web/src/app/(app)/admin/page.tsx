@@ -1,10 +1,11 @@
 import { redirect } from "next/navigation";
 import Nav from "@/app/nav";
 import { detectLocale } from "@/app/actions";
-import { addCompany, reviveSource, replyToFeedback, dismissFeedback, purgeNeverWorked, recheckSome, applyProposal, dismissProposal, applyAllProposals, addBoard, toggleBoard, toggleBoardGroup } from "./actions";
+import { addCompany, reviveSource, replyToFeedback, dismissFeedback, purgeNeverWorked, recheckSome, applyProposal, dismissProposal, applyAllProposals, addBoard, toggleBoard, toggleBoardGroup, addSources, forgetIntake, refreshTelegramNames } from "./actions";
 import { currentUser } from "@/lib/auth";
 import { all, one } from "@/lib/db";
 import { RELEASES } from "@/lib/releases";
+import { INTAKE_LIMIT } from "@/lib/source-link";
 
 /**
  * Панель власника.
@@ -25,6 +26,29 @@ const STATE = {
   degraded:   { tag: "tag-warn", c: "var(--warn)", text: "збоїть" },
   deprecated: { tag: "tag-bad",  c: "var(--bad)",  text: "мертве" },
 } as const;
+
+/**
+ * Роди джерел. Порядок — від того, що дає найбільше нового, до довідника.
+ *
+ * Агрегатори — єдине джерело НЕВІДОМИХ компаній; ATS — найбільший обсяг, але
+ * лише від тих, кого ми вже знаємо; дошка країни — єдине місце, де вакансія
+ * взагалі існує.
+ */
+const FAMILIES = [
+  { key: "ats", label: "компанії на ATS", note: "прямо з дошки роботодавця — найточніше, що є" },
+  { key: "aggregator", label: "агрегатори", note: "єдине джерело компаній, яких ми ще не знаємо" },
+  { key: "board", label: "національні дошки", note: "вакансія, якої більше ніде немає" },
+  { key: "getro", label: "колекції Getro", note: "списки портфельних компаній фондів" },
+] as const;
+
+/** Чим скінчилась спроба додати посилання. */
+const VERDICT: Record<string, { tag: string; text: string }> = {
+  added:       { tag: "tag-ok",   text: "додано" },
+  duplicate:   { tag: "tag-flat", text: "вже було" },
+  empty:       { tag: "tag-warn", text: "порожньо" },
+  unreachable: { tag: "tag-bad",  text: "не відповіло" },
+  unknown:     { tag: "tag-bad",  text: "не розпізнано" },
+};
 
 const DAYS = 14;
 /** Скільки змін показуємо в дні одразу; решта — під «ще N». */
@@ -47,6 +71,27 @@ function Block({ id, title, lede, right, children }: {
       <div className="mt-3">{children}</div>
     </section>
   );
+}
+
+/**
+ * Як звати людину.
+ *
+ * Нік — головне: за ним її можна знайти в Telegram і написати. Ніка може не
+ * бути (його вмикають у налаштуваннях, і багато хто цього не робив) — тоді
+ * ім'я. Немає й імені — лишається ідентифікатор, але вже як останній засіб,
+ * а не як єдиний варіант.
+ */
+function Person({ nick, name, id }: { nick: string | null; name: string | null; id: string | null }) {
+  if (nick) {
+    return (
+      <a href={`https://t.me/${nick}`} target="_blank" rel="noreferrer"
+         className="mono text-xs hover:underline" style={{ color: "var(--ember)" }}>@{nick}</a>
+    );
+  }
+  if (name) return <span className="text-xs" title={id ?? undefined}>{name}</span>;
+  return <span className="mono text-xs" style={{ color: "var(--muted)" }} title={id ?? undefined}>
+    {id ? id.slice(0, 8) : "без акаунту"}
+  </span>;
 }
 
 function Tile({ n, label, accent = false }: { n: number | string; label: string; accent?: boolean }) {
@@ -212,9 +257,14 @@ export default async function Admin() {
       ORDER BY CASE severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, created_at`);
   const bySeverity = (sev: string) => proposals.filter((x) => x.severity === sev);
 
+  // Нік автора приєднуємо тут-таки: відгук «від 06df703e» не давав ні
+  // впізнати людину, ні згадати, про що з нею вже говорили.
   const feedback = await all<{ id: string; user_id: string | null; contact: string | null;
-    locale: string; page: string | null; message: string; created_at: string }>(
-    "SELECT * FROM site_feedback WHERE handled_at IS NULL ORDER BY created_at DESC LIMIT 30");
+    locale: string; page: string | null; message: string; created_at: string;
+    nick: string | null; person: string | null }>(
+    `SELECT f.*, u.telegram_username nick, u.telegram_name person
+       FROM site_feedback f LEFT JOIN users u ON u.id = f.user_id
+      WHERE f.handled_at IS NULL ORDER BY f.created_at DESC LIMIT 30`);
 
   // Витрати в доларах: cost_usd пишеться при кожному виклику за таблицею pricing.ts.
   const spend = await one<{ calls: number; callsWeek: number; usdToday: number; usdWeek: number;
@@ -262,6 +312,51 @@ export default async function Admin() {
     return acc;
   }, new Map<string, { country: string; name: string; rows: typeof boards }>()).values()];
 
+  /**
+   * Звідки насправді приїхали вакансії.
+   *
+   * Досі «джерела» в панелі означали три різні речі в трьох різних місцях:
+   * компанії — в одному блоці, національні дошки — в іншому, а агрегатори й
+   * колекції Getro не показувались ніде, бо живуть у коді сканера. На питання
+   * «звідки ми беремо інфу» відповіді не було взагалі.
+   *
+   * Рахуємо за `jobs_cache.source` — за тим, що справді доїхало, а не за тим,
+   * що налаштоване. Джерело, налаштоване й мовчазне, тут не з'явиться, і це
+   * правильна відповідь: воно нічого нам не дає.
+   */
+  const families = await all<{ family: string; feeds: number; jobs: number;
+    companies: number; fresh: number }>(`
+    SELECT CASE WHEN source LIKE 'aggregator:%' THEN 'aggregator'
+                WHEN source LIKE 'getro:%'      THEN 'getro'
+                WHEN source LIKE 'board:%'      THEN 'board'
+                ELSE 'ats' END family,
+           COUNT(DISTINCT source) feeds, COUNT(*) jobs,
+           COUNT(DISTINCT company_key) companies,
+           SUM(CASE WHEN fetched_at >= datetime('now','-3 day') THEN 1 ELSE 0 END) fresh
+      FROM jobs_cache GROUP BY family ORDER BY jobs DESC`);
+
+  // Поіменно показуємо лише те, що можна назвати вголос: агрегатори й дошки.
+  // ATS-компаній тисяча з гаком — це довідник, а не панель, і в неї є свій
+  // блок нижче.
+  const feeds = await all<{ source: string; jobs: number; fresh: number;
+    status: string | null; last_ok: string | null }>(`
+    SELECT j.source,
+           COUNT(*) jobs,
+           SUM(CASE WHEN j.fetched_at >= datetime('now','-3 day') THEN 1 ELSE 0 END) fresh,
+           s.status, s.last_ok_at last_ok
+      FROM jobs_cache j LEFT JOIN sources_state s ON s.source_name = j.source
+     WHERE j.source LIKE 'aggregator:%' OR j.source LIKE 'board:%'
+     GROUP BY j.source ORDER BY jobs DESC`);
+
+  const intake = await all<{ id: string; url: string; at: string; verdict: string;
+    kind: string | null; target: string | null; note: string | null; found: number }>(
+    "SELECT * FROM source_intake ORDER BY at DESC LIMIT 12");
+
+  // Кнопку «підтягнути ніки» показуємо лише тоді, коли є кого підтягувати.
+  const nameless = (await one<{ n: number }>(
+    `SELECT COUNT(*) n FROM users
+      WHERE telegram_chat_id IS NOT NULL AND telegram_username IS NULL AND telegram_name IS NULL`))?.n ?? 0;
+
   // ── Зростання ───────────────────────────────────────────────────────────
   const scanDays = await all<{ d: string; jobs: number; companies: number }>(
     `SELECT date(started_at) d, MAX(jobs_found) jobs, MAX(distinct_companies) companies
@@ -289,11 +384,14 @@ export default async function Admin() {
            (SELECT COUNT(DISTINCT user_id) FROM feedback) reacted`);
 
   // Пошти тут навмисно немає: панель відкривають на людях і показують з
-  // екрана, а для питання «де застрягли» досить восьми символів ідентифікатора.
+  // екрана. А от нік є: за «06df703e» неможливо ні впізнати людину, ні
+  // написати їй, і саме це власник хоче зробити, дивлячись на цей список.
   const people = await all<{ id: string; created_at: string | null; locale: string; status: string;
     tg: number; country: string | null; spheres: string | null; sent: number;
-    more: number; nope: number; last_seen: string | null }>(`
+    more: number; nope: number; last_seen: string | null;
+    nick: string | null; person: string | null }>(`
     SELECT u.id, u.created_at, u.locale, u.status,
+           u.telegram_username nick, u.telegram_name person,
            CASE WHEN u.telegram_chat_id IS NULL THEN 0 ELSE 1 END tg,
            u.last_interaction_at last_seen,
            p.country, p.spheres,
@@ -417,7 +515,14 @@ export default async function Admin() {
 
         <div className="mt-12 flex flex-col gap-12">
           <Block id="people" title={`Люди · ${funnel?.registered ?? 0}`}
-                 lede="Де вони застрягли. Кожен щабель, який людина не пройшла, — це наша недоробка, а не її неуважність.">
+                 lede="Де вони застрягли. Кожен щабель, який людина не пройшла, — це наша недоробка, а не її неуважність."
+                 right={nameless > 0 ? (
+                   <form action={refreshTelegramNames}>
+                     <button className="btn btn-quiet px-3 py-2 text-xs">
+                       Підтягнути ніки · {nameless}
+                     </button>
+                   </form>
+                 ) : undefined}>
             <div className="grid gap-6 lg:grid-cols-[minmax(0,22rem)_1fr]">
               <Funnel steps={[
                 { label: "Зареєструвались", n: funnel?.registered ?? 0, note: "почали з сайту або з бота" },
@@ -436,7 +541,7 @@ export default async function Admin() {
                     {people.map((x) => (
                       <tr key={x.id} className="stripe"
                           style={{ "--c": x.sent > 0 ? "var(--ok)" : "var(--warn)" } as React.CSSProperties}>
-                        <td className="mono text-xs">{x.id.slice(0, 8)}</td>
+                        <td><Person nick={x.nick} name={x.person} id={x.id} /></td>
                         <td className="mono text-xs" style={{ color: "var(--muted)" }}>
                           {x.created_at?.slice(0, 10) ?? "—"}
                         </td>
@@ -630,7 +735,7 @@ export default async function Admin() {
                         {f.created_at.slice(0, 16).replace("T", " ")}
                       </span>
                       <span className="eyebrow">{f.locale}</span>
-                      <span className="eyebrow">{f.user_id ? f.user_id.slice(0, 8) : "без акаунту"}</span>
+                      <Person nick={f.nick} name={f.person} id={f.user_id} />
                       {f.contact && <span className="mono text-xs">{f.contact}</span>}
                     </div>
                     <p className="mt-2 whitespace-pre-line text-sm" style={{ color: "var(--ink)" }}>
@@ -657,6 +762,123 @@ export default async function Admin() {
               </div>
             </Block>
           )}
+
+          <Block id="sources" title="Джерела"
+                 lede="Звідки взялись вакансії, що лежать у кеші. Рахується за тим, що справді доїхало, а не за тим, що налаштоване: джерело, яке мовчить, тут не з'явиться — і це про нього чесна відповідь.">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {FAMILIES.map((f) => {
+                const row = families.find((x) => x.family === f.key);
+                return (
+                  <div key={f.key} className="card px-5 py-4">
+                    <div className="flex items-baseline justify-between gap-3">
+                      <div className="mono text-2xl leading-none" style={{ color: "var(--ember)" }}>
+                        {num(row?.jobs ?? 0)}
+                      </div>
+                      <div className="mono text-xs" style={{ color: "var(--muted)" }}>
+                        {num(row?.feeds ?? 0)} шт.
+                      </div>
+                    </div>
+                    <div className="eyebrow mt-2">{f.label}</div>
+                    <p className="mt-2 text-xs" style={{ color: "var(--ink-2)" }}>{f.note}</p>
+                    <p className="mono mt-2 text-xs"
+                       style={{ color: (row?.fresh ?? 0) > 0 ? "var(--ok)" : "var(--muted)" }}>
+                      {num(row?.fresh ?? 0)} за 3 дні
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+
+            {feeds.length > 0 && (
+              <details className="card mt-3 px-6 py-5">
+                <summary className="flex cursor-pointer flex-wrap items-baseline justify-between gap-3">
+                  <span className="font-medium">Поіменно: стрічки й дошки · {feeds.length}</span>
+                  <span className="mono text-xs" style={{ color: "var(--ember)" }}>показати</span>
+                </summary>
+                <p className="mt-2 text-sm" style={{ color: "var(--ink-2)" }}>
+                  Компанії на ATS сюди не входять: їх понад тисяча, і це довідник, а не панель.
+                </p>
+                <div className="mt-3 overflow-x-auto">
+                  <table className="board">
+                    <thead>
+                      <tr><th>джерело</th><th>рід</th><th>стан</th>
+                          <th className="num">у кеші</th><th className="num">за 3 дні</th></tr>
+                    </thead>
+                    <tbody>
+                      {feeds.map((f) => {
+                        const board = f.source.startsWith("board:");
+                        const st = f.status && f.status in STATE
+                          ? STATE[f.status as keyof typeof STATE] : null;
+                        return (
+                          <tr key={f.source} className="stripe"
+                              style={{ "--c": f.fresh > 0 ? "var(--ok)" : "var(--warn)" } as React.CSSProperties}>
+                            <td className="mono text-xs">{f.source.replace(/^(aggregator|board):/, "")}</td>
+                            <td className="text-xs" style={{ color: "var(--muted)" }}>
+                              {board ? "дошка" : "агрегатор"}
+                            </td>
+                            <td className="text-xs">
+                              {st ? <span className={`tag ${st.tag}`}>{st.text}</span>
+                                  : <span className="tag tag-flat">не міряли</span>}
+                            </td>
+                            <td className="num text-xs">{num(f.jobs)}</td>
+                            <td className="num text-xs"
+                                style={{ color: f.fresh > 0 ? undefined : "var(--muted)" }}>
+                              {f.fresh || "—"}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            )}
+
+            <form action={addSources} className="card mt-3 flex flex-col gap-3 px-5 py-5">
+              <div>
+                <h3 className="font-medium">Додати джерело посиланням</h3>
+                <p className="mt-1 max-w-prose text-sm" style={{ color: "var(--ink-2)" }}>
+                  Вставляй те, що бачив у браузері: сторінку вакансій компанії, стрічку дошки,
+                  просто «Careers». Рід джерела, назву й країну визначаємо самі. Можна кілька
+                  посилань — по одному на рядок.
+                </p>
+              </div>
+              <textarea name="links" rows={3} required
+                        className="field mono w-full text-xs"
+                        placeholder={"https://boards.greenhouse.io/deepl\nhttps://dou.ua/vacancies/feeds/?category=Python"} />
+              <div className="flex flex-wrap items-center gap-3">
+                <button className="btn px-4 py-2 text-sm">Додати</button>
+                <p className="text-xs" style={{ color: "var(--muted)" }}>
+                  Не більше {INTAKE_LIMIT} за раз. Кожне перевіряємо до запису: адреса, що не
+                  віддає жодної вакансії, у базу не потрапляє — але внизу буде видно чому.
+                </p>
+              </div>
+            </form>
+
+            {intake.length > 0 && (
+              <div className="ruled card mt-3">
+                {intake.map((x) => {
+                  const v = VERDICT[x.verdict] ?? { tag: "tag-flat", text: x.verdict };
+                  return (
+                    <div key={x.id} className="flex flex-wrap items-baseline gap-x-4 gap-y-1 px-6 py-3">
+                      <span className="mono text-xs" style={{ color: "var(--muted)" }}>
+                        {x.at.slice(5, 16).replace("T", " ")}
+                      </span>
+                      <span className={`tag ${v.tag}`}>{v.text}</span>
+                      <span className="mono min-w-0 flex-1 truncate text-xs" title={x.url}>{x.url}</span>
+                      <span className="text-xs" style={{ color: "var(--ink-2)" }}>{x.note}</span>
+                      <form action={forgetIntake}>
+                        <input type="hidden" name="id" value={x.id} />
+                        <button className="mono text-xs hover:underline" style={{ color: "var(--ember)" }}>
+                          прибрати
+                        </button>
+                      </form>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Block>
 
           <Block id="boards" title="Національні дошки"
                  lede="Дошка країни — не агрегатор: вакансія з неї ніде більше не існує. Показується лише людям із тієї ж країни.">

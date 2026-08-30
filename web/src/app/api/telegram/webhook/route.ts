@@ -53,14 +53,39 @@ export async function POST(request: Request): Promise<Response> {
   return NextResponse.json({ ok: true });
 }
 
+/** Те з відправника, що нам потрібне: як його звати. */
+interface Sender { language_code?: string; username?: string; first_name?: string; last_name?: string }
+
+/**
+ * Зберігає нік, лише коли він змінився.
+ *
+ * Людина пише боту десятки разів на день; UPDATE на кожне натискання кнопки
+ * був би записом у базу заради того самого рядка. Умова в WHERE робить це
+ * безкоштовним: збіг — і жоден рядок не чіпається.
+ */
+async function rememberName(chatId: number, from: Sender | undefined): Promise<void> {
+  if (!from) return;
+  const username = from.username ?? null;
+  const name = [from.first_name, from.last_name].filter(Boolean).join(" ") || null;
+  if (!username && !name) return;
+  // Ключ — chat_id, а не id акаунта: людина, що тільки-но створилась у цьому
+  // ж оновленні, рядка ще не мала, коли ми його шукали. Її нік доїде
+  // наступним повідомленням, а не загубиться в гілці «акаунт незнайомий».
+  await run(
+    `UPDATE users SET telegram_username=?, telegram_name=?
+      WHERE telegram_chat_id=? AND (COALESCE(telegram_username,'') <> COALESCE(?,'')
+                                 OR COALESCE(telegram_name,'') <> COALESCE(?,''))`,
+    username, name, String(chatId), username, name);
+}
+
 async function handle(env: Env, raw: unknown): Promise<void> {
   const update = raw as {
     update_id?: number;
     message?: { text?: string; chat?: { id?: number };
                 document?: { file_id?: string; file_name?: string; file_size?: number };
-                from?: { language_code?: string } };
+                from?: Sender };
     callback_query?: { data?: string; message?: { chat?: { id?: number } }; id?: string;
-                       from?: { language_code?: string } };
+                       from?: Sender };
   };
 
   const chatId = update.message?.chat?.id ?? update.callback_query?.message?.chat?.id;
@@ -85,6 +110,11 @@ async function handle(env: Env, raw: unknown): Promise<void> {
   // лише для того, у кого акаунта ще немає.
   const known = await one<{ id: string; locale: string }>(
     "SELECT id,locale FROM users WHERE telegram_chat_id=?", String(chatId));
+
+  // Нік — побіжно, з того самого оновлення. Telegram кладе його в КОЖЕН
+  // апдейт, і ми його весь час викидали: в адмінці людина була вісьмома
+  // символами UUID, за якими нікого не впізнати й нікому не написати.
+  await rememberName(chatId, update.message?.from ?? update.callback_query?.from);
   const langCode = (update.message?.from?.language_code
     ?? update.callback_query?.from?.language_code ?? "en").slice(0, 2).toLowerCase();
   const locale = known && isLocale(known.locale)

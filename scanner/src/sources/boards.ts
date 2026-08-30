@@ -165,6 +165,12 @@ export function cleanUrl(raw: string): string {
  * Країну ставить дошка, а не місто вакансії: оголошення в Лісабоні,
  * опубліковане на українській дошці, адресоване українцям. Країна тут
  * означає «кому це показувати», а не «де стоїть офіс».
+ *
+ * Зірочка — «країни немає». Такою позначається глобальна стрічка, додана з
+ * адмінки вставленим посиланням: сама вона нічим не відрізняється від
+ * національної, але вакансії з неї потрібні всім. NULL у `jobs_cache.country`
+ * і означає «видно всім» (digest.ts: `j.country IS NULL OR j.country = ?`),
+ * тож перекладаємо тут, а не тримаємо ще одну колонку-прапорець.
  */
 export async function fetchBoard(board: Board, o: FetchOptions = {}): Promise<RawJob[]> {
   if (board.kind !== "rss") throw new Error(`формат «${board.kind}» ще не вміємо: ${board.name}`);
@@ -179,7 +185,7 @@ export async function fetchBoard(board: Board, o: FetchOptions = {}): Promise<Ra
       url: cleanUrl(it.link), company: p.company, title: p.title,
       location: p.location, remote: p.remote, postedAt: iso(it.date),
       salaryMin: p.salaryMin, salaryMax: p.salaryMax, salaryCurrency: p.salaryCurrency,
-      source: board.name, country: board.country,
+      source: board.name, country: board.country === "*" ? null : board.country,
     });
   }
   return out;
