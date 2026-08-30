@@ -120,7 +120,19 @@ async function main(): Promise<void> {
       try {
         // Сіємо з агрегаторів, а не з R1: у R1 усі компанії вже наші.
         if (r2Jobs.length === 0) r2Jobs = (await runR2(skip)).jobs;
-        const seedPool = r2Jobs;
+
+        // Вузькі стрічки йдуть першими.
+        //
+        // Зростання перевіряє лише сорок кандидатів за прогін, а бере їх
+        // підряд із купи на тисячу рядків. Купа впорядкована так, як
+        // перелічені агрегатори, тож дизайнерська стрічка стояла б у хвості
+        // й до вгадування ATS не доходила майже ніколи. А саме її компанії
+        // нам і бракує: дизайну в кеші 311 рядків проти 4 674 інженерних.
+        //
+        // Це не фільтр, а порядок: решта купи лишається на місці й добирає
+        // ті ж сорок місць, щойно вузькі стрічки скінчаться.
+        const niche = (j: RawJob): boolean => j.source.startsWith("aggregator:wwr-");
+        const seedPool = [...r2Jobs.filter(niche), ...r2Jobs.filter((j) => !niche(j))];
         const known = await repo.knownCompanyKeys();
         const growth = await runR4(seedPool, known, {
           addCompany: (c) => repo.upsertCompany({

@@ -128,6 +128,55 @@ export async function fetchBreezy(rawSlug: string, name: string, o: FetchOptions
   });
 }
 
+// ── Recruitee ─── європейський ATS, віддає ще й текст оголошення
+/**
+ * Одинадцятий провайдер. Обраний не навмання: серед ATS з відкритим API без
+ * авторизації це єдиний, якого в нас не було, і він сильний саме там, де ми
+ * слабкі — європейські компанії поза колом техстартапів.
+ *
+ * Дає більше за інших: `description` разом зі списком, тобто витяг без
+ * поштучного доганяння — як в Ashby й Lever.
+ *
+ * `country_code` у відповіді Є, але в `country` він НЕ йде. Це поле означає
+ * «показувати лише своїм», і його ставлять національні дошки. Вакансія на
+ * власному сайті роботодавця адресована всім, навіть коли офіс в Амстердамі;
+ * записати туди NL означало б сховати її від кожного, чия країна порожня.
+ */
+export async function fetchRecruitee(rawSlug: string, name: string, o: FetchOptions = {}): Promise<RawJob[]> {
+  const slug = hostSlug(rawSlug, "recruitee");
+  const body = await fetchJson<{ offers?: Array<{
+    title?: string; careers_url?: string; slug?: string; location?: string; city?: string;
+    country_code?: string; remote?: boolean; hybrid?: boolean; on_site?: boolean;
+    published_at?: string; created_at?: string; department?: string | null;
+    employment_type_code?: string | null; description?: string | null; requirements?: string | null;
+    company_name?: string | null; status?: string;
+  }> }>(`https://${slug}.recruitee.com/api/offers/`, {}, o);
+
+  const out: RawJob[] = [];
+  for (const j of body.offers ?? []) {
+    const title = j.title?.trim();
+    // careers_url — сторінка вакансії в роботодавця. Без неї рядок марний:
+    // посилання і є тим, заради чого людина відкриває добірку.
+    const url = j.careers_url ?? (j.slug ? `https://${slug}.recruitee.com/o/${j.slug}` : null);
+    if (!title || !url) continue;
+    // Чернетки й закриті позиції теж лежать у відповіді.
+    if (j.status && j.status !== "published") continue;
+
+    const loc = j.location?.trim() || j.city?.trim() || null;
+    out.push({
+      url, company: name, title, location: loc,
+      remote: j.remote === true || REMOTE.test(`${loc ?? ""} ${title}`),
+      postedAt: iso(j.published_at ?? j.created_at),
+      source: `recruitee:${slug}`,
+      team: j.department ?? null,
+      commitment: j.employment_type_code ?? null,
+      // Опис і вимоги — два різні поля; для витягу цінні обидва.
+      description: [j.description, j.requirements].filter(Boolean).join("\n") || null,
+    });
+  }
+  return out;
+}
+
 // ── Rippling ──────────────────────────────────────────────────
 export async function fetchRippling(slug: string, name: string, o: FetchOptions = {}): Promise<RawJob[]> {
   const rows = await fetchJson<Array<{ name: string; url: string; workLocation?: { label?: string } }>>(
@@ -215,8 +264,9 @@ export const ATS: Record<AtsProvider, AtsFetcher> = {
   personio: fetchPersonio,
   workday: fetchWorkday,
   bamboohr: fetchBambooHr,
+  recruitee: fetchRecruitee,
 };
 
 /** Порядок перевірки при вгадуванні: найпоширеніші попереду. */
 export const GUESS_ORDER: AtsProvider[] =
-  ["greenhouse", "lever", "ashby", "workable", "smartrecruiters", "breezy", "bamboohr"];
+  ["greenhouse", "lever", "ashby", "workable", "smartrecruiters", "breezy", "bamboohr", "recruitee"];
