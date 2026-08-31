@@ -741,3 +741,15 @@ describe("стеля бала", () => {
     expect(matchPercent(18)).toBeGreaterThan(86);
   });
 });
+
+describe("порожній пошук, який виглядав осмисленим", () => {
+  it("роль лише зі слова рівня не вважається пошуком", () => {
+    // «junior» — це прикметник без іменника. Раніше профіль проходив як
+    // осмислений, а потім кожна вакансія падала на offTopic −8 і onTopic
+    // відсікав усе: добірка не приходила ніколи й нічого про це не казало.
+    expect(hasSearchSignal({ spheres: [], customRole: "junior" })).toBe(false);
+    expect(hasSearchSignal({ spheres: [], customRole: "senior" })).toBe(false);
+    expect(hasSearchSignal({ spheres: [], customRole: "junior product manager" })).toBe(true);
+    expect(hasSearchSignal({ spheres: ["product"], customRole: "junior" })).toBe(true);
+  });
+});

@@ -52,6 +52,26 @@ systemctl enable --now \
 веде курсор у `/var/lib/nextrole/discover-cursor` і щотижня бере наступні 300
 колекцій по колу.
 
+## Міграції бази
+
+Які вже накотили — питаємо базу, а не пам'ять:
+
+```bash
+npx wrangler d1 execute crypto-jobs-agent --remote \
+  --command "SELECT name FROM schema_migrations ORDER BY name"
+```
+
+Чого немає у відповіді — те й треба накотити, по одному файлу:
+
+```bash
+npx wrangler d1 execute crypto-jobs-agent --remote --file db/migrations/00NN_….sql
+npx wrangler d1 execute crypto-jobs-agent --remote \
+  --command "INSERT INTO schema_migrations (name) VALUES ('00NN_….sql')"
+```
+
+Запис у `schema_migrations` — частина міграції, а не окремий обов'язок:
+краще додати рядок у сам файл, ніж покластися на те, що хтось згадає.
+
 ## Перевірка
 
 ```bash

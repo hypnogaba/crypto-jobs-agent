@@ -714,9 +714,17 @@ export function fitsCountry(job: CandidateJob, p: Profile): boolean {
  *
  * Індустрія й рівень сюди не рахуються: «senior у фінтеху» — це не пошук,
  * це два прикметники без іменника.
+ *
+ * Саме тому рівень ВИЙМАЄТЬСЯ з назви ролі, перш ніж її рахувати. Коментар
+ * вище обіцяв це від початку, а код — ні: `roleWords("junior")` повертав
+ * одне слово, профіль вважався осмисленим, і людина не діставала прохання
+ * дописати роль. Далі кожна вакансія отримувала `offTopic −8`, `onTopic`
+ * відсікав усе поспіль — і добірка не приходила НІКОЛИ, без жодного
+ * повідомлення. Найгірший вид відмови: система мовчить і виглядає справною.
  */
 export function hasSearchSignal(p: Pick<Profile, "spheres" | "customRole" | "customRoleEn">): boolean {
-  return p.spheres.length > 0 || roleWords(roleText(p)).length > 0;
+  return p.spheres.length > 0
+    || roleWords(roleText(p)).some((w) => levelTier(w) === null);
 }
 
 /**
