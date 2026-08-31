@@ -56,3 +56,48 @@ describe("extractPdf: розпакувальна бомба", () => {
     await expect(extractCvText(file)).rejects.toThrow("tooBig");
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+import { readFileSync } from "node:fs";
+import { docxToText } from "./cv.js";
+
+/**
+ * .docx — найчастіший формат резюме, і саме він не читався: PDF ловився за
+ * сигнатурою, а все інше декодувалось як UTF-8, з чого ZIP дає кашу.
+ * Людина з вордівським резюме бачила «не зміг прочитати файл».
+ *
+ * Взірець — справжній архів, зібраний zipfile, а не вигаданий рядок:
+ * помилка тут була б саме в бінарному розборі, і текстовий підробок її б
+ * не впіймав.
+ */
+describe("резюме у .docx", () => {
+  const bytes = readFileSync(new URL("./__fixtures__/sample-cv.docx", import.meta.url));
+  const file = () => new File([new Uint8Array(bytes)], "cv.docx");
+
+  it("читається як текст", async () => {
+    const text = await extractCvText(file());
+    expect(text).toContain("Senior Community Manager");
+    expect(text).toContain("Bratislava");
+    expect(text).toContain("3000 EUR");
+  });
+
+  it("абзаци не злипаються в одне слово", async () => {
+    const text = await extractCvText(file());
+    // Без переносів «Yehor KovalenkoSenior Community Manager» стало б одним
+    // словом, і розбір по ньому не влучив би ні в роль, ні в місто.
+    expect(text).not.toMatch(/KovalenkoSenior/);
+  });
+
+  it("розмітка Word знімається, а сутності розкриваються", () => {
+    expect(docxToText("<w:p><w:r><w:t>A &amp; B</w:t></w:r></w:p><w:p><w:r><w:t>C</w:t></w:r></w:p>"))
+      .toContain("A & B");
+    expect(docxToText("<w:p><w:t>A</w:t></w:p><w:p><w:t>B</w:t></w:p>")).toMatch(/A\s*\n+\s*B/);
+  });
+
+  it("ZIP без word/document.xml — це не резюме", async () => {
+    // Порожній ZIP: сигнатура є, потрібного запису немає.
+    const empty = new Uint8Array([0x50,0x4b,0x03,0x04, ...new Array(18).fill(0),
+                                  0x50,0x4b,0x05,0x06, ...new Array(18).fill(0)]);
+    await expect(extractCvText(new File([empty], "x.docx"))).rejects.toThrow();
+  });
+});

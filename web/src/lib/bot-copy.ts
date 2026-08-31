@@ -289,10 +289,10 @@ const P = {
     ru: "Удалил аккаунт и все данные. Захочешь вернуться — просто /start.",
   },
   help: {
-    en: "/profile — your profile, edit any field\n/time — delivery hour\n/lang — language\n/pause and /resume — pause\n/site — sign in on the web\n/feedback — tell us what is wrong\n/delete — erase everything\n\nAny plain text is saved as a wish.",
-    uk: "/profile — твій профіль, правка по пунктах\n/time — година доставки\n/lang — мова\n/pause і /resume — пауза\n/site — вхід на сайт\n/feedback — сказати, що не так\n/delete — видалити все\n\nБудь-який звичайний текст записується як побажання.",
-    fr: "/profile — votre profil, champ par champ\n/time — heure d'envoi\n/lang — langue\n/pause et /resume — pause\n/site — accès au site\n/feedback — dire ce qui ne va pas\n/delete — tout effacer\n\nTout texte libre est enregistré comme souhait.",
-    ru: "/profile — твой профиль, правка по пунктам\n/time — час доставки\n/lang — язык\n/pause и /resume — пауза\n/site — вход на сайт\n/feedback — сказать, что не так\n/delete — удалить всё\n\nЛюбой обычный текст записывается как пожелание.",
+    en: "/profile — your profile, edit any field\n/time — delivery hour\n/lang — language\n/pause and /resume — pause\n/site — sign in on the web\n/feedback — tell us what is wrong\n/delete — erase everything\n\nSend your CV as a file (PDF, DOCX) and I will fill the profile from it.\nAny plain text is saved as a wish.",
+    uk: "/profile — твій профіль, правка по пунктах\n/time — година доставки\n/lang — мова\n/pause і /resume — пауза\n/site — вхід на сайт\n/feedback — сказати, що не так\n/delete — видалити все\n\nНадішли резюме файлом (PDF, DOCX) — заповню профіль із нього.\nБудь-який звичайний текст записується як побажання.",
+    fr: "/profile — votre profil, champ par champ\n/time — heure d'envoi\n/lang — langue\n/pause et /resume — pause\n/site — accès au site\n/feedback — dire ce qui ne va pas\n/delete — tout effacer\n\nEnvoyez votre CV en fichier (PDF, DOCX) — je remplirai le profil.\nTout texte libre est enregistré comme souhait.",
+    ru: "/profile — твой профиль, правка по пунктам\n/time — час доставки\n/lang — язык\n/pause и /resume — пауза\n/site — вход на сайт\n/feedback — сказать, что не так\n/delete — удалить всё\n\nПришли резюме файлом (PDF, DOCX) — заполню профиль из него.\nЛюбой обычный текст записывается как пожелание.",
   },
   feedbackAsk: {
     en: "What is wrong, or what is missing? Anything — a bug, an idea, a feature you want. One message, straight to the person who builds this.",
@@ -321,10 +321,10 @@ const P = {
     ru: "Выбери пункт ниже, чтобы изменить. Резюме файлом тоже подойдёт — оно перезаполнит профиль.",
   },
   orWrite: {
-    en: "Describe yourself in one sentence (role, level, where, salary from) — or send your CV as a file. Or just tap the buttons.",
-    uk: "Опиши себе одним реченням (роль, рівень, де, від скільки) — або надішли CV файлом. Або тисни кнопки.",
-    fr: "Décrivez-vous en une phrase (poste, niveau, où, salaire minimum) — ou envoyez votre CV en fichier. Ou appuyez sur les boutons.",
-    ru: "Опиши себя одним предложением (роль, уровень, где, от скольких) — или пришли CV файлом. Или жми кнопки.",
+    en: "Describe yourself in one sentence (role, level, where, salary from) — or send your CV as a file (PDF, DOCX). Or just tap the buttons.",
+    uk: "Опиши себе одним реченням (роль, рівень, де, від скільки) — або надішли резюме файлом (PDF, DOCX). Або тисни кнопки.",
+    fr: "Décrivez-vous en une phrase (poste, niveau, où, salaire minimum) — ou envoyez votre CV en fichier (PDF, DOCX). Ou appuyez sur les boutons.",
+    ru: "Опиши себя одним предложением (роль, уровень, где, от скольких) — или пришли резюме файлом (PDF, DOCX). Или жми кнопки.",
   },
   // Слова людини повертаються їй же. Мовчазне збереження нічим не
   // відрізняється від втраченого: на живому прогоні людина написала свою роль
@@ -362,10 +362,17 @@ const P = {
     fr: "C'est lu. Voici ce que j'ai compris :", ru: "Прочитал. Вот что я понял:",
   },
   cvUnreadable: {
-    en: "I could not read that file. PDF or plain text works; a scan or an image does not.",
-    uk: "Не зміг прочитати цей файл. Годиться PDF або звичайний текст; скан чи картинка — ні.",
-    fr: "Je n'ai pas pu lire ce fichier. PDF ou texte brut ; un scan ou une image, non.",
-    ru: "Не смог прочитать этот файл. Подходит PDF или обычный текст; скан или картинка — нет.",
+    en: "I could not read that file. PDF, DOCX or plain text works; a scan or a photo does not — there are no letters in a picture, only pixels.",
+    uk: "Не зміг прочитати цей файл. Годиться PDF, DOCX або звичайний текст; скан чи фото — ні: у картинці немає літер, лише пікселі.",
+    fr: "Je n'ai pas pu lire ce fichier. PDF, DOCX ou texte brut ; un scan ou une photo, non — une image ne contient pas de lettres.",
+    ru: "Не смог прочитать этот файл. Подходит PDF, DOCX или обычный текст; скан или фото — нет: в картинке нет букв, только пиксели.",
+  },
+  /** Завеликий файл. Раніше на це йшов /help — тобто відповідь не про те. */
+  cvTooBig: {
+    en: "That file is over 4 MB — almost always a scan. A text PDF or DOCX weighs far less; export it again from the original.",
+    uk: "Файл більший за 4 МБ — майже завжди це скан. Текстовий PDF чи DOCX важить набагато менше; збережи з оригіналу ще раз.",
+    fr: "Ce fichier dépasse 4 Mo — c'est presque toujours un scan. Un PDF ou DOCX texte pèse bien moins ; réexportez-le depuis l'original.",
+    ru: "Файл больше 4 МБ — почти всегда это скан. Текстовый PDF или DOCX весит намного меньше; сохрани из оригинала ещё раз.",
   },
   cvFailed: {
     en: "Something went wrong while reading it. Try again, or just write a sentence.",

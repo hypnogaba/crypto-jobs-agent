@@ -1013,6 +1013,29 @@ export async function handleDocument(
 
     const existing = await one<{ id: string }>("SELECT id FROM users WHERE telegram_chat_id=?", String(chatId));
     const userId = existing?.id ?? uuid();
+
+    /**
+     * Резюме доповнює профіль, а не стирає його.
+     *
+     * Запит нижче ставив excluded.* у КОЖНЕ поле, тож людина, яка щойно
+     * зібрала анкету кнопками, а потім надіслала CV, мовчки втрачала все,
+     * чого в резюме не написано: місто, вилку, побажання. Резюме про них
+     * часто мовчить — це не «людина передумала», це просто інший документ.
+     *
+     * Правило те саме, що й для тексту в режимі правки: написане людиною не
+     * пропадає. Що резюме СКАЗАЛО — те й оновлюємо; про що змовчало —
+     * лишається як було.
+     */
+    const before = await one<{ spheres: string; industries: string; remote_mode: string;
+      location: string | null; salary_min: number | null; salary_currency: string | null;
+      custom_role: string | null; custom_industry: string | null; wishes: string | null }>(
+      `SELECT spheres,industries,remote_mode,location,salary_min,salary_currency,
+              custom_role,custom_industry,wishes FROM profiles WHERE user_id=?`, userId);
+    const keep = <T,>(fresh: T, old: T): T =>
+      (fresh === null || fresh === undefined || (Array.isArray(fresh) && fresh.length === 0)) ? old : fresh;
+    const oldList = (raw: string | null | undefined): string[] => {
+      try { const v = JSON.parse(raw ?? "[]"); return Array.isArray(v) ? v : []; } catch { return []; }
+    };
     if (!existing) {
       await run(
         `INSERT INTO users (id,telegram_chat_id,locale,timezone,delivery_hour,last_interaction_at)
@@ -1036,10 +1059,16 @@ export async function handleDocument(
          wishes=excluded.wishes,
          updated_at=datetime('now')`,
       userId, "cv", text.slice(0, 20_000),
-      JSON.stringify(parsed.spheres), JSON.stringify(parsed.industries),
-      remoteMode, parsed.location, parsed.salaryMin, parsed.salaryCurrency,
-      parsed.customRole, parsed.customIndustry,
-      parsed.cvHighlights, parsed.leftover);
+      JSON.stringify(keep(parsed.spheres, oldList(before?.spheres))),
+      JSON.stringify(keep(parsed.industries, oldList(before?.industries))),
+      before ? keep(parsed.remoteMode || null, before.remote_mode) : remoteMode,
+      keep(parsed.location, before?.location ?? null),
+      keep(parsed.salaryMin, before?.salary_min ?? null),
+      keep(parsed.salaryCurrency, before?.salary_currency ?? null),
+      keep(parsed.customRole, before?.custom_role ?? null),
+      keep(parsed.customIndustry, before?.custom_industry ?? null),
+      parsed.cvHighlights,
+      keep(parsed.leftover, before?.wishes ?? null));
 
     await persistDerived(userId, env.ANTHROPIC_API_KEY ?? null);
 

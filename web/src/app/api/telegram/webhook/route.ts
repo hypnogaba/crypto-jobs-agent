@@ -7,6 +7,7 @@ import { handleCommand, startBotOnboarding, continueBotOnboarding,
          handleDeleteButton, handleEditButton, handleFirstButton, handleLangButton, handleStartButton, sendFirstOffer } from "@/lib/bot";
 import { freeTextAction } from "@/lib/bot-onboarding";
 import { isLocale } from "@/lib/i18n";
+import { CV_MAX_BYTES } from "@/lib/cv";
 import type { Locale } from "@/lib/vocab";
 import { t as botCopy, tf as botCopyF } from "@/lib/bot-copy";
 import { callTelegram, sendText } from "@/lib/telegram-send";
@@ -201,9 +202,12 @@ async function handle(env: Env, raw: unknown): Promise<void> {
   // Резюме файлом. До вільного тексту, бо документ приходить без тексту.
   const doc = update.message?.document;
   if (doc?.file_id) {
-    // Три мегабайти — стеля: більше майже напевно скан, який ми не прочитаємо.
-    if ((doc.file_size ?? 0) > 3_000_000) {
-      await handleCommand(env, chatId, "/help", locale);
+    // Стеля та сама, що на сайті (CV_MAX_BYTES): той самий файл не має
+    // проходити там і відскакувати тут. Раніше на завеликий файл ішов /help —
+    // тобто список команд у відповідь на «ось моє резюме». Виглядало як
+    // поломка, а не як відповідь.
+    if ((doc.file_size ?? 0) > CV_MAX_BYTES) {
+      await sendText(env.TELEGRAM_BOT_TOKEN, chatId, botCopy("cvTooBig", locale));
       return;
     }
     await handleDocument(env, chatId, doc.file_id, doc.file_name ?? "cv.pdf", locale);
