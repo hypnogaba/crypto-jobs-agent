@@ -516,7 +516,7 @@ function nextRun(days: readonly number[], hour: number, now: Date): { label: str
   return { label: "—", inDays: 0 };
 }
 
-/** Скільки сфер обрала людина. Порожній JSON — анкети ще немає. */
+/** Скільки ролей обрала людина. Порожній JSON — анкети ще немає. */
 const sphereCount = (raw: string | null): number => {
   try { const v = JSON.parse(raw ?? "[]"); return Array.isArray(v) ? v.length : 0; } catch { return 0; }
 };
@@ -1181,14 +1181,14 @@ export default async function Admin({ searchParams }: {
                         </td>
                         <td className="text-xs">
                           {/* «Немає анкети» має означати те саме, що й у підборі:
-                              нема З ЧОГО шукати. Своя роль — така сама вісь, як
-                              сфера (hasSearchSignal у scanner/src/match.ts бере
+                              нема З ЧОГО шукати. Написана роль — така сама вісь,
+                              як обрана (hasSearchSignal у scanner/src/match.ts бере
                               будь-яку з двох), тож людина, яка написала «Junior
                               regulatory affairs» і не тиснула жодної кнопки,
                               стояла тут із поміткою «немає» — і виглядала
                               загубленою, хоча добірку отримує справно. */}
                           {sphereCount(x.spheres) > 0
-                            ? `${sphereCount(x.spheres)} сфер · ${x.country ?? x.locale}`
+                            ? `${sphereCount(x.spheres)} ${sphereCount(x.spheres) < 5 ? "ролі" : "ролей"} · ${x.country ?? x.locale}`
                             : x.custom_role?.trim()
                               ? `своя роль · ${x.country ?? x.locale}`
                               : <span className="tag tag-warn">немає</span>}

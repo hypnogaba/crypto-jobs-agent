@@ -142,7 +142,7 @@ describe("правка по пунктах", () => {
     for (const step of EDITABLE) expect(data).toContain(`ed:${step}`);
     expect(data).toContain("ed:lang");
     expect(profileMenu("uk").flat().map((b) => b.text))
-      .toEqual(["Сфери", "Індустрії", "Місце", "Зарплата", "Побажання", "Мова", "Година"]);
+      .toEqual(["Роль", "Галузь", "Місце", "Зарплата", "Побажання", "Мова", "Година"]);
   });
 
   it("клавіатура з префіксом ed: не плутається з онбордингом", () => {

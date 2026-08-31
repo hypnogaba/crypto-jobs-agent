@@ -114,16 +114,16 @@ type Phrase = { en: string; uk: string; fr: string; ru: string };
 
 const ASK: Record<Step, Phrase> = {
   spheres: {
-    en: "1 of 3 · What kind of work?\nPick everything that fits.",
-    uk: "1 з 3 · Яка робота?\nОбери все, що підходить.",
-    fr: "1 sur 3 · Quel type de poste ?\nChoisissez tout ce qui convient.",
-    ru: "1 из 3 · Какая работа?\nВыбери всё, что подходит.",
+    en: "1 of 3 · What is your role?\nPick everything that fits.",
+    uk: "1 з 3 · Яка твоя роль?\nОбери все, що підходить.",
+    fr: "1 sur 3 · Quel est votre poste ?\nChoisissez tout ce qui convient.",
+    ru: "1 из 3 · Какая твоя роль?\nВыбери всё, что подходит.",
   },
   industries: {
     en: "2 of 3 · Any industry you care about?\nOptional — skip if it does not matter.",
-    uk: "2 з 3 · Якісь індустрії цікавлять?\nНеобов'язково — пропусти, якщо байдуже.",
+    uk: "2 з 3 · Якась галузь цікавить?\nНеобов'язково — пропусти, якщо байдуже.",
     fr: "2 sur 3 · Un secteur en particulier ?\nFacultatif — passez si peu importe.",
-    ru: "2 из 3 · Какие-то индустрии интересуют?\nНеобязательно — пропусти, если всё равно.",
+    ru: "2 из 3 · Какая-то отрасль интересует?\nНеобязательно — пропусти, если всё равно.",
   },
   where: {
     en: "3 of 3 · Where do you want to work?",
@@ -192,7 +192,7 @@ const WORD = {
   },
   askIndustry: {
     en: "Write the industry in your own words, for example: climate tech, logistics, esports.",
-    uk: "Напиши індустрію своїми словами — наприклад: кліматтех, логістика, кіберспорт.",
+    uk: "Напиши галузь своїми словами — наприклад: кліматтех, логістика, кіберспорт.",
     fr: "Écrivez le secteur avec vos mots, par exemple : climat, logistique, esport.",
     ru: "Напиши индустрию своими словами — например: климаттех, логистика, киберспорт.",
   },
@@ -223,8 +223,12 @@ const WORD = {
     ru: "/profile — твой профиль, правка по пунктам\n/time — час доставки\n/lang — язык\n/pause и /resume — пауза\n/site — вход на сайт\n/news — канал @nextroleinfo",
   },
   // Підписи рядків у /profile — що саме редагувати.
-  fSpheres:    { en: "Fields",     uk: "Сфери",      fr: "Domaines",  ru: "Сферы" },
-  fIndustries: { en: "Industries", uk: "Індустрії",  fr: "Secteurs",  ru: "Индустрии" },
+  // «Сфери» тут ніколи не були сферами: у списку лежать Інженерія, Дизайн,
+  // Продажі, QA — тобто ЧИМ людина займається. Поруч, у тому самому питанні,
+  // «Немає в списку» веде в поле, яке ми вже звемо «Своя роль», — список і
+  // його ж «мій варіант» називались різними словами. Те саме з галуззю.
+  fSpheres:    { en: "Role",     uk: "Роль",    fr: "Poste",   ru: "Роль" },
+  fIndustries: { en: "Industry", uk: "Галузь",  fr: "Secteur", ru: "Отрасль" },
   fWhere:      { en: "Place",      uk: "Місце",      fr: "Lieu",      ru: "Место" },
   fSalary:     { en: "Salary",     uk: "Зарплата",   fr: "Salaire",   ru: "Зарплата" },
   fWishes:     { en: "Wishes",     uk: "Побажання",  fr: "Souhaits",  ru: "Пожелания" },

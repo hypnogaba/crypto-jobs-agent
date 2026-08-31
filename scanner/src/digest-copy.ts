@@ -118,10 +118,10 @@ const P = {
   // чекає добірку і не знає, що анкета лишилась порожньою. Раніше замість
   // цього рядка їй приходили п'ять випадкових вакансій.
   noProfileYet: {
-    en: "I cannot pick jobs yet: your profile has no field of work. Send /profile and tick at least one — or write the role in your own words.",
-    uk: "Поки не можу підібрати вакансії: у профілі не вказано жодної сфери. Надішли /profile і познач хоча б одну — або напиши свою роль словами.",
-    fr: "Je ne peux pas encore sélectionner d'offres : votre profil n'indique aucun domaine. Envoyez /profile et cochez-en au moins un — ou écrivez votre poste avec vos mots.",
-    ru: "Пока не могу подобрать вакансии: в профиле не указана ни одна сфера. Отправь /profile и отметь хотя бы одну — или напиши свою роль словами.",
+    en: "I cannot pick jobs yet: your profile has no role. Send /profile and tick at least one — or write yours in your own words.",
+    uk: "Поки не можу підібрати вакансії: у профілі не вказано жодної ролі. Надішли /profile і познач хоча б одну — або напиши свою словами.",
+    fr: "Je ne peux pas encore sélectionner d'offres : votre profil n'indique aucun poste. Envoyez /profile et cochez-en au moins un — ou écrivez le vôtre avec vos mots.",
+    ru: "Пока не могу подобрать вакансии: в профиле не указана ни одна роль. Отправь /profile и отметь хотя бы одну — или напиши свою словами.",
   },
 } satisfies Record<string, Phrase>;
 

@@ -163,7 +163,7 @@ const P = {
     ru: "Что с ними было не так?",
   },
   whySphere: {
-    en: "Wrong kind of work", uk: "Не та сфера", fr: "Mauvais domaine", ru: "Не та сфера",
+    en: "Wrong role", uk: "Не та роль", fr: "Mauvais poste", ru: "Не та роль",
   },
   whyPlace: {
     en: "Wrong place", uk: "Не та локація", fr: "Mauvais lieu", ru: "Не та локация",
@@ -175,7 +175,7 @@ const P = {
     en: "Not really remote", uk: "Насправді не віддалено", fr: "Pas vraiment à distance", ru: "На самом деле не удалённо",
   },
   whyIndustry: {
-    en: "Wrong industry", uk: "Не та індустрія", fr: "Mauvais secteur", ru: "Не та индустрия",
+    en: "Wrong industry", uk: "Не та галузь", fr: "Mauvais secteur", ru: "Не та отрасль",
   },
   whyStale: {
     en: "Already closed", uk: "Вакансію вже закрито", fr: "Offre déjà fermée", ru: "Вакансия уже закрыта",
@@ -218,10 +218,10 @@ const P = {
     ru: "Принял. Зарплата ниже твоего порога теперь будет наказываться сильнее.",
   },
   learnedSphere: {
-    en: "Noted. Weights will not fix this one — the spheres themselves need changing: /profile → Fields.",
-    uk: "Прийняв. Вагами це не лікується — треба міняти самі сфери: /profile → Сфери.",
-    fr: "Noté. Les pondérations n'y changeront rien — il faut modifier les domaines : /profile → Domaines.",
-    ru: "Принял. Весами это не лечится — нужно менять сами сферы: /profile → Сферы.",
+    en: "Noted. Weights will not fix this one — the role itself needs changing: /profile → Role.",
+    uk: "Прийняв. Вагами це не лікується — треба міняти саму роль: /profile → Роль.",
+    fr: "Noté. Les pondérations n'y changeront rien — il faut modifier le poste : /profile → Poste.",
+    ru: "Принял. Весами это не лечится — нужно менять саму роль: /profile → Роль.",
   },
   noted: {
     en: "Thanks, noted. Tomorrow's digest will be closer.",

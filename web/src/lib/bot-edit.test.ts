@@ -80,7 +80,7 @@ describe("правка по пунктах живе в одному повідо
   it("лічильника «1 з 3» у правці одного поля немає", async () => {
     await handleEditButton(env, 1, "ed:spheres", "cb", "uk");
     expect(sent("editMessageText")[0]!.text).not.toContain("1 з 3");
-    expect(sent("editMessageText")[0]!.text).toContain("Яка робота?");
+    expect(sent("editMessageText")[0]!.text).toContain("Яка твоя роль?");
   });
 
   it("«Назад» повертає меню в те саме повідомлення й нічого не пише", async () => {
