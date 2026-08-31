@@ -297,84 +297,150 @@ function FeedTable({ rows, title }: {
   );
 }
 
-function Tile({ n, label, accent = false }: { n: number | string; label: string; accent?: boolean }) {
-  return (
-    <div className="card px-5 py-4">
-      <div className="mono text-2xl leading-none" style={{ color: accent ? "var(--bad)" : "var(--ember)" }}>
-        {typeof n === "number" ? num(n) : n}
+/**
+ * Плитка. З `href` — посилання на свій блок, і тоді вона поводиться як
+ * посилання: рамка теплішає, з'являється стрілка, під числом сказано КУДИ
+ * веде клік.
+ *
+ * Числа вгорі сторінки і були питаннями до блоків нижче — «дев'ять зламано»
+ * має сенс лише разом зі списком, які саме. Досі це були мертві плашки, і
+ * дорогу до відповіді доводилось шукати гортанням.
+ */
+function Tile({ n, label, accent = false, href, to }:
+  { n: number | string; label: string; accent?: boolean; href?: string; to?: string }) {
+  const body = (
+    <>
+      <div className="flex items-start justify-between gap-3">
+        <div className="mono text-2xl leading-none" style={{ color: accent ? "var(--bad)" : "var(--ember)" }}>
+          {typeof n === "number" ? num(n) : n}
+        </div>
+        {href && (
+          <svg className="tile-go" width="16" height="16" viewBox="0 0 16 16" fill="none"
+               stroke={accent ? "var(--bad)" : "var(--ember)"} strokeWidth="1.5"
+               strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M3 8h10M9 4l4 4-4 4" />
+          </svg>
+        )}
       </div>
-      <div className="eyebrow mt-2">{label}</div>
-    </div>
+      <div className="eyebrow mt-2" style={accent ? { color: "var(--bad)" } : undefined}>{label}</div>
+      {to && <div className="mt-1 text-xs" style={{ color: "var(--faint)" }}>{to}</div>}
+    </>
+  );
+  if (!href) return <div className="card px-5 py-4">{body}</div>;
+  return (
+    <Link href={href} className="tile-link card block px-5 py-4"
+          style={accent ? { borderColor: "color-mix(in srgb, var(--bad) 35%, transparent)" } : undefined}>
+      {body}
+    </Link>
   );
 }
 
 /**
- * Стовпчики зростання. Одна величина на картку й один колір — питання тут
- * «більшає чи ні», а не «як три ряди співвідносяться». Порожній день не
- * малюється нулем: кеш не зникає від того, що скан не записав рядок, тому
- * значення тягнеться з попереднього дня.
+ * Графік зростання. Форма залежить від того, ЩО це за число.
+ *
+ * Досі всі чотири картки малювались однаково — стовпчиками, нормованими на
+ * пік. Для накопичення це неправда: 13 491 із піку 16 832 давало стовпчик на
+ * 80% висоти, хоч «80% чогось» тут не існує. Око читає таку картку як «майже
+ * повно», а насправді вона про приріст на чверть.
+ *
+ * Тому два види марок, і вибір не косметичний:
+ *   `total` — накопичення (вакансії, компанії, люди). Лінія з площею: питання
+ *     тут про ТРАЄКТОРІЮ, і саме її видно;
+ *   `daily` — рахунок за добу (дотики в боті). Стовпчики: кожен день окремий,
+ *     і день без жодного дотику мусить читатись нулем, а не пропуском.
+ *
+ * Шкала більше не таємниця: обидва кінці підписані датою й числом. Раніше
+ * єдиним числом на картці був підсумок, тож висота стовпчика ні з чим не
+ * порівнювалась.
  */
-function Spark({ points, label }: { points: Array<{ d: string; v: number }>; label: string }) {
-  const peak = Math.max(1, ...points.map((p) => p.v));
+function Spark({ points, label, kind = "total" }:
+  { points: Array<{ d: string; v: number }>; label: string; kind?: "total" | "daily" }) {
+  const vals = points.map((p) => p.v);
+  const peak = Math.max(1, ...vals);
+  const low = Math.min(...vals);
   const last = points.at(-1)?.v ?? 0;
   // Приріст — від першого дня вікна. Раніше базою було перше НЕнульове
   // значення, тож на графіку з порожнім початком «+909 за 14 дн.» описувало
   // не два тижні, а три дні.
   const base = points[0]?.v ?? 0;
   const delta = last - base;
-  const low = Math.min(...points.map((p) => p.v));
-  const bars = (tall: boolean) => (
-    <div className={tall ? "spark spark-tall" : "spark"}>
+  const day = (d: string | undefined) => (d ?? "").slice(5).replace("-", ".");
+
+  /**
+   * Область значень для лінії — з полем, а не від нуля.
+   *
+   * Накопичення в 16 832 з початком 13 491 біля нульової осі виглядало б
+   * пласкою прямою: уся зміна — чверть верхнього дюйма. Беремо саме той
+   * діапазон, у якому величина рухалась, і додаємо 12% поля, щоб лінія не
+   * лягала на рамку.
+   */
+  const pad = Math.max(1, (peak - low) * 0.12);
+  const lo = kind === "daily" ? 0 : Math.max(0, low - pad);
+  const hi = peak + pad;
+  const W = 260, H = 56;
+  const at = (i: number) => (points.length === 1 ? W : (i / (points.length - 1)) * W);
+  const y = (v: number) => H - ((v - lo) / Math.max(1, hi - lo)) * H;
+  const line = points.map((p, i) => `${i === 0 ? "M" : "L"}${at(i).toFixed(1)},${y(p.v).toFixed(1)}`).join(" ");
+  const gid = `spark-${label.replace(/[^a-zA-Z0-9]/g, "")}`;
+
+  const plot = kind === "daily" ? (
+    <div className="spark">
       {points.map((p) => (
         <div key={p.d} className="spark-bar" title={`${p.d} · ${num(p.v)}`}
-             style={{ height: `${Math.max(3, Math.round((p.v / peak) * 100))}%` }} />
+             style={{ height: p.v === 0 ? "2px" : `${Math.max(6, Math.round((p.v / peak) * 100))}%`,
+                      opacity: p.v === 0 ? 0.25 : undefined }} />
       ))}
     </div>
+  ) : (
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none"
+         style={{ display: "block" }} aria-hidden="true">
+      <defs>
+        <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="var(--ember)" stopOpacity="0.18" />
+          <stop offset="100%" stopColor="var(--ember)" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={`${line} L${W},${H} L0,${H} Z`} fill={`url(#${gid})`} />
+      <path d={line} fill="none" stroke="var(--ember)" strokeWidth="2"
+            strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+    </svg>
   );
 
   return (
     <div className="card px-5 py-4">
-      <div className="flex items-baseline justify-between gap-3">
-        <div className="mono text-2xl leading-none" style={{ color: "var(--ember)" }}>{num(last)}</div>
-        <div className="mono text-xs" style={{ color: delta > 0 ? "var(--ok)" : "var(--muted)" }}>
-          {delta > 0 ? "+" : ""}{num(delta)} за {points.length} дн.
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="mono text-2xl leading-none" style={{ color: "var(--ember)" }}>{num(last)}</div>
+          <div className="eyebrow mt-2">{label}</div>
         </div>
+        <span className="tag" style={{ background: delta > 0 ? "var(--ok-soft)" : "var(--surface-2)",
+                                       color: delta > 0 ? "var(--ok)" : "var(--muted)" }}>
+          {delta > 0 ? "+" : ""}{num(delta)}
+        </span>
       </div>
-      <div className="eyebrow mt-2">{label}</div>
 
-      {/* Стовпчики на три сантиметри показують напрямок, але не величину:
-          різниця між 900 і 950 у них не видно взагалі. Тому те саме
-          розгортається вище і з підписами — на місці, без окремої сторінки. */}
+      <div className="mt-3" style={{ borderBottom: "1px solid var(--rule-2)" }}>{plot}</div>
+      {/* Обидва кінці підписані. Це і є шкала: без неї висота лінії ні з чим
+          не порівнюється, і картка повідомляє лише підсумок, який і так
+          написано вище великим кеглем. */}
+      <div className="mono mt-1 flex justify-between text-xs" style={{ color: "var(--faint)" }}>
+        <span>{day(points[0]?.d)} · {num(base)}</span>
+        <span>{day(points.at(-1)?.d)} · {num(last)}</span>
+      </div>
+
+      {/* Числа по днях — текстом, а не підказкою.
+          `title` спрацьовує лише при НАВЕДЕННІ, а на телефоні наведення не
+          існує: там число за день не діставалось узагалі. */}
       <details className="mt-3">
-        <summary className="list-none" style={{ cursor: "pointer" }}>
-          {bars(false)}
-          <span className="mono mt-1 block text-xs" style={{ color: "var(--muted)" }}>
-            розгорнути ›
-          </span>
+        <summary className="mono list-none text-xs" style={{ cursor: "pointer", color: "var(--muted)" }}>
+          числа по днях
         </summary>
-        <div className="mt-3">
-          {bars(true)}
-          <div className="mono mt-2 flex justify-between text-xs" style={{ color: "var(--muted)" }}>
-            <span>{points[0]?.d.slice(5) ?? ""}</span>
-            <span>найменше {num(Number.isFinite(low) ? low : 0)} · найбільше {num(peak)}</span>
-            <span>{points.at(-1)?.d.slice(5) ?? ""}</span>
-          </div>
-
-          {/* Числа по днях — текстом, а не підказкою.
-              Підказка живе в `title`, тобто з'являється лише при НАВЕДЕННІ, а
-              на телефоні наведення не існує: там число за день не можна було
-              дістати взагалі, скільки в графік не тицяй. Довгі вікна
-              проріджуємо, щоб «рік» не перетворився на простирадло. */}
-          <div className="mono mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs"
-               style={{ color: "var(--ink-2)" }}>
-            {points
-              .filter((_, i) => points.length <= 32
-                || i % Math.ceil(points.length / 32) === 0
-                || i === points.length - 1)
-              .map((pt) => (
-                <span key={pt.d}>{pt.d.slice(5)} · {num(pt.v)}</span>
-              ))}
-          </div>
+        <div className="mono mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs" style={{ color: "var(--ink-2)" }}>
+          {points
+            .filter((_, i) => points.length <= 32
+              || i % Math.ceil(points.length / 32) === 0
+              || i === points.length - 1)
+            .map((pt) => <span key={pt.d}>{day(pt.d)} · {num(pt.v)}</span>)}
         </div>
       </details>
     </div>
@@ -929,6 +995,18 @@ export default async function Admin({ searchParams }: {
      ${filter.where ? `WHERE ${filter.where}` : ""}`))?.n ?? 0;
   const pages = Math.max(1, Math.ceil(peopleTotal / PEOPLE_PAGE));
 
+  /**
+   * Розмір кожної групи — числом на самій кнопці.
+   *
+   * Фільтр без числа доводиться перебирати: тиснеш «без Telegram», щоб
+   * дізнатись, чи там узагалі хтось є. Одним запитом на всі п'ять, бо п'ять
+   * окремих коштували б п'ять читань D1 на кожне відкриття панелі.
+   */
+  const counts = await one<Record<string, number>>(
+    `SELECT ${PEOPLE_FILTERS.map((f) =>
+      `SUM(CASE WHEN ${f.where || "1=1"} THEN 1 ELSE 0 END) "${f.id}"`).join(", ")}
+       FROM users u LEFT JOIN profiles p ON p.user_id = u.id`);
+
   // Останній вимір ДО вікна. Без нього кожен день до першого скану у вікні
   // малювався нулем: «вакансій у кеші» показувало одинадцять порожніх
   // стовпчиків і стрибок наприкінці, хоч кеш весь час був повний. Нуль там
@@ -1044,12 +1122,13 @@ export default async function Admin({ searchParams }: {
         )}
 
         <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-          <Tile n={s?.allUsers ?? 0} label="людей" />
-          <Tile n={s?.newWeek ?? 0} label="нових за тиждень" />
-          <Tile n={s?.sentToday ?? 0} label="надіслано сьогодні" />
-          <Tile n={s?.liveJobs ?? 0} label="вакансій до добірки" />
-          <Tile n={s?.liveSources ?? 0} label="джерел живих" />
-          <Tile n={s?.broken ?? 0} label="зламано" accent={(s?.broken ?? 0) > 0} />
+          <Tile n={s?.allUsers ?? 0} label="людей" href="#people" to="до списку людей" />
+          <Tile n={s?.newWeek ?? 0} label="нових за тиждень" href="#growth" to="до графіків зростання" />
+          <Tile n={s?.sentToday ?? 0} label="надіслано сьогодні" href="#digests" to="до історії зводок" />
+          <Tile n={s?.liveJobs ?? 0} label="вакансій до добірки" href="#sources" to="до джерел" />
+          <Tile n={s?.liveSources ?? 0} label="джерел живих" href="#sources" to="до джерел" />
+          <Tile n={s?.broken ?? 0} label="зламано" accent={(s?.broken ?? 0) > 0}
+                href="#problems" to="до проблем джерел" />
         </div>
 
         <div className="mt-12 flex flex-col gap-12">
@@ -1065,7 +1144,7 @@ export default async function Admin({ searchParams }: {
                          <Link key={f.id} href={peopleHref(f.id, 1)} className="mono text-xs"
                                style={{ color: f.id === filter.id ? "var(--ember)" : "var(--muted)",
                                         textDecoration: f.id === filter.id ? "underline" : "none" }}>
-                           {f.label}
+                           {f.label} · {counts?.[f.id] ?? 0}
                          </Link>
                        ))}
                      </div>
@@ -1114,10 +1193,26 @@ export default async function Admin({ searchParams }: {
                               ? `своя роль · ${x.country ?? x.locale}`
                               : <span className="tag tag-warn">немає</span>}
                         </td>
-                        <td className="text-xs">{x.tg ? "✓" : <span className="tag tag-warn">ні</span>}</td>
+                        {/* Крапка, а не плашка: «ні» жовтим кольором стояло в
+                            половині рядків і читалось як попередження в
+                            кожному з них. Стан бінарний — його досить
+                            показати кольором, а слово лишити для читалок. */}
+                        <td className="text-xs">
+                          <span aria-hidden="true"
+                                style={{ display: "inline-block", width: "6px", height: "6px",
+                                         borderRadius: "50%",
+                                         background: x.tg ? "var(--ok)" : "var(--rule-2)" }} />
+                          <span className="sr-only">{x.tg ? "прив'язано" : "немає"}</span>
+                        </td>
                         <td className="num text-xs">{x.sent}</td>
                         <td className="mono text-xs" style={{ color: "var(--muted)" }}>
-                          {x.more + x.nope === 0 ? "—" : `+${x.more} / −${x.nope}`}
+                          {x.more + x.nope === 0 ? "—" : (
+                            <>
+                              {x.more > 0 && <span style={{ color: "var(--ok)" }}>+{x.more}</span>}
+                              {x.more > 0 && x.nope > 0 && " / "}
+                              {x.nope > 0 && <span style={{ color: "var(--bad)" }}>−{x.nope}</span>}
+                            </>
+                          )}
                         </td>
                         <td className="mono text-xs" style={{ color: "var(--muted)" }}>
                           {x.last_seen?.slice(0, 16).replace("T", " ") ?? "—"}
@@ -1213,7 +1308,14 @@ export default async function Admin({ searchParams }: {
           </Block>
 
           <Block id="growth" title="Як ми ростемо"
-                 lede={`Останні ${DAYS} днів. Наведи на стовпчик — покаже день і число.`}
+                 /* Підпис називає те, що Є, а не те, що просили.
+                    Вісь обрізається найранішим рядком у базі, тож на молодому
+                    продукті «останні 14 днів» обіцяли два тижні й малювали
+                    п'ять точок — і графік виглядав зламаним, хоч ламався
+                    саме підпис. */
+                 lede={axis.length < DAYS
+                   ? `Даних за ${axis.length} дн. — стільки, скільки ми ведемо облік.`
+                   : `Останні ${DAYS} днів.`}
                  right={
                    <div className="flex flex-wrap items-center gap-3">
                      {RANGES.map((r) => (
@@ -1231,7 +1333,9 @@ export default async function Admin({ searchParams }: {
               <Spark points={growth.jobs} label="вакансій у кеші" />
               <Spark points={growth.companies} label="компаній у скані" />
               <Spark points={growth.people} label="людей усього" />
-              <Spark points={growth.taps} label="дотиків у боті за день" />
+              {/* Єдина картка зі стовпчиками, і це навмисно: рахунок за добу,
+                  де день без дотиків має читатись нулем. Решта — накопичення. */}
+              <Spark points={growth.taps} label="дотиків у боті за день" kind="daily" />
             </div>
           </Block>
 
