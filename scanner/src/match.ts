@@ -914,20 +914,47 @@ export function pickTop(jobs: CandidateJob[], p: Profile, limit = 5, now = new D
    * доречність, компанію. Порожній резерв просто віддає місця далі — краще
    * коротша добірка, ніж місцева вакансія не з тієї роботи.
    */
-  const localSlots = p.country ? Math.min(2, Math.floor(limit / 2)) : 0;
+  // Порівняння рядків тут зламалось, щойно країна стала набором: у профілі
+  // лежить «SK,AT,HU,CZ», у вакансії «AT», і рівність не спрацьовувала
+  // жодного разу — резерв мовчки лишався порожнім саме в тих людей, які
+  // назвали найбільше місць.
+  const mine = countriesOf(p);
+  const localSlots = mine.length > 0 ? Math.min(2, Math.floor(limit / 2)) : 0;
   if (localSlots > 0) {
     for (const job of scored) {
       if (picked.length >= localSlots) break;
-      if (job.country !== p.country) continue;
+      if (!job.country || !mine.includes(job.country)) continue;
       take(job);
     }
   }
 
-  // Коло перше: найкраще з кожної обраної сфери.
-  for (const sphere of p.spheres) {
-    if (picked.length >= limit) break;
-    const best = scored.find((j) => !picked.includes(j) && j.tags.includes(sphere));
-    if (best) take(best);
+  /**
+   * Коло перше: одна сфера на всю добірку, а не по вакансії з кожної.
+   *
+   * Тут стояло протилежне — «найкраще з кожної обраної сфери», — і воно
+   * навмисно робило добірку широкою. На живих даних вийшло розсіяно: людина
+   * з чотирма сферами отримувала чотири не пов'язані між собою вакансії, і
+   * першою серед них — «Marketing Operations Specialist», хоча писала про
+   * штучний інтелект. Широка добірка читається не як вибір, а як випадковість.
+   *
+   * Тепер п'ять вакансій з ОДНІЄЇ сфери, якщо їх стільки є, і лише потім
+   * добір з решти. Сфера змінюється щодня по колу: інакше найбагатша з
+   * обраних забирала б усі дні собі, а решта не показалася б ніколи. Черга
+   * рахується від доби, а не від випадку, — той самий день дає ту саму
+   * сферу, і добірку можна відтворити прогоном.
+   *
+   * Сфери без жодного кандидата в чергу не входять: пропущений день виглядав
+   * би як день, коли нам не було чого надіслати.
+   */
+  const withCandidates = p.spheres.filter((s) => scored.some((j) => j.tags.includes(s)));
+  if (withCandidates.length > 0) {
+    const day = Math.floor(now.getTime() / 86_400_000);
+    const lead = withCandidates[day % withCandidates.length]!;
+    for (const job of scored) {
+      if (picked.length >= limit) break;
+      if (picked.includes(job) || !job.tags.includes(lead)) continue;
+      take(job);
+    }
   }
 
   // Коло друге: добираємо за балом.

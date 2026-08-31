@@ -154,31 +154,59 @@ describe("посилання має вести на роботодавця", () 
   });
 });
 
-describe("різноманітність добірки", () => {
+describe("одна сфера на добірку", () => {
   const wide: Profile = { ...p, spheres: ["partnerships", "devrel", "marketing"] };
 
-  it("бере найкраще з кожної обраної сфери, а не п'ять із найсильнішої", () => {
-    // Перша справжня доставка дала п'ять вакансій із двох сфер, хоча профіль
-    // був ширший: добірка сповзала в ту сферу, де балів більше.
+  /**
+   * Тут довго стояла протилежна мета — «найкраще з кожної обраної сфери», —
+   * і на живих даних вона вийшла розсіяною: людина з чотирма сферами діставала
+   * чотири не пов'язані вакансії, і першою серед них ту, про яку не писала.
+   * Широка добірка читається не як вибір, а як випадковість.
+   */
+  it("бере п'ять з однієї сфери, коли їх стільки є", () => {
     const jobs = [
-      job({ id: "p1", companyKey: "c1", tags: ["partnerships", "senior"] }),
-      job({ id: "p2", companyKey: "c2", tags: ["partnerships", "senior"] }),
-      job({ id: "p3", companyKey: "c3", tags: ["partnerships", "senior"] }),
+      job({ id: "p1", companyKey: "c1", tags: ["partnerships"] }),
+      job({ id: "p2", companyKey: "c2", tags: ["partnerships"] }),
+      job({ id: "p3", companyKey: "c3", tags: ["partnerships"] }),
       job({ id: "d1", companyKey: "c4", tags: ["devrel"] }),
       job({ id: "m1", companyKey: "c5", tags: ["marketing"] }),
     ];
-    const top = pickTop(jobs, wide, 3);
-    const spheres = top.map((t) => t.tags.find((x) => wide.spheres.includes(x)));
-    expect(new Set(spheres).size).toBe(3);
+    // День обрано так, щоб черга стала на partnerships: 3 сфери, day % 3 === 0.
+    const day0 = new Date(0);
+    const top = pickTop(jobs, wide, 3, day0);
+    expect(top.every((t) => t.tags.includes("partnerships"))).toBe(true);
   });
 
-  it("не бере двічі одну компанію навіть заради різноманітності", () => {
+  it("сфера змінюється щодня по колу, а не дістається найбагатшій назавжди", () => {
+    const jobs = [
+      job({ id: "p1", companyKey: "c1", tags: ["partnerships"] }),
+      job({ id: "d1", companyKey: "c2", tags: ["devrel"] }),
+      job({ id: "m1", companyKey: "c3", tags: ["marketing"] }),
+    ];
+    const lead = (dayIndex: number) =>
+      pickTop(jobs, wide, 1, new Date(dayIndex * 86_400_000))[0]!
+        .tags.find((x) => wide.spheres.includes(x));
+    // Три доби поспіль — три різні сфери.
+    expect(new Set([lead(0), lead(1), lead(2)]).size).toBe(3);
+  });
+
+  it("коли своєї сфери не вистачає, добираємо з решти", () => {
+    const jobs = [
+      job({ id: "p1", companyKey: "c1", tags: ["partnerships"] }),
+      job({ id: "d1", companyKey: "c2", tags: ["devrel"] }),
+    ];
+    expect(pickTop(jobs, wide, 5, new Date(0))).toHaveLength(2);
+  });
+
+  it("не бере двічі одну компанію", () => {
     const jobs = [
       job({ id: "a", companyKey: "same", tags: ["partnerships"] }),
       job({ id: "b", companyKey: "same", tags: ["devrel"] }),
       job({ id: "c", companyKey: "other", tags: ["marketing"] }),
     ];
-    expect(pickTop(jobs, wide, 5).map((t) => t.companyKey)).toEqual(["same", "other"]);
+    const keys = pickTop(jobs, wide, 5, new Date(0)).map((t) => t.companyKey);
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(keys).toContain("other");
   });
 
   it("порядок у повідомленні — за силою збігу", () => {
