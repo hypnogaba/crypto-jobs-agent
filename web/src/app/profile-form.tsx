@@ -212,6 +212,13 @@ export default function ProfileForm({ locale, pre, back, error, quote, evidence,
               у сканері) — це справжній фільтр, а не мертвий текст. */}
           <OwnWords name="customRole" locale={locale} value={pre.customRole}
             placeholder={t(locale, "onboarding.rolePlaceholder")} />
+          {/* Написана роль важить БІЛЬШЕ за галочку: точний збіг із назвою
+              вакансії дає +12, обрана зі списку роль — +6. Людина цього не
+              знала, тож поле виглядало як необов'язкове доповнення, хоча
+              саме воно й вирішує, що їй прийде. */}
+          <p className="mt-2 text-xs" style={{ color: "var(--muted)" }}>
+            {t(locale, "onboarding.roleWeight")}
+          </p>
           <div className="mt-5">
             <p className="eyebrow">{t(locale, "onboarding.industries")}</p>
             {/* Галочка тут НЕ «мені цікаво ще й це», а фільтр: збіг дає +3, а

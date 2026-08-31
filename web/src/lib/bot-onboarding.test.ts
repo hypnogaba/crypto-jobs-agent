@@ -208,3 +208,56 @@ describe("readyText", () => {
     expect(s).toContain("Найближча: понеділок, 31 серпня, 09:00");
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+import { currentOf, currentLine, keyboard as kb } from "./bot-onboarding.js";
+
+/**
+ * Питання відкривалось порожнім, і людина не бачила, що там уже лежить:
+ * зарплату вводила наосліп, місто так само. Виняток був один — побажання,
+ * і саме тому вони єдині не викликали цього питання.
+ */
+describe("що вже записано в полі", () => {
+  const draft = {
+    ...emptyDraft(),
+    spheres: ["engineering"], customRole: "комуніті менеджер",
+    location: "Варшава", salaryMin: 36_000, salaryCurrency: "EUR",
+    wishes: "тільки стартапи",
+  };
+
+  it("зарплата показується місячною — тією ж мірою, якою її питали", () => {
+    // Нерозривний пробіл від toLocaleString рівняємо до звичайного: інакше
+    // тест міряв би розділювач розрядів, а не суму.
+    const v = currentOf("salary", draft, "uk")!.replace(/\u00a0/g, " ");
+    expect(v).toContain("3 000 EUR");
+    expect(v).toContain("міс");
+  });
+
+  it("місто показується, а не лишається таємницею", () => {
+    expect(currentOf("where", draft, "uk")).toContain("Варшава");
+  });
+
+  it("написана роль стоїть у лапках поруч з обраними", () => {
+    const v = currentOf("spheres", draft, "uk")!;
+    expect(v).toContain("Інженерія");
+    expect(v).toContain("«комуніті менеджер»");
+  });
+
+  it("порожнє поле не малює рядок «Зараз: —»", () => {
+    expect(currentLine("salary", emptyDraft(), "uk")).toBeNull();
+    expect(currentLine("where", emptyDraft(), "uk")).toBeNull();
+  });
+});
+
+describe("кнопка «своє» на питанні про місце", () => {
+  it("каже про місце, а не «немає в списку»: у списку не перелік місць", () => {
+    const texts = kb("where", emptyDraft(), "uk").flat().map((b) => b.text);
+    expect(texts.some((t) => t.includes("Інше місце"))).toBe(true);
+    expect(texts.some((t) => t.includes("Немає в списку"))).toBe(false);
+  });
+
+  it("а на ролях лишається «Немає в списку» — там список справді є", () => {
+    const texts = kb("spheres", emptyDraft(), "uk").flat().map((b) => b.text);
+    expect(texts.some((t) => t.includes("Немає в списку"))).toBe(true);
+  });
+});

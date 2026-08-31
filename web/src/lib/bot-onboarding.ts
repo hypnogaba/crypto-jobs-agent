@@ -165,6 +165,25 @@ const WORD = {
   noMatter: { en: "Does not matter", uk: "Не важливо", fr: "Peu importe", ru: "Не важно" },
   other:    { en: "Another amount", uk: "Інша сума", fr: "Autre montant", ru: "Другая сумма" },
   perMonth: { en: "mo", uk: "міс", fr: "mois", ru: "мес" },
+  /** Підпис до написаної ролі: у підборі вона важить удвічі більше за галочку. */
+  mineWhere: {
+    en: "Another place",
+    uk: "Інше місце",
+    fr: "Autre lieu",
+    ru: "Другое место",
+  },
+  now: {
+    en: "Now:",
+    uk: "Зараз:",
+    fr: "Actuellement :",
+    ru: "Сейчас:",
+  },
+  searchingFor: {
+    en: "Searching for:",
+    uk: "Шукаємо:",
+    fr: "Nous cherchons :",
+    ru: "Ищем:",
+  },
   askOther: {
     en: "Write the monthly amount and currency, for example: 3000 EUR",
     uk: "Напиши місячну суму й валюту, наприклад: 3000 EUR",
@@ -316,7 +335,9 @@ export function keyboard(step: Step, draft: Draft, locale: Locale, opts: Keyboar
       }]);
     }
     rows.push([{
-      text: `${draft.customWhere ? "✓ " : ""}${say(WORD.mine, locale)}`,
+      // «Немає в списку» тут нічого не означало: у списку не перелік місць, а
+      // способи працювати. Питання насправді про місто, і кнопка має казати це.
+      text: `${draft.customWhere ? "✓ " : ""}${say(WORD.mineWhere, locale)}`,
       callback_data: `${pre}:where:__mine`,
     }]);
     const canFinish = chosen.length > 0 || Boolean(draft.customWhere);
@@ -417,9 +438,55 @@ export const askOtherAmount = (locale: Locale): string => say(WORD.askOther, loc
 export const askTime = (locale: Locale): string => say(WORD.askTime, locale);
 export const askWishes = (locale: Locale): string => say(WORD.askWishes, locale);
 export const askCustomRole = (locale: Locale): string => say(WORD.askMine, locale);
+/** Підпис «Зараз: …», готовий до вставки над питанням. */
+export const currentLine = (step: Step, draft: Draft, locale: Locale): string | null => {
+  const v = currentOf(step, draft, locale);
+  return v ? `${say(WORD.now, locale)} ${v}` : null;
+};
+
 export const askCustomFor = (step: Step, locale: Locale): string => say(
   step === "industries" ? WORD.askIndustry
   : step === "where" ? WORD.askWhere : WORD.askMine, locale);
+
+/**
+ * Що вже записано в цьому полі — рядком над питанням.
+ *
+ * Питання відкривалось порожнім, і людина не бачила, що там уже лежить:
+ * зарплату треба було вводити наосліп, місто так само, а галочку від
+ * написаних слів на клавіатурі не відрізниш. Виняток був один — побажання,
+ * і саме тому вони єдині не викликали цього питання.
+ *
+ * Порожнє поле повертає null: рядок «Зараз: —» не додає нічого, крім шуму.
+ */
+export function currentOf(step: Step, draft: Draft, locale: Locale): string | null {
+  const names = (ids: string[], src: readonly { id: string; en: string; uk: string; fr: string; ru: string }[]) =>
+    ids.map((id) => { const it = src.find((x) => x.id === id); return it ? label(it, locale) : id; }).join(", ");
+  const join = (parts: Array<string | null | undefined>) =>
+    parts.map((x) => x?.trim()).filter(Boolean).join(" · ") || null;
+
+  switch (step) {
+    case "spheres":
+      return join([names(draft.spheres, SPHERES), draft.customRole && `«${draft.customRole}»`]);
+    case "industries":
+      return join([names(draft.industries, INDUSTRIES), draft.customIndustry && `«${draft.customIndustry}»`]);
+    case "where": {
+      const modes = parseModes(draft.remoteMode)
+        .map((id) => REMOTE_MODES.find((x) => x.id === id))
+        .filter(Boolean).map((x) => label(x!, locale)).join(" + ");
+      return join([draft.customWhere ?? modes, draft.location]);
+    }
+    case "city":
+      return draft.location?.trim() || null;
+    case "salary": {
+      const m = monthlyFrom(draft.salaryMin);
+      return m ? `${m.toLocaleString("uk-UA")} ${draft.salaryCurrency ?? "EUR"} / ${say(WORD.perMonth, locale)}` : null;
+    }
+    case "wishes":
+      return draft.wishes?.trim() ? `«${draft.wishes.trim()}»` : null;
+    default:
+      return null;
+  }
+}
 
 /** Що вийшло — людськими словами, а не ідентифікаторами. */
 export function summary(draft: Draft, locale: Locale): string {
@@ -442,14 +509,26 @@ export function summary(draft: Draft, locale: Locale): string {
                 own: string | null | undefined): string | null =>
     [ids.length ? names(ids, src) : null, own].filter(Boolean).join(" · ") || null;
 
-  return [
-    both(draft.spheres, SPHERES, draft.customRole) ?? "—",
+  /**
+   * Написана роль виноситься окремим рядком, і це не оформлення.
+   *
+   * У підборі вона важить БІЛЬШЕ за галочку: точний збіг із назвою вакансії
+   * дає +12, обрана зі списку роль — +6. Тобто саме ці слова й вирішують,
+   * що людині прийде. А в підсумку вони стояли посеред крапкового рядка,
+   * приклеєні до списку («Інженерія · тестувальник ігор»), і нічим не
+   * відрізнялись від решти — головне про пошук виглядало як дрібниця.
+   */
+  const rest = [
+    both(draft.spheres, SPHERES, null) ?? "—",
     both(draft.industries, INDUSTRIES, draft.customIndustry),
     draft.customWhere ?? where,
     draft.location ?? null,
     money,
     draft.wishes?.trim() ? `«${draft.wishes.trim()}»` : null,
   ].filter(Boolean).join(" · ");
+
+  const own = draft.customRole?.trim();
+  return own ? `${say(WORD.searchingFor, locale)} «${own}»\n${rest}` : rest;
 }
 
 /**

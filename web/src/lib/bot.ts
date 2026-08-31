@@ -3,7 +3,7 @@ import {
   emptyDraft, keyboard, nextStep, questionText, askOtherAmount, askCustomFor, askTime, askWishes,
   readyText, draftTimezone, profileMenu, profileUpdateFor, backButton,
   STEPS, EDITABLE,
-  summary, toggle, fieldLabel, type Draft, type Step,
+  summary, toggle, fieldLabel, currentLine, type Draft, type Step,
 } from "./bot-onboarding";
 import { isLocale, LOCALES, toLocale } from "./i18n";
 import { CvError, extractCvText } from "./cv";
@@ -594,10 +594,17 @@ async function openEditor(
   env: Env, chatId: number, userId: string, step: Step, locale: Locale, messageId: number | null
 ): Promise<void> {
   const draft = (await loadDraft(userId)) ?? emptyDraft();
-  // Побажання — вільний текст: замість списку показуємо вже записане.
-  const text = step === "wishes"
-    ? `${draft.wishes?.trim() ? `«${draft.wishes.trim()}»\n\n` : ""}${askWishes(locale)}`
-    : questionText(step, locale, { bare: true });
+  /**
+   * Над кожним питанням — те, що вже записано.
+   *
+   * Раніше це робили лише побажання, і саме вони єдині не викликали питання
+   * «а що там зараз?». Зарплату доводилось вводити наосліп, місто так само,
+   * а написані слова від галочок на клавіатурі не відрізнити. Тепер правило
+   * одне на всі поля.
+   */
+  const now = currentLine(step, draft, locale);
+  const ask = step === "wishes" ? askWishes(locale) : questionText(step, locale, { bare: true });
+  const text = now ? `${now}\n\n${ask}` : ask;
   const rows = step === "wishes" ? [] : keyboard(step, draft, locale, { prefix: "ed" });
   await showEdit(env, chatId, `edit:${step}`, draft, locale, messageId, text, rows);
 }
