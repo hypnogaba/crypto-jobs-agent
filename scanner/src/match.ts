@@ -190,11 +190,48 @@ export function roleWords(role: string | null | undefined): string[] {
  * коштувала сім балів. Рівень має власне правило нижче й рахується там один
  * раз — тут він лише заважав.
  */
+/**
+ * Слова, що називають ту саму роботу різними словами.
+ *
+ * Живий випадок: людина написала «програміст». Переклад спрацював правильно
+ * — `programmer`, — але в назвах вакансій цього слова НЕМАЄ: пишуть Engineer
+ * або Developer. Тому чесна відповідь давала їй `roleMiss −3` на кожній
+ * вакансії поспіль: назвала себе точно й була за це покарана.
+ *
+ * Це список, а не «розумний пошук». Кожен рядок — та сама професія, названа
+ * інакше, і саме тому розширення безпечне: воно не робить роль ширшою, лише
+ * перестає залежати від того, яке з двох слів обрала людина, а яке —
+ * рекрутер. Слова, що звужують («senior», «lead»), сюди не входять: у них
+ * своє правило.
+ */
+const ROLE_SYNONYMS: string[][] = [
+  ["programmer", "developer", "engineer", "coder"],
+  ["designer", "design"],
+  ["marketer", "marketing"],
+  ["recruiter", "recruiting", "recruitment"],
+  ["analyst", "analytics"],
+  ["writer", "copywriter"],
+  ["researcher", "research"],
+  ["accountant", "accounting"],
+  ["lawyer", "legal", "counsel"],
+  ["tester", "testing", "qa"],
+  ["devops", "sre", "infrastructure"],
+  ["devrel", "advocate", "evangelist"],
+  ["support", "success"],
+  ["community", "communities"],
+];
+
+const SYNONYM_OF = new Map<string, string[]>();
+for (const group of ROLE_SYNONYMS) for (const w of group) SYNONYM_OF.set(w, group);
+
+/** Саме слово плюс усі, що означають те саме. */
+const variantsOf = (word: string): string[] => SYNONYM_OF.get(word) ?? [word];
+
 export function matchesCustomRole(title: string, role: string | null | undefined): boolean {
   const words = roleWords(role).filter((w) => levelTier(w) === null);
   if (words.length === 0) return false;
   const t = title.toLowerCase();
-  return words.every((w) => t.includes(w));
+  return words.every((w) => variantsOf(w).some((v) => t.includes(v)));
 }
 
 /**
@@ -226,7 +263,7 @@ export function partiallyMatchesRole(title: string, role: string | null | undefi
   const meaningful = meaningfulRoleWords(role);
   if (meaningful.length === 0) return false;
   const t = title.toLowerCase();
-  return meaningful.some((w) => t.includes(w));
+  return meaningful.some((w) => variantsOf(w).some((v) => t.includes(v)));
 }
 
 /**
@@ -583,8 +620,7 @@ export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): Score
   // Країна людини береться з профілю, а як її там немає — виводиться з
   // написаного міста тим самим розбором. Профілі, збережені до появи
   // стовпця `country`, інакше лишились би без географії назавжди.
-  // Усі країни людини, а не перша: вона назвала чотири міста — усі чотири її.
-  const myCountries = p.country ? parseCountries(p.country) : placeOf(cityText(p)).countries;
+  const myCountries = countriesOf(p);
   const fit = placeFit(place, myCountries);
   const cityHit = cityMatches(job.location, cityText(p));
 
@@ -776,13 +812,30 @@ export function onTopic(job: Pick<ScoredJob, "facts">, p: Pick<Profile, "spheres
  * Після межі в неї знову пʼять карток, просто інших: пул достатній, щоб цю
  * чесність нічого не коштувала.
  */
+/**
+ * Країни людини, у трьох спробах.
+ *
+ * Третя — побажання, і вона тут не для повноти. Живий випадок: людина
+ * написала «Entry level jobs in France, Centre Val-de-Loire» і отримувала
+ * Колорадо та Сан-Франциско. Франція в неї БУЛА названа — просто не в тому
+ * полі, а побажання шукають слова лише в назві й описі вакансії, країною
+ * вони не стають ніколи.
+ *
+ * Читаємо їх лише тоді, коли місця немає ЗОВСІМ: це не здогад замість
+ * відповіді людини, а остання спроба знайти відповідь, яку вона вже дала.
+ */
+export function countriesOf(p: Pick<Profile, "country" | "location" | "locationEn" | "wishes" | "wishesEn">): string[] {
+  const named = p.country ? parseCountries(p.country) : placeOf(cityText(p)).countries;
+  if (named.length > 0) return named;
+  return placeOf(wishesText(p)).countries;
+}
+
 export function reachable(job: CandidateJob, p: Profile): boolean {
   if (job.remote) return true;
   if (remoteOnly(p.remoteMode)) return true;   // там свій штраф, -6 за onsite
   if (willRelocate(p.remoteMode)) return true;
   if (!job.location?.trim()) return false;     // офіс невідомо де — нікуди ходити
-  const myCountries = p.country ? parseCountries(p.country) : placeOf(cityText(p)).countries;
-  return placeFit(placeOf(job.location), myCountries) !== "miss";
+  return placeFit(placeOf(job.location), countriesOf(p)) !== "miss";
 }
 
 /**

@@ -793,3 +793,44 @@ describe("людина назвала кілька міст", () => {
     expect(vienna).toBeGreaterThan(jakarta);
   });
 });
+
+import { countriesOf, matchesCustomRole } from "./match.js";
+
+/**
+ * Дві живі скарги, обидві з бази 31.08. Людина назвала відповідь — але не в
+ * тому полі, або не тим словом, яким її пише рекрутер.
+ */
+describe("країна, названа в побажаннях", () => {
+  const base = { country: null, location: null, locationEn: null, wishesEn: null };
+
+  it("читається, коли міста немає зовсім", () => {
+    expect(countriesOf({ ...base, wishes: "Entry level jobs in France, Centre Val-de-Loire" }))
+      .toContain("FR");
+  });
+
+  it("НЕ перебиває назване місто: відповідь людини важливіша за здогад", () => {
+    expect(countriesOf({ ...base, country: "PL", wishes: "would love to visit France" }))
+      .toEqual(["PL"]);
+  });
+
+  it("порожньо лишається порожнім", () => {
+    expect(countriesOf({ ...base, wishes: "тільки стартапи" })).toEqual([]);
+  });
+});
+
+describe("роль тими самими словами, що й рекрутер", () => {
+  it("«programmer» знаходить Engineer і Developer", () => {
+    expect(matchesCustomRole("Software Engineer", "programmer")).toBe(true);
+    expect(matchesCustomRole("Backend Developer", "programmer")).toBe(true);
+  });
+
+  it("складена роль усе одно вимагає ВСІХ слів", () => {
+    expect(matchesCustomRole("Data Engineer", "data programmer")).toBe(true);
+    expect(matchesCustomRole("Sales Engineer", "data programmer")).toBe(false);
+  });
+
+  it("синоніми не роблять роль ширшою за професію", () => {
+    expect(matchesCustomRole("Account Manager", "programmer")).toBe(false);
+    expect(matchesCustomRole("Community Manager", "designer")).toBe(false);
+  });
+});
