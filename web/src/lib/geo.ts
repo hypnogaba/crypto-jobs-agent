@@ -252,6 +252,25 @@ export function countryFromLocation(text: string | null | undefined): string | n
   return null;
 }
 
+/**
+ * УСІ країни, названі в рядку, а не перша.
+ *
+ * Жива скарга 31.08: людина написала «Bratislava, Vienna, Budapest, Prague»
+ * і отримувала вакансії в APAC та Америці. Причина не в підборі — у виводі:
+ * країна лишалась одна, CZ. Три з чотирьох її міст ставали для системи
+ * такими самими «промахами», як Джакарта, і коштували рівно стільки ж.
+ *
+ * Порядок збережено за PLACES, а не за появою в тексті: він і так лише для
+ * читабельності, бо далі це множина.
+ */
+export function deriveCountries(text: string | null | undefined): string[] {
+  if (!text?.trim()) return [];
+  const fixed = fixLayout(text);
+  const out: string[] = [];
+  for (const [code, re] of PLACES) if (re.test(fixed) && !out.includes(code)) out.push(code);
+  return out;
+}
+
 /** Країна з часового поясу, або null. */
 export function countryFromTimezone(tz: string | null | undefined): string | null {
   return (tz && TZ_COUNTRY[tz]) ?? null;

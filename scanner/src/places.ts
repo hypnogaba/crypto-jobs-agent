@@ -484,11 +484,24 @@ export function placeOf(location: string | null | undefined): Place {
  */
 export type PlaceFit = "hit" | "miss" | "unknown";
 
-export function placeFit(place: Place, country: string | null | undefined): PlaceFit {
-  if (!country) return "unknown";
+/**
+ * Країни людини — НАБІР, а не одна.
+ *
+ * «Bratislava, Vienna, Budapest, Prague» — це чотири країни, і кожна з них
+ * її. Поки тут стояла одна, три інші рахувались промахом нарівні з
+ * Джакартою й коштували стільки ж. Рядок приймається і кома-списком
+ * («SK,AT,HU,CZ»), і однією країною — старі профілі читаються без міграції.
+ */
+export const parseCountries = (raw: string | string[] | null | undefined): string[] =>
+  (Array.isArray(raw) ? raw : (raw ?? "").split(","))
+    .map((c) => c.trim().toUpperCase()).filter(Boolean);
+
+export function placeFit(place: Place, country: string | string[] | null | undefined): PlaceFit {
+  const mine = parseCountries(country);
+  if (mine.length === 0) return "unknown";
   if (place.anywhere) return "hit";
-  if (place.countries.includes(country)) return "hit";
-  if (place.regions.some((r) => REGION_COUNTRIES[r]?.includes(country))) return "hit";
+  if (mine.some((c) => place.countries.includes(c))) return "hit";
+  if (place.regions.some((r) => mine.some((c) => REGION_COUNTRIES[r]?.includes(c)))) return "hit";
   if (!place.known) return "unknown";
   return "miss";
 }

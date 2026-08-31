@@ -7,7 +7,7 @@
  */
 
 import { labelOf, languageName, whyLine, type Locale, type WhyBit } from "./digest-copy.js";
-import { placeFit, placeOf } from "./places.js";
+import { parseCountries, placeFit, placeOf } from "./places.js";
 import { toEur } from "./money.js";
 
 /**
@@ -583,8 +583,9 @@ export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): Score
   // Країна людини береться з профілю, а як її там немає — виводиться з
   // написаного міста тим самим розбором. Профілі, збережені до появи
   // стовпця `country`, інакше лишились би без географії назавжди.
-  const myCountry = p.country ?? placeOf(cityText(p)).countries[0] ?? null;
-  const fit = placeFit(place, myCountry);
+  // Усі країни людини, а не перша: вона назвала чотири міста — усі чотири її.
+  const myCountries = p.country ? parseCountries(p.country) : placeOf(cityText(p)).countries;
+  const fit = placeFit(place, myCountries);
   const cityHit = cityMatches(job.location, cityText(p));
 
   if (remoteOnly(p.remoteMode)) {
@@ -600,7 +601,7 @@ export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): Score
   } else {
     // Людина згодна на офіс — отже, місце має значення, а не лише прапорець.
     if (cityHit) { add("place", 4); facts.push({ k: "place", v: p.location ?? cityText(p)! }); }
-    else if (fit === "hit") { add("place", 3); facts.push({ k: "place", v: p.location ?? myCountry! }); }
+    else if (fit === "hit") { add("place", 3); facts.push({ k: "place", v: p.location ?? myCountries.join(", ") }); }
     else if (fit === "miss") {
       // Офіс на іншому континенті — не «менш доречно», а неможливо. Готовність
       // переїхати робить це незручністю; віддаленість — обмеженням у праві
@@ -780,8 +781,8 @@ export function reachable(job: CandidateJob, p: Profile): boolean {
   if (remoteOnly(p.remoteMode)) return true;   // там свій штраф, -6 за onsite
   if (willRelocate(p.remoteMode)) return true;
   if (!job.location?.trim()) return false;     // офіс невідомо де — нікуди ходити
-  const myCountry = p.country ?? placeOf(cityText(p)).countries[0] ?? null;
-  return placeFit(placeOf(job.location), myCountry) !== "miss";
+  const myCountries = p.country ? parseCountries(p.country) : placeOf(cityText(p)).countries;
+  return placeFit(placeOf(job.location), myCountries) !== "miss";
 }
 
 /**

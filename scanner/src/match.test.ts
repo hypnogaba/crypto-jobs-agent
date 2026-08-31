@@ -753,3 +753,43 @@ describe("порожній пошук, який виглядав осмисле�
     expect(hasSearchSignal({ spheres: ["product"], customRole: "junior" })).toBe(true);
   });
 });
+
+import { parseCountries } from "./places.js";
+
+/**
+ * Жива скарга 31.08: «Bratislava, Vienna, Budapest, Prague» — і вакансії в
+ * APAC та Америці. Причина була не в підборі, а у виводі: країна лишалась
+ * одна, тож три з чотирьох власних міст людини коштували їй стільки ж,
+ * скільки Джакарта.
+ */
+describe("людина назвала кілька міст", () => {
+  const many: Profile = {
+    userId: "u3", spheres: ["marketing"], industries: [],
+    remoteMode: "relocate", location: "Bratislava, Vienna, Budapest, Prague",
+    country: "SK,AT,HU,CZ", salaryMin: null,
+  };
+  const job = (loc: string): CandidateJob => ({
+    id: loc, company: "A", companyKey: "a", title: "Marketing Manager",
+    location: loc, remote: false, url: "https://x/1",
+    tags: ["marketing"], postedAt: null, salaryMin: null, salaryCurrency: null,
+  });
+
+  it("кома-список читається як набір країн", () => {
+    expect(parseCountries("SK,AT,HU,CZ")).toEqual(["SK", "AT", "HU", "CZ"]);
+    // Старий профіль з однією країною читається без міграції.
+    expect(parseCountries("PL")).toEqual(["PL"]);
+    expect(parseCountries(null)).toEqual([]);
+  });
+
+  it("кожне назване місто важить, а не лише останнє", () => {
+    for (const city of ["Vienna, Austria", "Budapest, Hungary", "Bratislava, Slovakia", "Prague, Czechia"]) {
+      expect(scoreJob(job(city), many).facts.some((f) => f.k === "place")).toBe(true);
+    }
+  });
+
+  it("своє місто стоїть вище за чужий континент", () => {
+    const vienna = scoreJob(job("Vienna, Austria"), many).score;
+    const jakarta = scoreJob(job("Jakarta, Indonesia"), many).score;
+    expect(vienna).toBeGreaterThan(jakarta);
+  });
+});

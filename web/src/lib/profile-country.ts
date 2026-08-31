@@ -1,5 +1,5 @@
 import { one, run } from "@/lib/db";
-import { deriveCountry } from "@/lib/geo";
+import { deriveCountries } from "@/lib/geo";
 import { normalizeCity, normalizeFreeText } from "@/lib/normalize-text";
 import { logUsage } from "@/lib/usage";
 
@@ -38,7 +38,10 @@ export async function persistDerived(userId: string, apiKey: string | null): Pro
     // Країна й місто — детерміновані й дешеві, тому рахуються завжди.
     // Часовий пояс сюди не входить: країна — це відповідь на «де хочеш
     // працювати», а не здогад про місце перебування.
-    const country = deriveCountry(r.location);
+    // Кома-список, як і `remote_mode`: людина називає кілька міст, і всі
+    // вони — її місця, а не лише перше. Міграції не потрібно, стовпець
+    // текстовий; читає його parseCountries у сканері.
+    const country = deriveCountries(r.location).join(",") || null;
     const locationEn = normalizeCity(r.location);
 
     if (r.normalized_from === sourceKey(r)) {
