@@ -381,6 +381,20 @@ const P = {
     fr: "Pas encore de profil — /start pose les questions. /help pour le reste.",
     ru: "Профиля ещё нет — /start задаст вопросы. /help — остальное.",
   },
+  /**
+   * Підтвердження, яке називає поле й значення.
+   *
+   * Раніше запис підтверджувало одне слово «Записав.» у хвості довгого
+   * підсумку, ще й у ПЕРЕПИСАНОМУ повідомленні — у чаті нічого не
+   * з'являлось, тож людина не бачила, чи її слова взагалі дійшли, і писала
+   * те саме втретє.
+   */
+  savedFields: {
+    en: "Recorded:",
+    uk: "Записав:",
+    fr: "Enregistré :",
+    ru: "Записал:",
+  },
   // Коротке слово посеред питань: кнопки чекають, а слово ні до чого не веде.
   useButtons: {
     en: "Use the buttons above, or write a full sentence about the work you want and I will tick the boxes.",

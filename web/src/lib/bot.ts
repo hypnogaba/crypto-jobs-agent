@@ -3,12 +3,12 @@ import {
   emptyDraft, keyboard, nextStep, questionText, askOtherAmount, askCustomFor, askTime, askWishes,
   readyText, draftTimezone, profileMenu, profileUpdateFor, backButton,
   STEPS, EDITABLE,
-  summary, toggle, type Draft, type Step,
+  summary, toggle, fieldLabel, type Draft, type Step,
 } from "./bot-onboarding";
 import { isLocale, LOCALES, toLocale } from "./i18n";
 import { CvError, extractCvText } from "./cv";
-import { parseProfile } from "./parse";
-import { yearlyFrom } from "./salary-period";
+import { parseProfile, type ParsedProfile } from "./parse";
+import { monthlyFrom, yearlyFrom } from "./salary-period";
 import { t as say, tf, timeNow, timeSet } from "./bot-copy";
 import { parseModes, serializeModes, toggleMode, type Locale } from "./vocab";
 import { persistDerived } from "@/lib/profile-country";
@@ -754,9 +754,95 @@ async function handleEditText(
     return true;
   }
 
-  // Інший edit:-крок (наприклад, спискова клавіатура) — текст ні до чого.
-  await send(env, chatId, say("useButtons", locale));
+  /**
+   * Будь-який інший крок правки: текст ПРИЙМАЄТЬСЯ, а не відхиляється.
+   *
+   * Тут стояло «скористайся кнопками вище». Живий випадок: людина тисне
+   * «Побажання», пише «комуніті менеджер» — записалось; повертається в меню,
+   * пише те саме ще раз — відмова. Той самий текст то приймався, то ні,
+   * залежно від невидимого їй стану, і жодна відмова не пояснювала, який
+   * стан правильний. Ще гірше на списках: «Сфери» приймали текст лише ПІСЛЯ
+   * «Немає в списку», тобто кнопки й слова були взаємно виключні.
+   *
+   * Тепер вони доповнюють одне одного. Написане розбирається тим самим
+   * парсером, що й на сайті, і лягає в УСІ поля, які він упізнав, — галочки
+   * при цьому лишаються, їх можна дообрати. Правило просте на весь бот:
+   * написане людиною ніколи не пропадає.
+   */
+  if (text.trim().length < 3) {
+    await send(env, chatId, say("useButtons", locale));
+    return true;
+  }
+  const parsed = await parseProfile(text, env.ANTHROPIC_API_KEY ?? null);
+  const changed = mergeIntoDraft(draft, parsed, text);
+  if (changed.length === 0) {
+    await send(env, chatId, say("useButtons", locale));
+    return true;
+  }
+  await saveWholeProfile(env, user.id, draft);
+  await send(env, chatId, savedLine(changed, locale));
+  await showProfileMenu(env, chatId, user.id, locale, row.message_id);
   return true;
+}
+
+/**
+ * Що з розібраного справді нове — і одразу список полів для підтвердження.
+ *
+ * Порожнє поле не перетирає заповнене: людина, яка написала одну роль, не
+ * має втратити місто, назване раніше.
+ */
+function mergeIntoDraft(draft: Draft, parsed: ParsedProfile, text: string): Array<[string, string]> {
+  const changed: Array<[string, string]> = [];
+  if (parsed.spheres.length) {
+    draft.spheres = [...new Set([...draft.spheres, ...parsed.spheres])];
+    changed.push(["spheres", String(draft.spheres.length)]);
+  }
+  if (parsed.industries.length) {
+    draft.industries = [...new Set([...draft.industries, ...parsed.industries])];
+    changed.push(["industries", String(draft.industries.length)]);
+  }
+  if (parsed.customRole) { draft.customRole = parsed.customRole; changed.push(["role", parsed.customRole]); }
+  if (parsed.customIndustry) {
+    draft.customIndustry = parsed.customIndustry;
+    changed.push(["industry", parsed.customIndustry]);
+  }
+  if (parsed.remoteMode) { draft.remoteMode = parsed.remoteMode; changed.push(["where", parsed.remoteMode]); }
+  if (parsed.location) { draft.location = parsed.location; changed.push(["city", parsed.location]); }
+  if (parsed.salaryMin) {
+    draft.salaryMin = parsed.salaryMin;
+    draft.salaryCurrency = parsed.salaryCurrency;
+    changed.push(["salary", `${monthlyFrom(parsed.salaryMin)} ${parsed.salaryCurrency ?? "EUR"}`]);
+  }
+  // Нічого не впізнали — написане не викидаємо: воно йде в побажання, за які
+  // підбір дає до +6 балів. Саме так із цим текстом чинить сайт.
+  if (changed.length === 0) {
+    const own = (parsed.leftover ?? text).trim().slice(0, 1000);
+    if (own) { draft.wishes = own; changed.push(["wishes", own]); }
+  } else if (parsed.leftover && !draft.wishes) {
+    draft.wishes = parsed.leftover;
+    changed.push(["wishes", parsed.leftover]);
+  }
+  return changed;
+}
+
+/** Підтвердження, яке називає поле й значення, а не саме себе. */
+function savedLine(changed: Array<[string, string]>, locale: Locale): string {
+  const rows = changed.map(([field, value]) => `${fieldLabel(field as Step, locale)}: ${value}`);
+  return `${say("savedFields", locale)}\n${rows.join("\n")}`;
+}
+
+/** Уся чернетка в profiles одним записом: розбір міняє кілька полів одразу. */
+async function saveWholeProfile(env: Env, userId: string, draft: Draft): Promise<void> {
+  await run(
+    `UPDATE profiles SET spheres=?, custom_role=?, industries=?, custom_industry=?,
+                         remote_mode=?, location=?, salary_min=?, salary_currency=?, wishes=?,
+                         updated_at=datetime('now')
+      WHERE user_id=?`,
+    JSON.stringify(draft.spheres), draft.customRole ?? null,
+    JSON.stringify(draft.industries), draft.customIndustry ?? null,
+    serializeModes(parseModes(draft.remoteMode)) || "remote_only", draft.location ?? null,
+    draft.salaryMin, draft.salaryCurrency, draft.wishes?.trim() || null, userId);
+  await persistDerived(userId, env.ANTHROPIC_API_KEY ?? null);
 }
 
 // ── Мова ─────────────────────────────────────────────────────

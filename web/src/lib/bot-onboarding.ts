@@ -350,6 +350,23 @@ export const backButton = (locale: Locale): Button => ({
 });
 
 /** Рядки-пункти під /profile: кожен відкриває клавіатуру одного питання. */
+/**
+ * Підпис поля людськими словами — для підтвердження «що саме я записав».
+ *
+ * Ті самі назви, що на кнопках меню правки: людина щойно їх бачила, і
+ * вигадувати для підтвердження другий словник означало б змусити її
+ * здогадуватись, що «роль» і «Сфери» — те саме місце.
+ */
+export function fieldLabel(step: Step | "role" | "industry", locale: Locale): string {
+  const map: Record<string, Phrase> = {
+    spheres: WORD.fSpheres, industries: WORD.fIndustries, where: WORD.fWhere,
+    city: WORD.fWhere, salary: WORD.fSalary, wishes: WORD.fWishes, tz: WORD.fTz,
+    role: { en: "Your role", uk: "Своя роль", fr: "Votre rôle", ru: "Своя роль" },
+    industry: { en: "Your industry", uk: "Своя галузь", fr: "Votre secteur", ru: "Своя отрасль" },
+  };
+  return say(map[step] ?? WORD.fSpheres, locale);
+}
+
 export function profileMenu(locale: Locale): Button[][] {
   const b = (p: Phrase, step: string): Button => ({ text: say(p, locale), callback_data: `ed:${step}` });
   return [
