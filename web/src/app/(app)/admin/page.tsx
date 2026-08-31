@@ -136,6 +136,97 @@ function Person({ nick, name, id }: { nick: string | null; name: string | null; 
  * мусять виглядати однаково: різниця між ними в тому, КОМУ видно вакансію,
  * а не в тому, як її показувати власникові.
  */
+interface BoardRow {
+  id: string; country: string; label: string; enabled: number;
+  status: string | null; jobs_last_run: number | null;
+}
+interface BoardGroup { country: string; name: string; rows: BoardRow[] }
+
+/**
+ * Дошки однією таблицею. Викликається двічі — і в цьому вся правка.
+ *
+ * Раніше глобальні дошки й національні стояли впереміш, відрізняючись лише
+ * зірочкою в першому стовпчику. Це два різні питання: «чим ми накриваємо всіх»
+ * і «чи є дошка під країну, з якої в нас є людина». Відповідь на друге
+ * доводилось видобувати очима зі списку, відсортованого не за тим.
+ */
+function BoardTable({ groups, title }: { groups: BoardGroup[]; title: string }) {
+  if (groups.length === 0) return null;
+  const live = groups.filter((g) => g.rows.some((r) => r.enabled === 1)).length;
+  return (
+    <div className="card mt-3 overflow-x-auto px-6 py-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-3">
+        <h4 className="eyebrow">{title} · {groups.length}</h4>
+        <span className="mono text-xs" style={{ color: "var(--muted)" }}>
+          увімкнено {live}
+        </span>
+      </div>
+      <table className="board mt-3">
+        <thead>
+          <tr><th>країна</th><th>дошка</th><th>стан</th><th className="num">рубрик</th>
+              <th className="num">вакансій</th><th /></tr>
+        </thead>
+        <tbody>
+{groups.map((g) => {
+                      const on = g.rows.filter((r) => r.enabled === 1).length;
+                      const jobs = g.rows.reduce((n, r) => n + (r.jobs_last_run ?? 0), 0);
+                      const bad = g.rows.filter((r) => r.status === "deprecated").length;
+                      const soso = g.rows.filter((r) => r.status === "degraded").length;
+                      return (
+                        <tr key={`${g.country}|${g.name}`}>
+                          <td className="mono text-xs"
+                              style={{ color: g.country === "*" ? "var(--muted)" : undefined }}>
+                            {g.country === "*" ? "усі" : g.country}
+                          </td>
+                          <td className="text-xs">
+                            {g.rows.length > 1 ? (
+                              <details>
+                                <summary style={{ cursor: "pointer" }}>{g.name}</summary>
+                                <div className="mono mt-2 text-xs" style={{ color: "var(--muted)" }}>
+                                  {g.rows.map((r) => (
+                                    <div key={r.id} className="flex items-center justify-between gap-4 py-0.5">
+                                      <span>{r.label.split(" · ")[1] ?? r.label}</span>
+                                      <span>{r.jobs_last_run ?? "—"}</span>
+                                      <form action={toggleBoard}>
+                                        <input type="hidden" name="id" value={r.id} />
+                                        <button className="mono text-xs hover:underline"
+                                                style={{ color: "var(--ember)" }}>
+                                          {r.enabled === 0 ? "увімкнути" : "вимкнути"}
+                                        </button>
+                                      </form>
+                                    </div>
+                                  ))}
+                                </div>
+                              </details>
+                            ) : g.name}
+                          </td>
+                          <td>
+                            <span className={`tag ${on === 0 ? "tag-flat" : bad > 0 ? "tag-bad"
+                              : soso > 0 ? "tag-warn" : "tag-ok"}`}>
+                              {on === 0 ? "вимкнено" : bad > 0 ? `мертвих ${bad}`
+                                : soso > 0 ? `збоїть ${soso}` : "працює"}
+                            </span>
+                          </td>
+                          <td className="num text-xs">{on === g.rows.length ? g.rows.length : `${on} / ${g.rows.length}`}</td>
+                          <td className="num text-xs">{jobs || "—"}</td>
+                          <td className="text-right">
+                            <form action={toggleBoardGroup}>
+                              <input type="hidden" name="country" value={g.country} />
+                              <input type="hidden" name="board" value={g.name} />
+                              <button className="mono text-xs hover:underline" style={{ color: "var(--ember)" }}>
+                                {on === 0 ? "увімкнути всі" : "вимкнути всі"}
+                              </button>
+                            </form>
+                          </td>
+                        </tr>
+                      );
+                    })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function FeedTable({ rows, title }: {
   rows: Array<{ source: string; label: string; family: string; country: string | null;
                 jobs: number; fresh: number; status: string | null; parts: number }>;
@@ -255,13 +346,34 @@ function Spark({ points, label }: { points: Array<{ d: string; v: number }>; lab
           різниця між 900 і 950 у них не видно взагалі. Тому те саме
           розгортається вище і з підписами — на місці, без окремої сторінки. */}
       <details className="mt-3">
-        <summary className="list-none" style={{ cursor: "pointer" }}>{bars(false)}</summary>
+        <summary className="list-none" style={{ cursor: "pointer" }}>
+          {bars(false)}
+          <span className="mono mt-1 block text-xs" style={{ color: "var(--muted)" }}>
+            розгорнути ›
+          </span>
+        </summary>
         <div className="mt-3">
           {bars(true)}
           <div className="mono mt-2 flex justify-between text-xs" style={{ color: "var(--muted)" }}>
             <span>{points[0]?.d.slice(5) ?? ""}</span>
             <span>найменше {num(Number.isFinite(low) ? low : 0)} · найбільше {num(peak)}</span>
             <span>{points.at(-1)?.d.slice(5) ?? ""}</span>
+          </div>
+
+          {/* Числа по днях — текстом, а не підказкою.
+              Підказка живе в `title`, тобто з'являється лише при НАВЕДЕННІ, а
+              на телефоні наведення не існує: там число за день не можна було
+              дістати взагалі, скільки в графік не тицяй. Довгі вікна
+              проріджуємо, щоб «рік» не перетворився на простирадло. */}
+          <div className="mono mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs"
+               style={{ color: "var(--ink-2)" }}>
+            {points
+              .filter((_, i) => points.length <= 32
+                || i % Math.ceil(points.length / 32) === 0
+                || i === points.length - 1)
+              .map((pt) => (
+                <span key={pt.d}>{pt.d.slice(5)} · {num(pt.v)}</span>
+              ))}
           </div>
         </div>
       </details>
@@ -298,6 +410,44 @@ function Funnel({ steps }: { steps: Array<{ label: string; n: number; note: stri
       ))}
     </div>
   );
+}
+
+/**
+ * Годинник сервера, а не браузера.
+ *
+ * Таймери systemd спрацьовують за місцевим часом VPS, тож «наступний прогін»
+ * має рахуватись у ньому. Взяти час машини, що малює сторінку, означало б
+ * показувати різні відповіді залежно від того, звідки дивишся.
+ */
+const VPS_ZONE = "Europe/Berlin";
+const DAY_NAME = ["неділя", "понеділок", "вівторок", "середа", "четвер", "п'ятниця", "субота"];
+
+/** Котра година й котрий день тижня зараз на сервері. */
+function serverNow(now: Date): { day: number; hour: number } {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: VPS_ZONE, weekday: "short", hour: "2-digit", hour12: false,
+  }).formatToParts(now);
+  const wd = parts.find((x) => x.type === "weekday")?.value ?? "Sun";
+  const hh = Number.parseInt(parts.find((x) => x.type === "hour")?.value ?? "0", 10);
+  return { day: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(wd), hour: hh };
+}
+
+/**
+ * Через скільки днів наступний прогін і в який день.
+ *
+ * Рахуємо в цілих днях навмисно: точна мітка часу вимагала б відтворювати
+ * перехід на літній час, а помилка тут коштувала б довіри до всього блоку.
+ * «Неділя 06:00 · через 5 дн.» відповідає на питання власника повністю.
+ */
+function nextRun(days: readonly number[], hour: number, now: Date): { label: string; inDays: number } {
+  const { day, hour: h } = serverNow(now);
+  for (let i = 0; i <= 7; i++) {
+    const d = (day + i) % 7;
+    if (!days.includes(d)) continue;
+    if (i === 0 && h >= hour) continue;
+    return { label: `${DAY_NAME[d]} ${String(hour).padStart(2, "0")}:00`, inDays: i };
+  }
+  return { label: "—", inDays: 0 };
 }
 
 /** Скільки сфер обрала людина. Порожній JSON — анкети ще немає. */
@@ -346,10 +496,45 @@ function SourceTable({ rows, total }: {
   );
 }
 
+/**
+ * Щаблі лійки як фільтр списку людей.
+ *
+ * Умова кожного рядка — та сама, за якою лійка вище рахує свій відсоток.
+ * Дві різні умови для одного слова вже дали суперечність на екрані («12 ·
+ * 100%» поряд із трьома «немає»), і повторювати її окремо для фільтра
+ * означало б завести її вдруге.
+ */
+const PEOPLE_FILTERS = [
+  { id: "all", label: "усі", where: "" },
+  { id: "noprofile", label: "без анкети",
+    where: `(p.user_id IS NULL
+             OR ((p.spheres IS NULL OR p.spheres IN ('', '[]'))
+                 AND (p.custom_role IS NULL OR trim(p.custom_role) = '')))` },
+  { id: "notg", label: "без Telegram", where: "u.telegram_chat_id IS NULL" },
+  { id: "nodigest", label: "без добірки",
+    where: "NOT EXISTS (SELECT 1 FROM sent WHERE user_id=u.id AND status='sent')" },
+  { id: "silent", label: "без реакції",
+    where: `EXISTS (SELECT 1 FROM sent WHERE user_id=u.id AND status='sent')
+            AND NOT EXISTS (SELECT 1 FROM feedback WHERE user_id=u.id)` },
+] as const;
+
+/** Скільки людей на сторінці. Десять — щоб блок не з'їдав екран. */
+const PEOPLE_PAGE = 10;
+
+/** Адреса списку людей. Порожні значення не пишемо — «/admin#people» чистіше. */
+const peopleHref = (who: string, page: number): string => {
+  const q = new URLSearchParams();
+  if (who !== "all") q.set("who", who);
+  if (page > 1) q.set("page", String(page));
+  return `/admin${q.toString() ? `?${q}` : ""}#people`;
+};
+
 export default async function Admin({ searchParams }: {
-  searchParams: Promise<{ range?: string; bucket?: string }>;
+  searchParams: Promise<{ range?: string; bucket?: string; who?: string; page?: string }>;
 }) {
-  const { range, bucket } = await searchParams;
+  const { range, bucket, who, page } = await searchParams;
+  const filter = PEOPLE_FILTERS.find((f) => f.id === who) ?? PEOPLE_FILTERS[0];
+  const pageNo = Math.max(1, Number.parseInt(page ?? "1", 10) || 1);
   const DAYS = RANGES.find((r) => r.id === range)?.days ?? DEFAULT_DAYS;
   const step: Bucket = BUCKETS.find((b) => b.id === bucket) ?? BUCKETS[0];
   const locale = await detectLocale();
@@ -389,6 +574,49 @@ export default async function Admin({ searchParams }: {
   const lastRun = await one<{ started_at: string; status: string; jobs_found: number;
     ladder_reached: string | null; notes: string | null }>(
     "SELECT * FROM scan_runs ORDER BY started_at DESC LIMIT 1");
+
+  /**
+   * Що система міняє в собі сама — і коли наступного разу.
+   *
+   * Розклад живе в systemd на VPS, а не в базі, тож повторюємо його тут
+   * СПИСКОМ, а не вигадуємо: кожен рядок дослівно відповідає файлу в
+   * scanner/deploy. Наступний час рахується з того самого правила, тому
+   * панель не може розійтися з сервером мовчки — розійдеться видимо, і це
+   * помітно з «як пройшло» поруч.
+   */
+  const learning = [
+    { name: "Скан джерел", days: [1, 2, 3, 4, 5], hour: 5,
+      what: "обходить драбину джерел і наповнює кеш вакансій",
+      unit: "nextrole-scan.timer" },
+    { name: "Сторож", days: [1, 2, 3, 4, 5], hour: 8,
+      what: "судить учорашній скан і, якщо той вийшов коротким, запускає ще раз",
+      unit: "nextrole-watchdog.timer" },
+    { name: "Самоперегляд", days: [0], hour: 6,
+      what: "сім правил над власними даними: що поховати, що воскресити, які компанії давно порожні — і кладе це в «Що пропоную змінити»",
+      unit: "nextrole-review.timer" },
+    { name: "Розвідка Getro", days: [0], hour: 4,
+      what: "шукає нові колекції фондів і записує їх вимкненими",
+      unit: "nextrole-discover.timer" },
+    { name: "Розвідка дошок", days: [0], hour: 7,
+      what: "шукає дошки під країни, де вже є люди, а джерел немає",
+      unit: "nextrole-twitter.timer" },
+  ];
+
+  /** Історія прогонів, а не лише останній: «як пройшов» видно тільки поруч. */
+  const runs = await all<{ started_at: string; finished_at: string | null; status: string;
+    jobs_found: number; distinct_companies: number; ladder_reached: string | null; notes: string | null }>(
+    "SELECT * FROM scan_runs ORDER BY started_at DESC LIMIT 7");
+
+  /** Що самоперегляд і розвідка вже принесли — і скільки з того ми прийняли. */
+  const learned = await one<{ open: number; applied: number; dismissed: number; last_at: string | null }>(
+    `SELECT SUM(status='open') open, SUM(status='applied') applied,
+            SUM(status='dismissed') dismissed, MAX(created_at) last_at
+       FROM proposals`);
+
+  /** Ваги, вивчені зі скарг людей. Порожньо — скарг ще не було. */
+  const tuned = await one<{ people: number; loc: number | null; sal: number | null }>(
+    `SELECT COUNT(*) people, MAX(location_weight) loc, MAX(salary_weight) sal
+       FROM user_tuning WHERE location_weight > 1 OR salary_weight > 1`);
 
   const proposals = await all<{ id: string; kind: string; target: string | null; title: string;
     detail: string; evidence: string | null; severity: string; created_at: string }>(
@@ -556,13 +784,48 @@ export default async function Admin({ searchParams }: {
 
   const intake = await all<{ id: string; url: string; at: string; verdict: string;
     kind: string | null; target: string | null; note: string | null; found: number;
-    fix: string | null }>(
-    // Лише невдалі. Вдалий рядок нічого не пояснює — з ним уже все гаразд, —
-    // а займав більшу частину блоку: вісім посилань поспіль зі словом
-    // «додано» ховали два, з якими треба щось робити.
-    `SELECT * FROM source_intake
+    fix: string | null; attempts: number }>(
+    // Лише невдалі, і кожна адреса ОДИН раз.
+    //
+    // Досі рядки йшли як є, і блок був журналом спроб, а не списком роботи:
+    // один прогін розвідки 30.08 записав кожну адресу по п'ять разів за
+    // двадцять секунд, тож дванадцять рядків описували три посилання.
+    // Тепер адреса згортається в один рядок, а скільки разів ми стукали —
+    // це окреме число поруч, і воно корисніше за п'ять однакових рядків.
+    `SELECT url, MAX(id) id, MAX(at) at, COUNT(*) attempts,
+            MAX(verdict) verdict, MAX(kind) kind, MAX(target) target,
+            MAX(note) note, MAX(found) found, MAX(fix) fix
+       FROM source_intake
       WHERE verdict <> 'added' AND verdict <> 'duplicate'
+      GROUP BY url
       ORDER BY at DESC LIMIT 12`);
+
+  /**
+   * Рядки, з якими людині нема що робити, знімаються самі.
+   *
+   * Блок питав власника про те, що вже зроблено або вже вирішено:
+   * `jobstash.xyz`, `web3.career`, `crypto-careers.com` і `cryptocurrencyjobs.co`
+   * стояли з вердиктом «не розпізнано», хоч усі чотири підключені й дають
+   * 1638, 438, 20 і 85 вакансій — просто під іншою адресою стрічки, тож
+   * звірка за повним рядком їх не бачила. Порівнюємо ВУЗОЛ, а не адресу.
+   *
+   * Друга половина — ті, що не запрацюють ніколи: домен за інтерактивним
+   * викликом Cloudflare або сторінка, порожня без JavaScript. Це вже
+   * виміряно й записано в docs/BACKLOG.md; тримати їх у списку роботи
+   * означає щотижня пропонувати спробу, яка не може вдатися.
+   */
+  const HOPELESS: Record<string, string> = {
+    "cryptojobslist.com": "домен за викликом Cloudflare, усі шляхи RSS дають 403",
+    "beincrypto.com": "домен за викликом Cloudflare, усі шляхи RSS дають 403",
+    "kyzzen.io": "дошка порожня без JavaScript, а вакансій там дев'ять",
+    "ethereumjobboard.com": "дошка порожня без JavaScript, а вакансій там дев'ять",
+  };
+  const host = (u: string): string => {
+    try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return ""; }
+  };
+  const knownHosts = new Set(boards.map((b) => host(b.feed_url)).filter(Boolean));
+  const intakeLive = intake.filter((x) => !knownHosts.has(host(x.url)) && !HOPELESS[host(x.url)]);
+  const intakeHidden = intake.length - intakeLive.length;
 
   // Скільки прийнялось — числом, бо сам список не потрібен.
   const intakeOk = (await one<{ n: number }>(
@@ -633,7 +896,9 @@ export default async function Admin({ searchParams }: {
   const funnel = await one<{ registered: number; profiled: number; connected: number;
     delivered: number; reacted: number }>(`
     SELECT (SELECT COUNT(*) FROM users) registered,
-           (SELECT COUNT(*) FROM profiles) profiled,
+           (SELECT COUNT(*) FROM profiles
+             WHERE (spheres IS NOT NULL AND spheres NOT IN ('', '[]'))
+                OR (custom_role IS NOT NULL AND trim(custom_role) <> '')) profiled,
            (SELECT COUNT(*) FROM users WHERE telegram_chat_id IS NOT NULL) connected,
            (SELECT COUNT(DISTINCT user_id) FROM sent WHERE status='sent') delivered,
            (SELECT COUNT(DISTINCT user_id) FROM feedback) reacted`);
@@ -642,19 +907,27 @@ export default async function Admin({ searchParams }: {
   // екрана. А от нік є: за «06df703e» неможливо ні впізнати людину, ні
   // написати їй, і саме це власник хоче зробити, дивлячись на цей список.
   const people = await all<{ id: string; created_at: string | null; locale: string; status: string;
-    tg: number; country: string | null; spheres: string | null; sent: number;
+    tg: number; country: string | null; spheres: string | null; custom_role: string | null; sent: number;
     more: number; nope: number; last_seen: string | null;
     nick: string | null; person: string | null }>(`
     SELECT u.id, u.created_at, u.locale, u.status,
            u.telegram_username nick, u.telegram_name person,
            CASE WHEN u.telegram_chat_id IS NULL THEN 0 ELSE 1 END tg,
            u.last_interaction_at last_seen,
-           p.country, p.spheres,
+           p.country, p.spheres, p.custom_role,
            (SELECT COUNT(*) FROM sent WHERE user_id=u.id AND status='sent') sent,
            (SELECT COUNT(*) FROM feedback WHERE user_id=u.id AND reaction='more') more,
            (SELECT COUNT(*) FROM feedback WHERE user_id=u.id AND reaction='not_relevant') nope
       FROM users u LEFT JOIN profiles p ON p.user_id = u.id
-     ORDER BY u.created_at DESC LIMIT 50`);
+     ${filter.where ? `WHERE ${filter.where}` : ""}
+     ORDER BY u.created_at DESC LIMIT ? OFFSET ?`,
+    PEOPLE_PAGE, (pageNo - 1) * PEOPLE_PAGE);
+
+  // Скільки їх усього за цим фільтром — саме звідси беруться номери сторінок.
+  const peopleTotal = (await one<{ n: number }>(
+    `SELECT COUNT(*) n FROM users u LEFT JOIN profiles p ON p.user_id = u.id
+     ${filter.where ? `WHERE ${filter.where}` : ""}`))?.n ?? 0;
+  const pages = Math.max(1, Math.ceil(peopleTotal / PEOPLE_PAGE));
 
   // Останній вимір ДО вікна. Без нього кожен день до першого скану у вікні
   // малювався нулем: «вакансій у кеші» показувало одинадцять порожніх
@@ -782,13 +1055,29 @@ export default async function Admin({ searchParams }: {
         <div className="mt-12 flex flex-col gap-12">
           <Block id="people" title={`Люди · ${funnel?.registered ?? 0}`}
                  lede="Де вони застрягли. Кожен щабель, який людина не пройшла, — це наша недоробка, а не її неуважність."
-                 right={nameless > 0 ? (
-                   <form action={refreshTelegramNames}>
-                     <SubmitButton busy="Питаю Telegram…" className="btn btn-quiet px-3 py-2 text-xs">
-                       Підтягнути ніки · {nameless}
-                     </SubmitButton>
-                   </form>
-                 ) : undefined}>
+                 right={
+                   <div className="flex flex-wrap items-center gap-4">
+                     {/* Фільтр — це ті самі щаблі лійки зліва. Дивитись на
+                         «хто застряг без Telegram» очима по всьому списку
+                         було неможливо вже на дванадцятьох. */}
+                     <div className="flex flex-wrap gap-3">
+                       {PEOPLE_FILTERS.map((f) => (
+                         <Link key={f.id} href={peopleHref(f.id, 1)} className="mono text-xs"
+                               style={{ color: f.id === filter.id ? "var(--ember)" : "var(--muted)",
+                                        textDecoration: f.id === filter.id ? "underline" : "none" }}>
+                           {f.label}
+                         </Link>
+                       ))}
+                     </div>
+                     {nameless > 0 && (
+                       <form action={refreshTelegramNames}>
+                         <SubmitButton busy="Питаю Telegram…" className="btn btn-quiet px-3 py-2 text-xs">
+                           Підтягнути ніки · {nameless}
+                         </SubmitButton>
+                       </form>
+                     )}
+                   </div>
+                 }>
             <div className="grid gap-6 lg:grid-cols-[minmax(0,22rem)_1fr]">
               <Funnel steps={[
                 { label: "Зареєструвались", n: funnel?.registered ?? 0, note: "почали з сайту або з бота" },
@@ -812,9 +1101,18 @@ export default async function Admin({ searchParams }: {
                           {x.created_at?.slice(0, 10) ?? "—"}
                         </td>
                         <td className="text-xs">
+                          {/* «Немає анкети» має означати те саме, що й у підборі:
+                              нема З ЧОГО шукати. Своя роль — така сама вісь, як
+                              сфера (hasSearchSignal у scanner/src/match.ts бере
+                              будь-яку з двох), тож людина, яка написала «Junior
+                              regulatory affairs» і не тиснула жодної кнопки,
+                              стояла тут із поміткою «немає» — і виглядала
+                              загубленою, хоча добірку отримує справно. */}
                           {sphereCount(x.spheres) > 0
                             ? `${sphereCount(x.spheres)} сфер · ${x.country ?? x.locale}`
-                            : <span className="tag tag-warn">немає</span>}
+                            : x.custom_role?.trim()
+                              ? `своя роль · ${x.country ?? x.locale}`
+                              : <span className="tag tag-warn">немає</span>}
                         </td>
                         <td className="text-xs">{x.tg ? "✓" : <span className="tag tag-warn">ні</span>}</td>
                         <td className="num text-xs">{x.sent}</td>
@@ -829,6 +1127,36 @@ export default async function Admin({ searchParams }: {
                   </tbody>
                 </table>
               </div>
+
+              {/* Сторінки числами, а не «далі».
+                  Власник шукає конкретну людину, а не гортає підряд: із «далі»
+                  до п'ятої сторінки треба чотири переходи, з номером — один.
+                  Показуємо всі номери, поки їх мало, і вікно навколо поточної,
+                  коли стане багато. */}
+              {pages > 1 && (
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  <span className="mono text-xs" style={{ color: "var(--muted)" }}>
+                    {(pageNo - 1) * PEOPLE_PAGE + 1}–{Math.min(pageNo * PEOPLE_PAGE, peopleTotal)} з {peopleTotal}
+                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    {Array.from({ length: pages }, (_, i) => i + 1)
+                      .filter((n) => pages <= 9 || n === 1 || n === pages || Math.abs(n - pageNo) <= 2)
+                      .map((n, i, kept) => (
+                        <span key={n} className="flex items-center gap-2">
+                          {i > 0 && kept[i - 1] !== n - 1 && (
+                            <span className="mono text-xs" style={{ color: "var(--muted)" }}>…</span>
+                          )}
+                          <Link href={peopleHref(filter.id, n)}
+                                className="mono text-xs"
+                                style={{ color: n === pageNo ? "var(--ember)" : "var(--muted)",
+                                         textDecoration: n === pageNo ? "underline" : "none" }}>
+                            {n}
+                          </Link>
+                        </span>
+                      ))}
+                  </div>
+                </div>
+              )}
             </div>
           </Block>
 
@@ -905,6 +1233,90 @@ export default async function Admin({ searchParams }: {
               <Spark points={growth.people} label="людей усього" />
               <Spark points={growth.taps} label="дотиків у боті за день" />
             </div>
+          </Block>
+
+          <Block id="learning" title="Самонавчання"
+                 lede="Що система міняє в собі без мене: коли наступний прогін, і як пройшов останній.">
+            <div className="card overflow-x-auto px-6 py-5">
+              <table className="board">
+                <thead>
+                  <tr><th>що</th><th>розклад</th><th>наступний</th><th>робить</th></tr>
+                </thead>
+                <tbody>
+                  {learning.map((x) => {
+                    const nxt = nextRun(x.days, x.hour, new Date());
+                    return (
+                      <tr key={x.unit}>
+                        <td className="text-xs">{x.name}</td>
+                        <td className="mono text-xs" style={{ color: "var(--muted)" }}>
+                          {x.days.length > 1 ? "Пн–Пт" : DAY_NAME[x.days[0]!]} {String(x.hour).padStart(2, "0")}:00
+                        </td>
+                        <td className="mono text-xs"
+                            style={{ color: nxt.inDays === 0 ? "var(--ember)" : undefined }}>
+                          {nxt.label}
+                          <span style={{ color: "var(--muted)" }}>
+                            {nxt.inDays === 0 ? " · сьогодні" : ` · через ${nxt.inDays} дн.`}
+                          </span>
+                        </td>
+                        <td className="text-xs" style={{ color: "var(--ink-2)" }}>{x.what}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <p className="mt-3 max-w-prose text-xs" style={{ color: "var(--muted)" }}>
+                Розклад живе в systemd на сервері (<span className="mono">scanner/deploy</span>),
+                а не в базі — тут він повторений списком. Жодна з цих речей не міняє
+                нічого сама: самоперегляд і розвідка лише кладуть пропозицію в блок
+                нижче, а вмикає її людина.
+              </p>
+            </div>
+
+            {/* Як пройшло. Досі панель показувала ОДИН останній рядок, і
+                питання «а раніше бувало інакше?» не мало відповіді взагалі. */}
+            <div className="card mt-3 overflow-x-auto px-6 py-5">
+              <h4 className="eyebrow">Останні прогони скану</h4>
+              <table className="board mt-3">
+                <thead>
+                  <tr><th>початок</th><th>стан</th><th className="num">вакансій</th>
+                      <th className="num">компаній</th><th>щабель</th></tr>
+                </thead>
+                <tbody>
+                  {runs.length === 0 && (
+                    <tr><td colSpan={5} className="text-sm" style={{ color: "var(--muted)" }}>
+                      Жодного прогону ще не було.
+                    </td></tr>
+                  )}
+                  {runs.map((r) => (
+                    <tr key={r.started_at}>
+                      <td className="mono text-xs">{r.started_at.slice(0, 16).replace("T", " ")}</td>
+                      <td>
+                        <span className={`tag ${r.status === "ok" ? "tag-ok"
+                          : r.status === "failed" ? "tag-bad" : "tag-warn"}`}>
+                          {r.status}
+                        </span>
+                      </td>
+                      <td className="num text-xs">{num(r.jobs_found ?? 0)}</td>
+                      <td className="num text-xs">{num(r.distinct_companies ?? 0)}</td>
+                      <td className="mono text-xs" style={{ color: "var(--muted)" }}>
+                        {r.ladder_reached ?? "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+              <Tile n={learned?.applied ?? 0} label="пропозицій прийнято" />
+              <Tile n={learned?.open ?? 0} label="чекають на рішення" />
+              <Tile n={tuned?.people ?? 0} label="людей із власними вагами" />
+            </div>
+            <p className="mt-2 max-w-prose text-xs" style={{ color: "var(--muted)" }}>
+              Власні ваги — це вивчене зі скарг «не те»: людина називає причину,
+              і саме її вага росте для НЕЇ, а не для всіх. Стеля 3.0.
+              {(learned?.dismissed ?? 0) > 0 && ` Відхилено пропозицій: ${learned!.dismissed}.`}
+            </p>
           </Block>
 
           {proposals.length > 0 && (
@@ -1140,14 +1552,18 @@ export default async function Admin({ searchParams }: {
             </div>
 
             {grouped.length > 0 && (
-              <div className="card mt-3 px-6 py-5">
-                <div className="flex flex-wrap items-baseline justify-between gap-3">
+              /* Згорнуто за умовчанням.
+                 Дві таблиці на 44 рядки займали більшу частину екрана щодня, а
+                 розгортають їх лише коли щось зламалось — і саме «щось
+                 зламалось» видно з лічильника мовчазних поруч, не розгортаючи.  */
+              <details className="card mt-3 px-6 py-5">
+                <summary className="flex cursor-pointer flex-wrap items-baseline justify-between gap-3">
                   <h3 className="font-medium">Поіменно · {grouped.length}</h3>
                   <span className="mono text-xs"
                         style={{ color: grouped.some((f) => f.jobs === 0) ? "var(--bad)" : "var(--muted)" }}>
                     мовчазних: {grouped.filter((f) => f.jobs === 0).length}
                   </span>
-                </div>
+                </summary>
                 <p className="mt-1 max-w-prose text-sm" style={{ color: "var(--ink-2)" }}>
                   Усе, звідки ми тягнемо дані. Рубрики однієї дошки згорнуті в неї саму —
                   «DOU · Java» і «DOU · HR» це один DOU. Компанії на ATS згорнуті по
@@ -1157,7 +1573,7 @@ export default async function Admin({ searchParams }: {
 
                 <FeedTable rows={general} title="Загальні — бачать усі" />
                 <FeedTable rows={regional} title="Регіональні — бачить лише своя країна" />
-              </div>
+              </details>
             )}
 
             <form action={addSources} className="card mt-3 flex flex-col gap-3 px-5 py-5">
@@ -1224,17 +1640,17 @@ export default async function Admin({ searchParams }: {
               </details>
             )}
 
-            {intakeOk > 0 && intake.length === 0 && (
+            {intakeOk > 0 && intakeLive.length === 0 && (
               <p className="mt-3 text-sm" style={{ color: "var(--muted)" }}>
                 За тиждень прийнято джерел: {intakeOk}. Нерозібраних немає.
               </p>
             )}
 
-            {intake.length > 0 && (
+            {intakeLive.length > 0 && (
               <div className="ruled card mt-3">
                 <div className="px-6 pb-1 pt-5">
                   <h3 className="font-medium">
-                    Посилання, які не прийнялись · {intake.length}
+                    Посилання, які не прийнялись · {intakeLive.length}
                     {intakeOk > 0 && (
                       <span className="ml-2 font-normal" style={{ color: "var(--muted)" }}>
                         і ще {intakeOk} прийнятих за тиждень
@@ -1248,11 +1664,18 @@ export default async function Admin({ searchParams }: {
                     (дошка віддала 403 під навантаженням, стрічка була порожня між
                     публікаціями), тож рядок можна перевірити ще раз. Розібрався — прибери.
                   </p>
+                  {intakeHidden > 0 && (
+                    <p className="mono mt-2 text-xs" style={{ color: "var(--muted)" }}>
+                      знято автоматично: {intakeHidden} — джерело вже підключене
+                      під іншою адресою стрічки, або домен виміряно й визнано
+                      недоступним
+                    </p>
+                  )}
                 </div>
-                {intake.map((x) => {
+                {intakeLive.map((x) => {
                   const v = VERDICT[x.verdict] ?? { tag: "tag-flat", text: x.verdict };
                   return (
-                    <div key={x.id} className="px-6 py-4">
+                    <div key={x.url} className="px-6 py-4">
                       <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
                         <span className="mono text-xs" style={{ color: "var(--muted)" }}>
                           {x.at.slice(5, 16).replace("T", " ")}
@@ -1335,73 +1758,10 @@ export default async function Admin({ searchParams }: {
               </form>
             </div>
 
-            {boardGroups.length > 0 && (
-              <div className="card mt-3 overflow-x-auto">
-                <table className="board">
-                  <thead>
-                    <tr><th>країна</th><th>дошка</th><th>стан</th><th className="num">рубрик</th>
-                        <th className="num">вакансій</th><th /></tr>
-                  </thead>
-                  <tbody>
-                    {boardGroups.map((g) => {
-                      const on = g.rows.filter((r) => r.enabled === 1).length;
-                      const jobs = g.rows.reduce((n, r) => n + (r.jobs_last_run ?? 0), 0);
-                      const bad = g.rows.filter((r) => r.status === "deprecated").length;
-                      const soso = g.rows.filter((r) => r.status === "degraded").length;
-                      return (
-                        <tr key={`${g.country}|${g.name}`}>
-                          <td className="mono text-xs"
-                              style={{ color: g.country === "*" ? "var(--muted)" : undefined }}>
-                            {g.country === "*" ? "усі" : g.country}
-                          </td>
-                          <td className="text-xs">
-                            {g.rows.length > 1 ? (
-                              <details>
-                                <summary style={{ cursor: "pointer" }}>{g.name}</summary>
-                                <div className="mono mt-2 text-xs" style={{ color: "var(--muted)" }}>
-                                  {g.rows.map((r) => (
-                                    <div key={r.id} className="flex items-center justify-between gap-4 py-0.5">
-                                      <span>{r.label.split(" · ")[1] ?? r.label}</span>
-                                      <span>{r.jobs_last_run ?? "—"}</span>
-                                      <form action={toggleBoard}>
-                                        <input type="hidden" name="id" value={r.id} />
-                                        <button className="mono text-xs hover:underline"
-                                                style={{ color: "var(--ember)" }}>
-                                          {r.enabled === 0 ? "увімкнути" : "вимкнути"}
-                                        </button>
-                                      </form>
-                                    </div>
-                                  ))}
-                                </div>
-                              </details>
-                            ) : g.name}
-                          </td>
-                          <td>
-                            <span className={`tag ${on === 0 ? "tag-flat" : bad > 0 ? "tag-bad"
-                              : soso > 0 ? "tag-warn" : "tag-ok"}`}>
-                              {on === 0 ? "вимкнено" : bad > 0 ? `мертвих ${bad}`
-                                : soso > 0 ? `збоїть ${soso}` : "працює"}
-                            </span>
-                          </td>
-                          <td className="num text-xs">{on === g.rows.length ? g.rows.length : `${on} / ${g.rows.length}`}</td>
-                          <td className="num text-xs">{jobs || "—"}</td>
-                          <td className="text-right">
-                            <form action={toggleBoardGroup}>
-                              <input type="hidden" name="country" value={g.country} />
-                              <input type="hidden" name="board" value={g.name} />
-                              <button className="mono text-xs hover:underline" style={{ color: "var(--ember)" }}>
-                                {on === 0 ? "увімкнути всі" : "вимкнути всі"}
-                              </button>
-                            </form>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
+            <BoardTable groups={boardGroups.filter((g) => g.country === "*")}
+                        title="Весь світ — бачать усі" />
+            <BoardTable groups={boardGroups.filter((g) => g.country !== "*")}
+                        title="Країни — бачить лише своя" />
             <form action={addBoard} className="card mt-3 flex flex-wrap items-end gap-3 px-5 py-4">
               <label className="flex flex-col gap-1">
                 <span className="eyebrow">країна</span>

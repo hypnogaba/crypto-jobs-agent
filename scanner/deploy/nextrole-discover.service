@@ -1,0 +1,13 @@
+[Unit]
+Description=NextRole — щотижнева розвідка колекцій Getro
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/nextrole-scanner
+EnvironmentFile=/etc/nextrole-scanner.env
+ExecStart=/opt/nextrole-scanner/discover-window.sh
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=7200

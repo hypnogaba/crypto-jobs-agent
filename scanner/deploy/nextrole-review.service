@@ -1,0 +1,13 @@
+[Unit]
+Description=NextRole — тижневий самоперегляд системи
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/nextrole-scanner
+EnvironmentFile=/etc/nextrole-scanner.env
+ExecStart=/usr/bin/node dist/review.js
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=1800

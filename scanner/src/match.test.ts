@@ -645,3 +645,99 @@ describe("пам'ять про власні дії людини", () => {
     expect(after).toBe(plain);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+import { levelsIn, jobLevel, splitWishes, wishPenalty, STRONG_SCORE, matchPercent } from "./match.js";
+
+/**
+ * Скарга 31.08: людина написала, що шукає вхідний рівень, і отримала middle
+ * та senior. Тести нижче стережуть саме той ланцюжок, а не абстрактне
+ * «рівень враховується».
+ */
+describe("рівень зі слів людини", () => {
+  const junior: Profile = {
+    userId: "u2", spheres: ["product"], industries: [],
+    remoteMode: "remote_ok", location: null, salaryMin: null,
+    customRole: "junior product manager",
+  };
+  const pm = (title: string): CandidateJob => ({
+    id: title, company: "Acme", companyKey: "acme", title,
+    location: "Remote", remote: true, url: "https://x.test/1",
+    tags: ["product"], postedAt: null, salaryMin: null, salaryCurrency: null,
+  });
+
+  it("читає рівень із назви ролі й з назви вакансії", () => {
+    expect(levelsIn("junior product manager")).toEqual(new Set([1]));
+    expect(levelsIn("шукаю вхідного рівня")).toEqual(new Set([1]));
+    expect(jobLevel("Senior Product Manager")).toBe(3);
+    expect(jobLevel("Product Manager")).toBeNull();
+    // Старше з двох слів і є посадою.
+    expect(jobLevel("Senior Staff Engineer")).toBe(4);
+  });
+
+  it("«lead» не вважається рівнем: Lead Generation — це продажі", () => {
+    expect(jobLevel("Lead Generation Specialist")).toBeNull();
+  });
+
+  it("свій рівень стоїть вище за чужий — те, чого просила людина", () => {
+    const own = scoreJob(pm("Junior Product Manager"), junior).score;
+    const near = scoreJob(pm("Middle Product Manager"), junior).score;
+    const far = scoreJob(pm("Senior Product Manager"), junior).score;
+    expect(own).toBeGreaterThan(near);
+    expect(near).toBeGreaterThan(far);
+  });
+
+  it("названий рівень не з'їдає точного збігу за роллю", () => {
+    // «junior product manager» проти «Product Manager» — це повний збіг:
+    // рівень рахується окремим правилом і з назви ролі виймається.
+    expect(scoreJob(pm("Product Manager"), junior).score)
+      .toBe(scoreJob(pm("Product Manager"), { ...junior, customRole: "product manager" }).score);
+  });
+
+  it("вакансія без рівня в назві стоїть вище за чужий рівень", () => {
+    // «не знаємо» має бути дешевшим за «не той» — так само, як у географії.
+    expect(scoreJob(pm("Product Manager"), junior).score)
+      .toBeGreaterThan(scoreJob(pm("Senior Product Manager"), junior).score);
+  });
+
+  it("senior-вакансія лишається в списку, а не зникає", () => {
+    // У вузькій сфері порожня добірка гірша за добірку не свого рівня.
+    expect(scoreJob(pm("Senior Product Manager"), junior).score).toBeGreaterThan(0);
+  });
+
+  it("рівень мовчить, коли його не назвала жодна сторона", () => {
+    const noLevel: Profile = { ...junior, customRole: "product manager" };
+    expect(scoreJob(pm("Product Manager"), noLevel).parts.some((x) => x.k.startsWith("level"))).toBe(false);
+  });
+});
+
+describe("побажання в обидва боки", () => {
+  it("ділить написане на «хочу» і «не хочу» по частинах", () => {
+    const { want, avoid } = splitWishes("готовий переїхати, але не в Азію");
+    expect(want).toContain("переїхати");
+    expect(avoid).toContain("Азію");
+  });
+
+  it("«не хочу стартапів» більше не важить те саме, що «хочу стартапи»", () => {
+    // Текст англійською навмисно: у профілі поруч живе wishesEn, і підбір
+    // читає саме переклад — порівнювати українське слово з англійським
+    // оголошенням не має сенсу в жодному напрямку.
+    const j = { title: "Growth Manager", summary: "Fast-growing fintech scaleup, agency background welcome" };
+    expect(wishPenalty(j, "not interested in agency work")).toBeLessThan(0);
+    expect(wishPenalty(j, "agency background is a plus")).toBe(0);
+  });
+
+  it("«no on-call» проти «no on-call rotation» — це згода, а не сутичка", () => {
+    const j = { title: "Designer", summary: "no on-call rotation" };
+    expect(wishBonus(j, "no on-call")).toBeGreaterThan(0);
+    expect(wishPenalty(j, "no on-call")).toBe(0);
+  });
+});
+
+describe("стеля бала", () => {
+  it("сфера плюс точна роль дають повні сто відсотків", () => {
+    expect(matchPercent(STRONG_SCORE)).toBe(100);
+    // Раніше в стелі жили три бали за прибране правило, і 18 давало 86%.
+    expect(matchPercent(18)).toBeGreaterThan(86);
+  });
+});

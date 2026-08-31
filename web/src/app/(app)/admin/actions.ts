@@ -590,20 +590,30 @@ export async function addSources(formData: FormData): Promise<void> {
  * шум. Лишається останній вирок, який і є відповіддю на питання «то що з
  * цим посиланням?».
  */
+/**
+ * Обидві дії працюють по АДРЕСІ, а не по одному рядку.
+ *
+ * У журналі та сама адреса лежить по кілька разів: один прогін розвідки
+ * пише спробу на кожен свій захід. Поки «прибрати» видаляло рядок за `id`,
+ * посилання зникало з екрана й поверталось наступним оновленням сторінки —
+ * бо решта його копій лишалась. Виглядало як кнопка, що не працює.
+ */
 export async function retryIntake(formData: FormData): Promise<void> {
   await requireAdmin();
   const id = String(formData.get("id") ?? "");
   const row = await one<{ url: string }>("SELECT url FROM source_intake WHERE id=?", id);
   if (!row) return;
-  await run("DELETE FROM source_intake WHERE id=?", id);
+  await run("DELETE FROM source_intake WHERE url=?", row.url);
   await intake(row.url);
   refresh();
 }
 
-/** Прибрати рядок із журналу — розібрався й не хочеш його більше бачити. */
+/** Прибрати посилання з журналу — розібрався й не хочеш його більше бачити. */
 export async function forgetIntake(formData: FormData): Promise<void> {
   await requireAdmin();
-  await run("DELETE FROM source_intake WHERE id=?", String(formData.get("id") ?? ""));
+  const id = String(formData.get("id") ?? "");
+  const row = await one<{ url: string }>("SELECT url FROM source_intake WHERE id=?", id);
+  await run("DELETE FROM source_intake WHERE url=?", row?.url ?? "");
   refresh();
 }
 

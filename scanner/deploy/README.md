@@ -23,14 +23,34 @@ chmod 600 /etc/nextrole-scanner.env
 chown root:root /etc/nextrole-scanner.env
 ```
 
-Ставимо юніти:
+Ставимо юніти. Список нижче — ПОВНИЙ: у ньому сім таймерів, і кожен із них
+живе на сервері зараз. Раніше тут стояло чотири, тож розгортання за цією
+інструкцією мовчки лишало систему без самоперегляду й обох розвідок — тобто
+без усього, що вона міняє в собі сама.
 
 ```bash
 cp deploy/*.service deploy/*.timer /etc/systemd/system/
+install -m 755 deploy/discover-window.sh /opt/nextrole-scanner/discover-window.sh
 systemctl daemon-reload
-systemctl enable --now nextrole-scan.timer nextrole-watchdog.timer \
-  nextrole-digest.timer nextrole-requests.timer
+systemctl enable --now \
+  nextrole-scan.timer nextrole-watchdog.timer \
+  nextrole-digest.timer nextrole-requests.timer \
+  nextrole-review.timer nextrole-discover.timer nextrole-twitter.timer
 ```
+
+| Таймер | Коли | Що робить |
+|---|---|---|
+| `nextrole-scan` | Пн–Пт 05:00 | обхід джерел, наповнення кеша |
+| `nextrole-watchdog` | Пн–Пт 08:00 | судить учорашній скан, за потреби повторює |
+| `nextrole-digest` | щогодини о :05 | розсилка в годину людини |
+| `nextrole-requests` | кожні 2 хв | черга «Ще п'ять» |
+| `nextrole-review` | Нд 06:00 | самоперегляд → пропозиції в панель |
+| `nextrole-discover` | Нд 04:00 | розвідка колекцій Getro по рухомому вікну |
+| `nextrole-twitter` | Нд 07:00 | пошук дошок під країни, де є люди |
+
+`nextrole-discover` запускає не `node` напряму, а `discover-window.sh`: він
+веде курсор у `/var/lib/nextrole/discover-cursor` і щотижня бере наступні 300
+колекцій по колу.
 
 ## Перевірка
 

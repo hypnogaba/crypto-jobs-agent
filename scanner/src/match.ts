@@ -137,6 +137,7 @@ export type MatchFact =
   | { k: "role"; v: string }
   | { k: "industry"; v: string }
   | { k: "place"; v: string }
+  | { k: "level" }
   | { k: "remote" }
   | { k: "salary" }
   | { k: "fresh" };
@@ -179,8 +180,18 @@ export function roleWords(role: string | null | undefined): string[] {
   return role.toLowerCase().split(/[^\p{L}\p{N}+#]+/u).filter((w) => w.length > 2);
 }
 
+/**
+ * Точний збіг рахується БЕЗ слів про рівень.
+ *
+ * Розбір навмисно кладе рівень усередину назви ролі («junior product
+ * manager»). Поки тут вимагались усі слова, людина, яка назвала свій рівень,
+ * ніколи не діставала повного збігу: «Product Manager» не містить «junior»,
+ * тож замість +12 їй лишалось +5 за частковий. Тобто чесніша відповідь
+ * коштувала сім балів. Рівень має власне правило нижче й рахується там один
+ * раз — тут він лише заважав.
+ */
 export function matchesCustomRole(title: string, role: string | null | undefined): boolean {
-  const words = roleWords(role);
+  const words = roleWords(role).filter((w) => levelTier(w) === null);
   if (words.length === 0) return false;
   const t = title.toLowerCase();
   return words.every((w) => t.includes(w));
@@ -218,6 +229,90 @@ export function partiallyMatchesRole(title: string, role: string | null | undefi
   return meaningful.some((w) => t.includes(w));
 }
 
+/**
+ * Рівень: повернутий як окреме правило, а не як кнопка.
+ *
+ * 30.08 питання про рівень прибрали, і це було правильно: бал спирався на тег
+ * із назви вакансії, а тегу не мали 62% кеша. Обіцянка була така — слова
+ * людини про рівень житимуть у назві ролі й у побажаннях, «і там вони
+ * шукаються по-справжньому». Обіцянка не виконалась: `GENERIC_ROLE_WORDS` і
+ * `GENERIC_WISH_WORDS` викреслюють «junior» ще до пошуку, тож фраза «шукаю
+ * junior-позицію» давала нуль слів і нуль балів.
+ *
+ * Гірше за нуль. Із «junior product manager» знімалось «junior», решта
+ * збігалася з «Senior Product Manager» через `.some()`, це давало `rolePart`
+ * і факт `role` — а `onTopic` пускає вакансію далі саме за цим фактом. Тобто
+ * слова людини про вхідний рівень САМІ відчиняли ворота senior-вакансії.
+ * Жива скарга 31.08 прийшла рівно звідти.
+ *
+ * Тому рівень тепер читається з СИРОГО тексту, до стоп-листів, і живе
+ * власним правилом. Три відмінності від того, що прибрали:
+ *
+ *   1. джерело — назва вакансії, а не тег. Тег мали 38% рядків, назву має
+ *      кожен;
+ *   2. рівень діє, лише коли його назвали ОБИДВІ сторони. Не назвала жодна —
+ *      правило мовчить і нічого не коштує, як географія й індустрія поруч;
+ *   3. «middle» більше не осібний випадок: рівні порівнюються відстанню, тож
+ *      сусідній коштує мало, а через два — дорого.
+ */
+const LEVEL_EXACT: Record<string, number> = {
+  intern: 1, internship: 1, interns: 1, trainee: 1, graduate: 1, entry: 1,
+  junior: 1, jr: 1, apprentice: 1,
+  middle: 2, mid: 2,
+  senior: 3, sr: 3, confirmed: 3,
+  principal: 4, staff: 4, director: 4, vp: 4, head: 4, chief: 4,
+};
+
+/**
+ * Кирилиця через основу слова, бо відмінки.
+ *
+ * «вхідного рівня», «вхідний рівень» — один намір і дві форми, а точний
+ * список довелося б писати під кожну. Основа коротша за слово навмисно.
+ */
+const LEVEL_STEMS: Array<[string, number]> = [
+  ["стаж", 1], ["джун", 1], ["початк", 1], ["новач", 1], ["вхідн", 1], ["входн", 1],
+  ["міддл", 2], ["мидл", 2],
+  ["сеньйор", 3], ["синьйор", 3], ["старш", 3],
+  ["провідн", 4], ["ведущ", 4], ["керівн", 4],
+];
+
+/**
+ * «lead» сюди НЕ входить, і це не забудькуватість.
+ *
+ * «Lead Generation Specialist» — це продажі, а не керівна посада, і таких у
+ * кеші більше, ніж справжніх Team Lead. Один хибний рівень коштує дорожче за
+ * один пропущений: пропущений лишає вакансію рівно там, де вона й була, а
+ * хибний зсуває її на шість балів у чужий бік.
+ */
+const levelTier = (word: string): number | null => {
+  const exact = LEVEL_EXACT[word];
+  if (exact !== undefined) return exact;
+  for (const [stem, tier] of LEVEL_STEMS) if (word.startsWith(stem)) return tier;
+  return null;
+};
+
+/** Усі рівні, названі в тексті. Порожньо — рівня не називали. */
+export function levelsIn(text: string | null | undefined): Set<number> {
+  const out = new Set<number>();
+  if (!text) return out;
+  for (const w of text.toLowerCase().split(/[^\p{L}\p{N}+#]+/u)) {
+    const tier = levelTier(w);
+    if (tier !== null) out.add(tier);
+  }
+  return out;
+}
+
+/**
+ * Рівень вакансії — найвищий із названих.
+ *
+ * «Senior Staff Engineer» це четвертий рівень, а не третій: старше з двох слів
+ * і є посадою, молодше лише уточнює її.
+ */
+export function jobLevel(title: string): number | null {
+  const tiers = levelsIn(title);
+  return tiers.size === 0 ? null : Math.max(...tiers);
+}
+
 /** Скільки додає одне слово з побажань і де стеля. */
 const WISH_WORD_BONUS = 2;
 const WISH_MAX_BONUS = 6;
@@ -245,13 +340,60 @@ const GENERIC_WISH_WORDS = new Set([
   "position", "job", "jobs", "global", "international", "remote", "hybrid",
   "senior", "junior", "middle", "startup", "startups", "product", "products",
   "solutions", "services", "group", "innovation", "innovative", "modern",
+  // Рівень має власне правило (див. levelsIn), і в пошуку слів йому не місце:
+  // `wordBonus` шукає ПІДРЯДОК, тож «entry» ловило б «Data Entry Clerk», а
+  // «staff» — «Staffing Coordinator». Слова читаються раніше, з сирого тексту.
+  "entry", "level", "intern", "internship", "trainee", "graduate", "staff",
+  "principal", "apprentice",
 ]);
 
+/**
+ * Дефіс ділить слово — так само, як у `roleWords`.
+ *
+ * Раніше два розбори розходились рівно на дефісі: у ролі «entry-level»
+ * розпадалось на «entry» і «level», а в побажаннях лишалось одним токеном і
+ * шукалось у назві дослівно. Жодна вакансія не зветься «entry-level», тож
+ * побажання мовчки не працювало, а роль працювала — з тих самих слів людини.
+ */
 export function wishWords(wishes: string | null | undefined): string[] {
   if (!wishes) return [];
-  const words = wishes.toLowerCase().split(/[^\p{L}\p{N}+#-]+/u)
+  const words = wishes.toLowerCase().split(/[^\p{L}\p{N}+#]+/u)
     .filter((w) => w.length >= 4 && !GENERIC_WISH_WORDS.has(w));
   return [...new Set(words)];
+}
+
+/**
+ * Слова заперечення. Побажання читаються по частинах, і частина, що починається
+ * із заперечення, стає протилежністю самої себе.
+ */
+const NEGATIONS = new Set([
+  "не", "ні", "без", "нет", "no", "not", "without", "avoid", "except",
+  "pas", "sans", "aucun", "никаких", "жодних", "крім", "кроме",
+]);
+
+/**
+ * «Хочу» і «не хочу» — це два різні списки.
+ *
+ * Досі побажання мали лише плюс: збіг додавав до шести балів, а суперечність
+ * не коштувала нічого. Тому «хочу тільки стартапи» і «не хочу стартапів»
+ * важили однаково — обидва підіймали вакансію зі словом «startup». Людина
+ * писала нам протилежне, а бал виходив той самий.
+ *
+ * Ділимо на частини за розділовими знаками й «але»: заперечення діє на свою
+ * частину, а не на все речення. «Готовий переїхати, але не в Азію» має
+ * лишити переїзд у плюсі й покласти в мінус саме Азію.
+ */
+export function splitWishes(wishes: string | null | undefined): { want: string; avoid: string } {
+  if (!wishes) return { want: "", avoid: "" };
+  const want: string[] = [];
+  const avoid: string[] = [];
+  for (const part of wishes.split(/[.,;!?\n·]+|\s+(?:але|but|mais|но)\s+/iu)) {
+    const clause = part.trim();
+    if (!clause) continue;
+    const negated = clause.toLowerCase().split(/[^\p{L}\p{N}+#]+/u).some((w) => NEGATIONS.has(w));
+    (negated ? avoid : want).push(clause);
+  }
+  return { want: want.join(" · "), avoid: avoid.join(" · ") };
 }
 
 /**
@@ -266,8 +408,39 @@ function wordBonus(hay: string, phrase: string | null | undefined, per: number, 
   return Math.min(cap, words.filter((w) => low.includes(w)).length * per);
 }
 
+/**
+ * Заперечення читається з ОБОХ боків — інакше стає гірше, ніж було.
+ *
+ * Людина пише «no on-call». Оголошення пише «no on-call rotation». Слово те
+ * саме, а намір збігається ідеально: обоє кажуть, що чергувань немає. Наївне
+ * покарання за збіг слова опустило б рівно ту вакансію, яку людина шукала.
+ *
+ * Тому оголошення теж ділиться на стверджувальне й заперечне, і «не хочу X»
+ * зустрічається з «у нас немає X» як ЗГОДА, а з «потрібно X» — як суперечність.
+ */
+const jobSides = (job: Pick<CandidateJob, "title" | "summary">) =>
+  splitWishes(`${job.title} ${job.summary ?? ""}`);
+
 export function wishBonus(job: Pick<CandidateJob, "title" | "summary">, wishes: string | null | undefined): number {
-  return wordBonus(`${job.title} ${job.summary ?? ""}`, wishes, WISH_WORD_BONUS, WISH_MAX_BONUS);
+  const me = splitWishes(wishes);
+  const it = jobSides(job);
+  return Math.min(WISH_MAX_BONUS,
+    wordBonus(it.want, me.want, WISH_WORD_BONUS, WISH_MAX_BONUS)
+    // «не хочу X» проти «у нас немає X» — це збіг, а не сутичка.
+    + wordBonus(it.avoid, me.avoid, WISH_WORD_BONUS, WISH_MAX_BONUS));
+}
+
+/**
+ * Ціна написаного «не хочу». Дзеркало бонуса, тією ж мірою.
+ *
+ * Симетрія навмисна: слово, що підіймало на два бали, тепер на два й опускає.
+ * Робити покарання сильнішим за нагороду не можна — побажання це вільний
+ * текст, і одне випадкове слово не має викидати вакансію з добірки.
+ */
+export function wishPenalty(job: Pick<CandidateJob, "title" | "summary">, wishes: string | null | undefined): number {
+  const hit = wordBonus(jobSides(job).want, splitWishes(wishes).avoid, WISH_WORD_BONUS, WISH_MAX_BONUS);
+  // Не `-hit`: нуль зі знаком мінуса ламає порівняння в розкладці бала.
+  return hit === 0 ? 0 : -hit;
 }
 
 /**
@@ -347,6 +520,7 @@ export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): Score
   if (!sphereHits.length && !roleHit && !rolePart && (p.spheres.length > 0 || named)) add("offTopic", -8);
 
   add("wishes", wishBonus(job, wishesText(p)));
+  add("wishesAgainst", wishPenalty(job, wishesText(p)));
 
   // Індустрія тепер працює в обидва боки.
   //
@@ -371,17 +545,28 @@ export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): Score
   const ownIndustry = customIndustryBonus(job, industryText(p));
   if (ownIndustry > 0) { add("ownIndustry", ownIndustry); facts.push({ k: "industry", v: p.customIndustry! }); }
 
-  // Рівня тут навмисно немає.
+  // Рівень. Діє, лише коли його назвали обидві сторони.
   //
-  // Бал за рівень спирався на тег, який сканер брав із назви вакансії, а
-  // тегу не мали 14 049 рядків із 22 674 — тобто на 62% кеша відповідь
-  // людини не робила нічого. Тега `middle` не існувало взагалі, хоч кнопка
-  // на сайті була: така людина не могла отримати збіг у принципі й лише
-  // платила штраф на 7 867 вакансіях. Жодна скарга за весь час не назвала
-  // рівень причиною, і всі ваги лишились одиницями.
+  // Стара версія правила спиралась на тег, якого не мали 62% кеша, і тому її
+  // прибрали. Ця читає назву вакансії, яку має кожен рядок, і мовчить, коли
+  // рівня не назвав ніхто, — як географія й індустрія поруч. «Не знаємо» і
+  // «не збіглося» знову різні речі.
   //
-  // Слова про рівень тепер приходять у customRole («senior backend
-  // engineer») і в wishes — і там вони шукаються по-справжньому.
+  // Ціни несиметричні навмисно. Сусідній рівень (junior проти middle) коштує
+  // два бали: людину туди візьмуть, це радше «трохи не те». Через два (junior
+  // проти senior) коштує шість — це вже інша робота, і саме на неї прийшла
+  // скарга. Шість, а не більше: разом зі сферою (6) і частковим збігом за
+  // роллю (5) вакансія лишається в списку, але нижче за свій рівень. Викидати
+  // її зовсім не можна — у вузькій сфері добірка спорожніє.
+  const wantedLevels = new Set([...levelsIn(roleText(p)), ...levelsIn(wishesText(p))]);
+  const jobTier = jobLevel(job.title);
+  if (wantedLevels.size > 0 && jobTier !== null) {
+    const gap = Math.min(...[...wantedLevels].map((t) => Math.abs(t - jobTier)));
+    if (gap === 0) { add("level", 2); facts.push({ k: "level" }); }
+    else if (gap === 1) add("levelNear", -2);
+    else add("levelMiss", -6);
+  }
+
   const w = p.tuning ?? { location: 1, salary: 1 };
 
   // Географія.
@@ -595,14 +780,19 @@ export function reachable(job: CandidateJob, p: Profile): boolean {
  * Бал сильного збігу.
  *
  * Не максимум — саме «сильний»: сфера (6) плюс точний збіг за назвою ролі
- * (12) плюс рівень (3). Усе понад це — вже подарунок, і показувати 140%
+ * (12) плюс рівень (2). Усе понад це — вже подарунок, і показувати 140%
  * було б дивно.
+ *
+ * Число довго було 21 із трьома балами за рівень, якого в підрахунку не
+ * існувало: правило прибрали, а доданок у стелі лишили. Через це КОЖЕН
+ * відсоток збігу був занижений приблизно на 14% — точний збіг за роллю плюс
+ * сфера показували 86% замість ста.
  *
  * Шкала навмисно АБСОЛЮТНА, а не «відсоток від найкращого сьогодні». Інакше
  * перша вакансія завжди мала б 100%, навіть у день, коли нічого доброго не
  * знайшлось, — і число перестало б щось означати.
  */
-export const STRONG_SCORE = 21;
+export const STRONG_SCORE = 20;
 
 /**
  * Наскільки ця вакансія близька, у відсотках. Ціле число від 5 до 100.
