@@ -10,7 +10,8 @@
     "watchdog": "node dist/watchdog.js",
     "discover": "node dist/discover.js",
     "retag": "node dist/retag.js",
-    "replay": "node dist/replay.js"
+    "replay": "node dist/replay.js",
+    "prune": "node dist/prune.js"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",

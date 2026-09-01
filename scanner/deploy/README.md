@@ -35,7 +35,8 @@ systemctl daemon-reload
 systemctl enable --now \
   nextrole-scan.timer nextrole-watchdog.timer \
   nextrole-digest.timer nextrole-requests.timer \
-  nextrole-review.timer nextrole-discover.timer nextrole-twitter.timer
+  nextrole-review.timer nextrole-discover.timer nextrole-twitter.timer \
+  nextrole-prune.timer
 ```
 
 | Таймер | Коли | Що робить |
@@ -47,6 +48,12 @@ systemctl enable --now \
 | `nextrole-review` | Нд 06:00 | самоперегляд → пропозиції в панель |
 | `nextrole-discover` | Нд 04:00 | розвідка колекцій Getro по рухомому вікну |
 | `nextrole-twitter` | Нд 07:00 | пошук дошок під країни, де є люди |
+| `nextrole-prune` | Нд 03:00 | прибирання кеша: старе, чого нікому не слали |
+
+`nextrole-prune` НІКОЛИ не видаляє вакансію, яку комусь надсилали:
+`sent.job_id` має `ON DELETE CASCADE`, тож разом із рядком кеша зник би й
+запис про відправлення — а він тримає захист від повтору й історію кабінету.
+Перевірити перед першим запуском: `node dist/prune.js --dry`.
 
 `nextrole-discover` запускає не `node` напряму, а `discover-window.sh`: він
 веде курсор у `/var/lib/nextrole/discover-cursor` і щотижня бере наступні 300

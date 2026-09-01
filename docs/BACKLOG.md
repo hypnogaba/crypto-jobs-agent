@@ -15,12 +15,6 @@
 
 ## Джерела
 
-— Прибирати старі рядки з `jobs_cache`: 26 539 вакансій, 22 МБ і жодного
-  видалення в коді (чиститься лише `webhook_updates`). Не робити наївно —
-  каскад `sent.job_id` зробить видалення руйнівним; план уже написано в
-  `docs/superpowers/plans/2026-08-30-cache-retention-and-local-mix.md`, а
-  юнітів `nextrole-prune` у `scanner/deploy` немає · `scanner/src/repo.ts`
-
 
 ## Підбір
 
