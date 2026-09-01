@@ -78,7 +78,24 @@ export interface Profile {
   location: string | null;
   /** Місто канонічною англійською: «Париж» -> «Paris». Порівнюється саме воно. */
   locationEn?: string | null;
+  /**
+   * Стеля рівня: «не вище за mid». Ставить її кнопка «занадто senior» під
+   * добіркою або сама людина в анкеті. Щаблі — ті самі, що в levelTier.
+   *
+   * Це не рівень людини, а межа. Порожнє поле мовчить.
+   */
+  levelMax?: number | null;
   salaryMin: number | null;
+  /**
+   * Стеля вилки, якої людина просить не перевищувати.
+   *
+   * Здається зайвою («хто відмовиться від більшого?»), але прохання прийшло
+   * від живої людини й має причину: «відкрита до нормальних junior/mid ролей,
+   * але не хочу, щоб бот через це тягнув дуже дорогі американські сініор
+   * вакансії». Верхня межа тут — це спосіб сказати «не мій рівень» мовою,
+   * якою вакансії описують себе самі.
+   */
+  salaryMax?: number | null;
   /** Валюта очікування. Без неї 120 000 UAH дорівнювало 120 000 EUR. */
   salaryCurrency?: string | null;
   /** Країна людини, виведена з локації або часового поясу. Може бути порожня. */
@@ -328,6 +345,26 @@ const levelTier = (word: string): number | null => {
   return null;
 };
 
+/**
+ * Чи заборонений цей рівень вакансії.
+ *
+ * Просте входження в перелік не досить. Людина пише «no senior roles» і має
+ * на увазі «і нічого вище», а не «senior не можна, director можна» — саме так
+ * читає це будь-хто, крім регулярки. Тому заборона діє СТЕЛЕЮ: усе від
+ * найнижчого забороненого рівня і вище.
+ *
+ * Але лише тоді, коли людина назвала й те, що ХОЧЕ, і воно нижче за заборону.
+ * Без цієї умови «не беріть мене на джуна» (заборонено 1, бажаного немає)
+ * зробило б стелею одиницю й закрило геть усе. У такому разі забороняємо
+ * рівно назване й нічого більше.
+ */
+export function isBanned(tier: number, wanted: Set<number>, banned: Set<number>): boolean {
+  if (banned.size === 0) return false;
+  const floor = Math.min(...banned);
+  const ceiling = wanted.size > 0 && floor > Math.max(...wanted);
+  return ceiling ? tier >= floor : banned.has(tier);
+}
+
 /** Усі рівні, названі в тексті. Порожньо — рівня не називали. */
 export function levelsIn(text: string | null | undefined): Set<number> {
   const out = new Set<number>();
@@ -419,16 +456,58 @@ const NEGATIONS = new Set([
  * Ділимо на частини за розділовими знаками й «але»: заперечення діє на свою
  * частину, а не на все речення. «Готовий переїхати, але не в Азію» має
  * лишити переїзд у плюсі й покласти в мінус саме Азію.
+ *
+ * Кома заперечення не скасовує, коли за нею йде продовження переліку.
+ *
+ * Людина пише «No Senior, Lead, Head, Director or VP roles». Кома тут ділить
+ * однорідні члени, а не речення: «no» стоїть один раз і стосується всіх.
+ * Поки кома скидала полярність, у «хочу» потрапляли Lead, Head і Director —
+ * рівно ті слова, які людина заборонила. Виміряно на живому кеші: профіль
+ * 4231c8 діставав топ-5 із самих Senior і Director, кожен із бонусом за
+ * рівень і підписом «твій рівень» під ним.
+ *
+ * Заперечення тягнеться далі лише через ГОЛІ пункти переліку: коротка частина
+ * без власного слова наміру. «Не хочу банки, хочу стартапи» обривається на
+ * «хочу», а «Director or VP roles» продовжує заборону. Крапка, «але» і «а»
+ * скидають полярність завжди.
+ *
+ * Для тексту вакансії тягнути не можна, і `carry` вимикає саме це. Оголошення
+ * пише «Four-day week, no on-call rotation, cycling budget» — три незалежні
+ * переваги, де «no» стосується лише чергувань. Людина перелічує заборони,
+ * оголошення перелічує факти, і однакове правило зіпсувало б одне з двох.
  */
-export function splitWishes(wishes: string | null | undefined): { want: string; avoid: string } {
+const SENTENCE_SPLIT = /[.;!?\n·]+|\s+(?:але|проте|однак|а|but|however|mais|но|однако)\s+/iu;
+
+/** Слова наміру: після них перелік заборон закінчився й почалось побажання. */
+const INTENT = new Set([
+  "хочу", "шукаю", "готовий", "готова", "цікавить", "тільки", "лише", "перевага",
+  "want", "prefer", "looking", "seeking", "open", "only", "okay", "ok", "fine",
+  "хочется", "ищу", "интересует", "только",
+  "veux", "cherche", "seulement",
+]);
+
+/** Голий пункт переліку: коротка частина без власного слова наміру. */
+const isBareItem = (words: string[]): boolean =>
+  words.length > 0 && words.length <= 4 && !words.some((w) => INTENT.has(w));
+
+export function splitWishes(
+  wishes: string | null | undefined, carry = true,
+): { want: string; avoid: string } {
   if (!wishes) return { want: "", avoid: "" };
   const want: string[] = [];
   const avoid: string[] = [];
-  for (const part of wishes.split(/[.,;!?\n·]+|\s+(?:але|but|mais|но)\s+/iu)) {
-    const clause = part.trim();
-    if (!clause) continue;
-    const negated = clause.toLowerCase().split(/[^\p{L}\p{N}+#]+/u).some((w) => NEGATIONS.has(w));
-    (negated ? avoid : want).push(clause);
+
+  for (const sentence of wishes.split(SENTENCE_SPLIT)) {
+    if (!sentence.trim()) continue;
+    let negated = false;
+    for (const part of sentence.split(",")) {
+      const clause = part.trim();
+      if (!clause) continue;
+      const words = clause.toLowerCase().split(/[^\p{L}\p{N}+#]+/u).filter(Boolean);
+      if (words.some((w) => NEGATIONS.has(w))) negated = true;
+      else if (negated && !(carry && isBareItem(words))) negated = false;
+      (negated ? avoid : want).push(clause);
+    }
   }
   return { want: want.join(" · "), avoid: avoid.join(" · ") };
 }
@@ -456,7 +535,8 @@ function wordBonus(hay: string, phrase: string | null | undefined, per: number, 
  * зустрічається з «у нас немає X» як ЗГОДА, а з «потрібно X» — як суперечність.
  */
 const jobSides = (job: Pick<CandidateJob, "title" | "summary">) =>
-  splitWishes(`${job.title} ${job.summary ?? ""}`);
+  // `false` — оголошення перелічує незалежні факти, а не список заборон.
+  splitWishes(`${job.title} ${job.summary ?? ""}`, false);
 
 export function wishBonus(job: Pick<CandidateJob, "title" | "summary">, wishes: string | null | undefined): number {
   const me = splitWishes(wishes);
@@ -595,9 +675,29 @@ export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): Score
   // скарга. Шість, а не більше: разом зі сферою (6) і частковим збігом за
   // роллю (5) вакансія лишається в списку, але нижче за свій рівень. Викидати
   // її зовсім не можна — у вузькій сфері добірка спорожніє.
-  const wantedLevels = new Set([...levelsIn(roleText(p)), ...levelsIn(wishesText(p))]);
+  // Рівень, названий у «не хочу», — це заборона, а не побажання.
+  //
+  // Досі сюди йшли ВСІ побажання одним рядком, разом із запереченнями. Тому
+  // «No Senior, Lead, Head, Director or VP roles» читалось як список бажаних
+  // рівнів: людина отримувала +2 і підпис «твій рівень» саме на тих
+  // вакансіях, які заборонила. Виміряно на живому кеші: у профілі 4231c8
+  // весь топ-5 складався з Senior і Director, кожен із бонусом за рівень.
+  //
+  // Тепер сторони розділені: «хочу» задає рівень, «не хочу» його забороняє.
+  // Заборона коштує шість — стільки ж, скільки промах на два щаблі: людина
+  // назвала це прямо, і дорожче за пряме слово в системі нічого немає.
+  const wishSides = splitWishes(wishesText(p));
+  const wantedLevels = new Set([...levelsIn(roleText(p)), ...levelsIn(wishSides.want)]);
+  const bannedLevels = levelsIn(wishSides.avoid);
+  for (const t of bannedLevels) wantedLevels.delete(t);
   const jobTier = jobLevel(job.title);
-  if (wantedLevels.size > 0 && jobTier !== null) {
+  // Кнопка «занадто senior» і слова людини кажуть те саме різними шляхами.
+  // Спрацьовує будь-який: поле — коли людина натиснула кнопку, розбір слів —
+  // коли написала руками. Вакансія без рівня в назві не підпадає під жодне.
+  const overCap = jobTier !== null && p.levelMax != null && jobTier > p.levelMax;
+  if (jobTier !== null && (overCap || isBanned(jobTier, wantedLevels, bannedLevels))) {
+    add("levelBanned", -6);
+  } else if (wantedLevels.size > 0 && jobTier !== null) {
     const gap = Math.min(...[...wantedLevels].map((t) => Math.abs(t - jobTier)));
     if (gap === 0) { add("level", 2); facts.push({ k: "level" }); }
     else if (gap === 1) add("levelNear", -2);
@@ -661,6 +761,16 @@ export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): Score
     if (jobEur >= wantEur) { add("salary", 2); facts.push({ k: "salary" }); }
     else add("salaryLow", -2 * w.salary);
   }
+
+  // Стеля вилки. Дзеркало нижньої межі, тією ж ціною й з тим самим мовчанням
+  // на невідомому.
+  //
+  // Порівнюємо саме з НИЖНІМ краєм вакансії, а не з верхнім. Вилка «60-200k»
+  // людині зі стелею 80k підходить: її візьмуть у нижню частину. А ось «від
+  // 180k» не підходить ніяк — це інша посада, хоч би що писали в назві. Саме
+  // цей випадок і назвала людина: дорогі американські сініор-вакансії.
+  const capEur = toEur(p.salaryMax ?? null, p.salaryCurrency ?? "EUR");
+  if (capEur && jobEur && jobEur > capEur) add("salaryHigh", -2 * w.salary);
 
   if (job.postedAt) {
     const days = (now.getTime() - new Date(job.postedAt).getTime()) / 86_400_000;

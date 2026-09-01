@@ -3,7 +3,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { one, run } from "@/lib/db";
 import { WEBHOOK_401_LIMITS, checkRate, recordFailure } from "@/lib/ratelimit";
 import { handleCommand, startBotOnboarding, continueBotOnboarding,
-         handleOnboardingButton, handleOnboardingText, handleWhyButton, handleDocument,
+         handleOnboardingButton, handleOnboardingText, handleWhyButton, handleLevelCapButton, handleUndoButton, handleDocument,
          handleDeleteButton, handleEditButton, handleFirstButton, handleLangButton, handleStartButton, sendFirstOffer } from "@/lib/bot";
 import { freeTextAction } from "@/lib/bot-onboarding";
 import { isLocale } from "@/lib/i18n";
@@ -190,6 +190,12 @@ async function handle(env: Env, raw: unknown): Promise<void> {
     if (await handleLangButton(env, chatId, callback, cbId)) return;
     // Кнопки онбордингу йдуть першими: реакції на добірку мають префікс fb:
     if (await handleOnboardingButton(env, chatId, callback, update.callback_query?.id, locale)) {
+      return;
+    }
+    if (await handleLevelCapButton(env, chatId, callback, update.callback_query?.id, locale)) {
+      return;
+    }
+    if (await handleUndoButton(env, chatId, callback, update.callback_query?.id, locale)) {
       return;
     }
     if (await handleWhyButton(env, chatId, callback, update.callback_query?.id, locale)) {

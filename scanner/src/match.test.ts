@@ -675,7 +675,7 @@ describe("пам'ять про власні дії людини", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────
-import { levelsIn, jobLevel, splitWishes, wishPenalty, STRONG_SCORE, matchPercent } from "./match.js";
+import { levelsIn, jobLevel, splitWishes, wishPenalty, isBanned, STRONG_SCORE, matchPercent } from "./match.js";
 
 /**
  * Скарга 31.08: людина написала, що шукає вхідний рівень, і отримала middle
@@ -744,6 +744,50 @@ describe("побажання в обидва боки", () => {
     const { want, avoid } = splitWishes("готовий переїхати, але не в Азію");
     expect(want).toContain("переїхати");
     expect(avoid).toContain("Азію");
+  });
+
+  // Рядок узято дослівно з живого профілю 4231c8. Поки кома скидала
+  // заперечення, Lead, Head і Director потрапляли в «хочу», і людина
+  // отримувала топ-5 із рівно тих посад, які заборонила.
+  it("перелік заборон не розвалюється на комах", () => {
+    const { want, avoid } = splitWishes("No Senior, Lead, Head, Director or VP roles");
+    expect(want).toBe("");
+    for (const w of ["Senior", "Lead", "Head", "Director"]) expect(avoid).toContain(w);
+  });
+
+  it("слово наміру закриває перелік заборон", () => {
+    const { want, avoid } = splitWishes("не хочу банки, хочу стартапи");
+    expect(avoid).toContain("банки");
+    expect(want).toContain("стартапи");
+  });
+
+  it("оголошення перелічує факти, а не заборони", () => {
+    // Тут кома МУСИТЬ скидати заперечення: «no» стосується лише чергувань.
+    const { want } = splitWishes("Four-day week, no on-call rotation, cycling budget", false);
+    expect(want).toContain("cycling budget");
+  });
+
+  it("заборонений рівень карається, а не додає бал", () => {
+    const her: Profile = { ...p, spheres: ["marketing"], customRole: "content marketing",
+      wishes: "Junior to mid-level roles only. No Senior, Lead, Head, Director or VP roles" };
+    const senior = scoreJob(job({ title: "Senior Content Marketing Manager" }), her);
+    const plain  = scoreJob(job({ title: "Content Marketing Manager" }), her);
+    expect(senior.parts.some((x) => x.k === "levelBanned")).toBe(true);
+    expect(senior.facts.some((f) => f.k === "level")).toBe(false);
+    expect(senior.score).toBeLessThan(plain.score);
+  });
+
+  it("стеля заборони накриває все вище, коли названо й бажане", () => {
+    const wanted = new Set([1, 2]);
+    expect(isBanned(3, wanted, new Set([3]))).toBe(true);
+    expect(isBanned(4, wanted, new Set([3]))).toBe(true);   // «no senior» = і нічого вище
+    expect(isBanned(2, wanted, new Set([3]))).toBe(false);
+  });
+
+  it("сама заборона без бажаного не стає стелею", () => {
+    // «не беріть мене на джуна» не має закривати геть усе.
+    expect(isBanned(1, new Set(), new Set([1]))).toBe(true);
+    expect(isBanned(3, new Set(), new Set([1]))).toBe(false);
   });
 
   it("«не хочу стартапів» більше не важить те саме, що «хочу стартапи»", () => {

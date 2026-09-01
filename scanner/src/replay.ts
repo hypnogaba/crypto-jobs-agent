@@ -14,8 +14,13 @@
  *
  * Порядок роботи: зберегти базовий стан (`--json was.json`), змінити правила,
  * прогнати ще раз із `--baseline was.json` — і отримати таблицю «було/стало».
+ *
+ * `VIA_WRANGLER=1 WEB_DIR=../web` бере базу через `wrangler d1 execute --remote`
+ * замість REST. Потрібне там, де є звичайний логін wrangler, але немає
+ * CF_API_TOKEN, — тобто на машині розробника. Прогін і так лише читає.
  */
 import { loadConfig } from "./config.js";
+import { wranglerFetch } from "./wrangler-fetch.js";
 import { D1Client } from "./d1.js";
 import { fetchCandidateRows, profileOf, PROFILE_COLUMNS, toCandidates, type UserRow } from "./digest.js";
 import { pickTop, type Profile, type ScoredJob } from "./match.js";
@@ -132,9 +137,11 @@ export function renderDiff(was: ReplayUser | undefined, now: ReplayUser): string
 
 async function main(): Promise<void> {
   const args = parseReplayArgs(process.argv.slice(2));
-  const cfg = loadConfig();
+  const cfg = process.env.VIA_WRANGLER
+    ? { cfAccountId: "x", cfDatabaseId: "x", cfApiToken: "x" }
+    : loadConfig();
   const now = new Date();
-  const d1 = new D1Client({ accountId: cfg.cfAccountId, databaseId: cfg.cfDatabaseId, token: cfg.cfApiToken });
+  const d1 = new D1Client({ accountId: cfg.cfAccountId, databaseId: cfg.cfDatabaseId, token: cfg.cfApiToken }, process.env.VIA_WRANGLER ? { fetchImpl: wranglerFetch, attempts: 1, timeoutMs: 600_000 } : {});
 
   const where = ["u.status = 'active'"];
   const params: unknown[] = [];

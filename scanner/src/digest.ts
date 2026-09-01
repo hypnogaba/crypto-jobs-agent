@@ -35,6 +35,8 @@ export interface UserRow {
   timezone: string; delivery_hour: number; status: string; last_interaction_at: string | null;
   spheres: string; industries: string;
   remote_mode: string; location: string | null; salary_min: number | null;
+  salary_max: number | null;
+  level_max: number | null;
   salary_currency: string | null;
   country: string | null;
   custom_role: string | null;
@@ -670,6 +672,8 @@ export function profileOf(u: UserRow): Profile {
     customIndustryEn: u.custom_industry_en,
     cvHighlights: u.cv_highlights,
     wishes: u.wishes,
+    salaryMax: u.salary_max,
+    levelMax: u.level_max,
     wishesEn: u.wishes_en,
     // Вивчене зі скарг. Немає рядка — усі ваги одиничні, поведінка як була.
     tuning: {
@@ -685,7 +689,7 @@ export function profileOf(u: UserRow): Profile {
 
 /** Стовпці профілю, які читає підбір. Один список на digest і replay. */
 export const PROFILE_COLUMNS =
-  `u.*, p.spheres,p.industries,p.remote_mode,p.location,p.salary_min,p.salary_currency,p.custom_role,p.country,
+  `u.*, p.spheres,p.industries,p.remote_mode,p.location,p.salary_min,p.salary_max,p.level_max,p.salary_currency,p.custom_role,p.country,
         p.wishes,p.custom_industry,p.cv_highlights,
         p.custom_role_en,p.custom_industry_en,p.wishes_en,p.location_en,
         t.location_weight,t.salary_weight

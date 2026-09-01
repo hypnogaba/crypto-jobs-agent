@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { needsModel, normalizeCity, normalizeFreeText, safeEnglish, termTranslate } from "./normalize-text";
+import { needsModel, normalizeCity, normalizeFreeText, safeEnglish, termTranslate, NORMALIZED_MAX } from "./normalize-text";
 
 describe("termTranslate", () => {
   it("той самий випадок, з якого все почалось", () => {
@@ -103,5 +103,37 @@ describe("normalizeCity", () => {
 
   it("латиницю не чіпає", () => {
     expect(normalizeCity("Berlin")).toBe("Berlin");
+  });
+});
+
+describe("межа поля", () => {
+  // Живий рядок із профілю 4231c8: 595 символів, з яких у базу лягало 160.
+  const LONG = "Junior to mid-level individual contributor roles only. No Senior, Lead, "
+    + "Head, Director or VP roles. Prefer Web3/crypto companies and hands-on content, "
+    + "community, social media, growth, product marketing, brand or ecosystem marketing "
+    + "roles. Remote worldwide or roles open to candidates based in Argentina. "
+    + "English-speaking roles only; do not show roles that require Spanish. No sales or "
+    + "business development roles. Full-time, contract and part-time are all okay.";
+
+  it("англійські побажання доходять цілими, а не першими 160 символами", async () => {
+    const out = await normalizeFreeText(LONG, null, undefined, NORMALIZED_MAX.wishes);
+    expect(out).toBe(LONG);
+    expect(out).toContain("No Senior, Lead, Head, Director or VP roles");
+  });
+
+  it("назва ролі й далі коротка: спільна межа нікуди не поділась", async () => {
+    expect((await normalizeFreeText(LONG, null))?.length).toBe(NORMALIZED_MAX.short);
+  });
+
+  it("довгу відповідь моделі приймаємо саме для побажань", () => {
+    const long = "a".repeat(500);
+    expect(safeEnglish(long)).toBeNull();
+    expect(safeEnglish(long, NORMALIZED_MAX.wishes)).toBe(long);
+  });
+
+  it("кирилиця в побажаннях без моделі лишається без перекладу, а не набором слів", async () => {
+    // Словник дав би «sales», тобто протилежне сказаному. Краще нічого.
+    expect(await normalizeFreeText("не хочу продажі", null, undefined, NORMALIZED_MAX.wishes)).toBeNull();
+    expect(await normalizeFreeText("не хочу продажі", null)).toBe("sales");
   });
 });

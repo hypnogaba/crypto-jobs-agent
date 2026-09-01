@@ -14,8 +14,18 @@ import type { Locale } from "@/lib/vocab";
  * і поки мова бралася звідти, /uk віддавав англійський текст.
  */
 
+/**
+ * Порядок навмисний: три нові питання стоять одразу після «Підбір невдалий».
+ *
+ * Скарга 01.09 була не про те, що продукт не працює, а про те, що людина не
+ * знала, ЯК його налаштувати: писала обмеження своїми словами й не могла
+ * зрозуміти, чи вони діють і чи треба чекати ранку. Відповідь на це — не
+ * ще один крок в анкеті, а сторінка, яку можна перечитати.
+ */
 export const FAQ_KEYS = [
-  "cost", "apply", "sources", "cv", "why5", "wrong", "stop", "telegram", "languages", "dead",
+  "cost", "apply", "sources", "cv", "why5",
+  "wrong", "profile", "when", "senior",
+  "stop", "telegram", "languages", "dead",
 ];
 
 export default function FaqBody({ locale }: { locale: Locale }) {

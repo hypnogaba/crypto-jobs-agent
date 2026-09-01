@@ -180,6 +180,77 @@ const P = {
   whyStale: {
     en: "Already closed", uk: "Вакансію вже закрито", fr: "Offre déjà fermée", ru: "Вакансия уже закрыта",
   },
+  whyLevel: {
+    en: "Too senior for me", uk: "Занадто senior для мене",
+    fr: "Trop senior pour moi", ru: "Слишком senior для меня",
+  },
+  askLevelCap: {
+    en: "Which level fits you? I will keep anything above it out of your digests.",
+    uk: "Який рівень тобі підходить? Усе вище я більше не показуватиму.",
+    fr: "Quel niveau vous convient ? Je ne montrerai plus rien au-dessus.",
+    ru: "Какой уровень тебе подходит? Всё выше я больше показывать не буду.",
+  },
+  capJunior: { en: "Junior / entry", uk: "Junior, початковий", fr: "Junior / début", ru: "Junior, начальный" },
+  capMid:    { en: "Mid",            uk: "Mid",                fr: "Confirmé",      ru: "Mid" },
+  capSenior: { en: "Senior",         uk: "Senior",             fr: "Senior",        ru: "Senior" },
+  learnedLevel: {
+    en: "Set: nothing above {level}. Head, director and VP roles will not reach you at all. A fresh five is on its way, in a couple of minutes.",
+    uk: "Записав: не вище за {level}. Head, director і VP до тебе більше не доїдуть узагалі. Нову п'ятірку вже готую, за пару хвилин.",
+    fr: "Noté : rien au-dessus de {level}. Les postes head, director et VP ne vous parviendront plus. Une nouvelle sélection arrive dans deux minutes.",
+    ru: "Записал: не выше {level}. Head, director и VP до тебя больше не доедут вообще. Новую пятёрку уже готовлю, через пару минут.",
+  },
+  noteApplied: {
+    en: "Read it, and here is what I changed in your profile:",
+    uk: "Прочитав. Ось що я змінив у твоєму профілі:",
+    fr: "Lu. Voici ce que j'ai changé dans votre profil :",
+    ru: "Прочитал. Вот что я изменил в твоём профиле:",
+  },
+  noteComing: {
+    en: "A fresh five is on its way, in a couple of minutes.",
+    uk: "Нову п'ятірку вже готую, за пару хвилин.",
+    fr: "Une nouvelle sélection arrive dans deux minutes.",
+    ru: "Новую пятёрку уже готовлю, через пару минут.",
+  },
+  noteUndo: {
+    en: "That is not what I meant", uk: "Я мав на увазі не це",
+    fr: "Ce n'est pas ce que je voulais dire", ru: "Я имел в виду не это",
+  },
+  noteUnclear: {
+    en: "Written down, and I read every one of these. But I could not turn it into a profile change on my own — the surest way is /profile.",
+    uk: "Записав, і я читаю кожне таке повідомлення. Але сам перетворити це на зміну профілю не зміг — найпевніший шлях це /profile.",
+    fr: "Consigné, et je les lis toutes. Mais je n'ai pas su en tirer une modification du profil — le plus sûr reste /profile.",
+    ru: "Записал, и я читаю каждое такое сообщение. Но сам превратить это в изменение профиля не смог — самый верный путь это /profile.",
+  },
+  editLevel: {
+    en: "Level ceiling: nothing above {level}",
+    uk: "Стеля рівня: не вище за {level}",
+    fr: "Plafond de niveau : rien au-dessus de {level}",
+    ru: "Потолок уровня: не выше {level}",
+  },
+  editSalaryMin: {
+    en: "Pay from {sum} a month", uk: "Зарплата від {sum} на місяць",
+    fr: "Salaire à partir de {sum} par mois", ru: "Зарплата от {sum} в месяц",
+  },
+  editSalaryMax: {
+    en: "Pay up to {sum} a month", uk: "Зарплата до {sum} на місяць",
+    fr: "Salaire jusqu'à {sum} par mois", ru: "Зарплата до {sum} в месяц",
+  },
+  editWishes: {
+    en: "Added to your wishes: {text}", uk: "Додав у побажання: {text}",
+    fr: "Ajouté à vos souhaits : {text}", ru: "Добавил в пожелания: {text}",
+  },
+  undoDone: {
+    en: "Rolled back. The profile is as it was, and the next digest goes by the old rules.",
+    uk: "Повернув як було. Профіль у попередньому стані, наступна добірка йде за старими правилами.",
+    fr: "Annulé. Le profil est revenu à son état précédent.",
+    ru: "Вернул как было. Профиль в прежнем состоянии, следующая подборка идёт по старым правилам.",
+  },
+  undoNothing: {
+    en: "Nothing to roll back — I have not changed your profile.",
+    uk: "Скасовувати нічого: твій профіль я не міняв.",
+    fr: "Rien à annuler : je n'ai pas modifié votre profil.",
+    ru: "Отменять нечего: твой профиль я не менял.",
+  },
   whySame: {
     en: "Too similar to each other", uk: "Усі надто схожі між собою", fr: "Trop semblables", ru: "Все слишком похожи",
   },

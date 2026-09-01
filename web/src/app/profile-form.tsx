@@ -30,6 +30,9 @@ export interface ProfilePre {
   remoteMode: string | null;
   location: string | null;
   salaryMin: number | null;
+  salaryMax: number | null;
+  /** Стеля рівня: 1 junior, 2 mid, 3 senior. Порожньо — без стелі. */
+  levelMax: number | null;
   salaryCurrency: string | null;
   wishes: string | null;
 }
@@ -299,16 +302,41 @@ export default function ProfileForm({ locale, pre, back, error, quote, evidence,
         </Question>
 
         <Question n={3} title={t(locale, "onboarding.salary")} hint={t(locale, "onboarding.salaryHint")}>
-          <div className="flex gap-3">
+          {/* Дві межі, а не одна. Прохання живої людини: «відкрита до
+              нормальних junior/mid ролей, але не хочу, щоб бот через це тягнув
+              дуже дорогі американські сініор вакансії». Верхня порожня нічого
+              не робить, тож наявні профілі не змінюються. */}
+          <div className="flex gap-3 items-center">
             {/* Підказка теж місячна: «90000» у полі, підписаному «на місяць»,
                 сама по собі казала людині, що тут чекають річну. */}
             <input type="number" name="salaryMin" className="field mono" placeholder="4000"
+              aria-label={t(locale, "onboarding.salaryFrom")}
               defaultValue={pre.salaryMin ?? ""} />
+            <span className="eyebrow shrink-0">{t(locale, "onboarding.salaryTo")}</span>
+            <input type="number" name="salaryMax" className="field mono" placeholder="8000"
+              aria-label={t(locale, "onboarding.salaryTo")}
+              defaultValue={pre.salaryMax ?? ""} />
             <select name="salaryCurrency" className="field mono" style={{ maxWidth: "7rem" }}
               defaultValue={pre.salaryCurrency ?? "EUR"}>
               {["EUR", "USD", "GBP", "PLN", "CHF"].map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
+          {/* Стеля рівня стоїть тут, а не окремим питанням: анкету свідомо
+              звели до трьох, і четверте повернуло б назад те, що прибрали.
+              Поле те саме, яке ставить кнопка «занадто senior» у боті, — тож
+              людина бачить і може зняти те, що сама там натиснула. */}
+          <label className="mt-5 block">
+            <span className="eyebrow">{t(locale, "onboarding.levelCap")}</span>
+            <select name="levelMax" className="field mono mt-2" defaultValue={pre.levelMax ?? ""}>
+              <option value="">{t(locale, "onboarding.levelAny")}</option>
+              <option value="1">{t(locale, "onboarding.levelJunior")}</option>
+              <option value="2">{t(locale, "onboarding.levelMid")}</option>
+              <option value="3">{t(locale, "onboarding.levelSenior")}</option>
+            </select>
+            <span className="mt-1 block text-xs" style={{ color: "var(--muted)" }}>
+              {t(locale, "onboarding.levelCapHint")}
+            </span>
+          </label>
           <Reasons items={kept([
             why("salary", pre.salaryMin ? `${pre.salaryMin} ${pre.salaryCurrency ?? ""}`.trim() : ""),
           ])} />

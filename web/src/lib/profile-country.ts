@@ -1,6 +1,6 @@
 import { one, run } from "@/lib/db";
 import { deriveCountries } from "@/lib/geo";
-import { normalizeCity, normalizeFreeText } from "@/lib/normalize-text";
+import { normalizeCity, normalizeFreeText, NORMALIZED_MAX } from "@/lib/normalize-text";
 import { logUsage } from "@/lib/usage";
 
 /**
@@ -57,7 +57,9 @@ export async function persistDerived(userId: string, apiKey: string | null): Pro
     const [role, industry, wishes] = await Promise.all([
       normalizeFreeText(r.custom_role, apiKey, note),
       normalizeFreeText(r.custom_industry, apiKey, note),
-      normalizeFreeText(r.wishes, apiKey, note),
+      // Побажання — абзац, а не назва: своя межа й свій промпт. Спільні 160
+      // символів різали написане на три чверті й губили саме заперечення.
+      normalizeFreeText(r.wishes, apiKey, note, NORMALIZED_MAX.wishes),
     ]);
 
     await run(

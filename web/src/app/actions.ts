@@ -221,6 +221,10 @@ export async function saveProfile(formData: FormData): Promise<void> {
   const modes = parseModes(formData.getAll("remoteMode").map(String).join(","));
   const location = String(formData.get("location") ?? "").trim().slice(0, SHORT_FIELD_MAX) || null;
   const salaryMinRaw = Number.parseInt(String(formData.get("salaryMin") ?? ""), 10);
+  const salaryMaxRaw = Number.parseInt(String(formData.get("salaryMax") ?? ""), 10);
+  // Обидві межі — місячні й в одній валюті, тож і перевірка в них спільна.
+  const monthly = (n: number): number | null =>
+    Number.isFinite(n) && n > 0 && n < 1_000_000 ? n * 12 : null;
   const profile = {
     spheres: allowed(formData.getAll("spheres").map(String), SPHERES),
     industries: allowed(formData.getAll("industries").map(String), INDUSTRIES),
@@ -234,8 +238,16 @@ export async function saveProfile(formData: FormData): Promise<void> {
     // Поле МІСЯЧНЕ — так думають люди, і так воно підписане. У базі лежить
     // річна: вакансії зведені до річних, і дві одиниці виміру в одній колонці
     // вже коштували нам мовчазної втрати «3000 євро».
-    salaryMin: Number.isFinite(salaryMinRaw) && salaryMinRaw > 0 && salaryMinRaw < 1_000_000
-      ? salaryMinRaw * 12 : null,
+    // Стеля рівня: 1, 2 або 3. Усе інше — «без стелі», зокрема порожній вибір.
+    levelMax: [1, 2, 3].includes(Number(formData.get("levelMax")))
+      ? Number(formData.get("levelMax")) : null,
+    salaryMin: monthly(salaryMinRaw),
+    // Верхня межа нижча за нижню — це описка, а не побажання. Приймати її
+    // означало б зробити добірку порожньою й не сказати чому.
+    salaryMax: (() => {
+      const lo = monthly(salaryMinRaw), hi = monthly(salaryMaxRaw);
+      return hi !== null && lo !== null && hi < lo ? null : hi;
+    })(),
     salaryCurrency: String(formData.get("salaryCurrency") ?? "").trim().slice(0, 8) || null,
     wishes: String(formData.get("wishes") ?? "").trim().slice(0, 2000) || null,
   };
@@ -302,7 +314,8 @@ async function persistProfile(
   p: { spheres: string[]; industries: string[]; customRole: string | null;
        customIndustry: string | null;
        remoteMode: string;
-       location: string | null; salaryMin: number | null; salaryCurrency: string | null;
+       location: string | null; levelMax: number | null;
+       salaryMin: number | null; salaryMax: number | null; salaryCurrency: string | null;
        wishes: string | null; cvHighlights: string | null }
 ): Promise<void> {
   // Без нового тексту (null) три текстові стовпці лишаються як були: раніше
@@ -317,14 +330,16 @@ async function persistProfile(
     ? "mode=profiles.mode, raw_input=profiles.raw_input, cv_text=profiles.cv_text"
     : "mode=excluded.mode, raw_input=excluded.raw_input, cv_text=excluded.cv_text";
   await run(
-    `INSERT INTO profiles (user_id,mode,raw_input,cv_text,spheres,custom_role,industries,custom_industry,remote_mode,location,salary_min,salary_currency,wishes,cv_highlights,updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+    `INSERT INTO profiles (user_id,mode,raw_input,cv_text,spheres,custom_role,industries,custom_industry,remote_mode,location,level_max,salary_min,salary_max,salary_currency,wishes,cv_highlights,updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
      ON CONFLICT(user_id) DO UPDATE SET
        ${textCols},
        spheres=excluded.spheres, custom_role=excluded.custom_role,
        industries=excluded.industries, custom_industry=excluded.custom_industry,
        remote_mode=excluded.remote_mode, location=excluded.location,
-       salary_min=excluded.salary_min, salary_currency=excluded.salary_currency,
+       level_max=excluded.level_max,
+       salary_min=excluded.salary_min, salary_max=excluded.salary_max,
+       salary_currency=excluded.salary_currency,
        wishes=excluded.wishes, cv_highlights=excluded.cv_highlights,
        updated_at=datetime('now')`,
     userId, isCv ? "cv" : "freetext",
@@ -332,7 +347,7 @@ async function persistProfile(
     isCv ? rawInput!.slice(0, 20_000) : null,
     JSON.stringify(p.spheres), p.customRole,
     JSON.stringify(p.industries), p.customIndustry,
-    p.remoteMode, p.location, p.salaryMin, p.salaryCurrency, p.wishes, p.cvHighlights);
+    p.remoteMode, p.location, p.levelMax, p.salaryMin, p.salaryMax, p.salaryCurrency, p.wishes, p.cvHighlights);
   await persistDerived(userId, (await env()).ANTHROPIC_API_KEY ?? null);
 
 }

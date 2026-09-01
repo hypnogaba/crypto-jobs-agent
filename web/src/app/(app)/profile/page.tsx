@@ -27,7 +27,7 @@ export default async function Profile({ searchParams }: { searchParams: Promise<
   const row = await one<{ spheres: string; industries: string;
     custom_role: string | null; custom_industry: string | null;
     cv_highlights: string | null; mode: string | null;
-    remote_mode: string; location: string | null; salary_min: number | null; salary_currency: string | null;
+    remote_mode: string; location: string | null; level_max: number | null; salary_min: number | null; salary_max: number | null; salary_currency: string | null;
     wishes: string | null }>(
     "SELECT * FROM profiles WHERE user_id=?", user.id);
   if (!row) redirect("/");
@@ -40,7 +40,8 @@ export default async function Profile({ searchParams }: { searchParams: Promise<
         customRole: row.custom_role, customIndustry: row.custom_industry,
         cvHighlights: row.cv_highlights, fromCv: row.mode === "cv",
         remoteMode: row.remote_mode, location: row.location,
-        salaryMin: monthlyFrom(row.salary_min), salaryCurrency: row.salary_currency, wishes: row.wishes,
+        salaryMin: monthlyFrom(row.salary_min), levelMax: row.level_max, salaryMax: monthlyFrom(row.salary_max),
+        salaryCurrency: row.salary_currency, wishes: row.wishes,
       }} />
     </Shell>
   );

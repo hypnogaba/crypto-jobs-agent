@@ -9,7 +9,9 @@ import { isLocale, LOCALES, toLocale } from "./i18n";
 import { CvError, extractCvText } from "./cv";
 import { parseProfile, type ParsedProfile } from "./parse";
 import { monthlyFrom, yearlyFrom } from "./salary-period";
-import { t as say, tf, timeNow, timeSet } from "./bot-copy";
+import { isEmptyEdit, readNote, wishClauses } from "./note-to-profile";
+import { logUsage } from "./usage";
+import { t as say, tf, timeNow, timeSet, type CopyKey } from "./bot-copy";
 import { parseModes, serializeModes, toggleMode, type Locale } from "./vocab";
 import { persistDerived } from "@/lib/profile-country";
 import { timezoneFor } from "./geo";
@@ -302,6 +304,117 @@ export async function handleOnboardingButton(
   return true;
 }
 
+/** Поля профілю, яких може торкнутись розбір коментаря. Річні, як у базі. */
+interface EditableProfile {
+  level_max: number | null;
+  salary_min: number | null;
+  salary_max: number | null;
+  wishes: string | null;
+}
+
+/** Назва поля людською мовою — для рядка «що саме змінилось». */
+const CAP_NAME: Record<number, CopyKey> = { 1: "capJunior", 2: "capMid", 3: "capSenior" };
+
+/**
+ * Написане словами -> правка профілю, показана людині.
+ *
+ * Порядок навмисний: спершу міняємо, потім показуємо ЩО змінили, і лише
+ * потім пропонуємо нову добірку. Людина має побачити наслідок до того, як
+ * попросить результат, — інакше «врахував» лишається словом без доказу.
+ *
+ * Нічого не розібралось (немає ключа, модель упала, у тексті немає жодного
+ * відомого поля) — кажемо це прямо й показуємо, де ті самі речі стоять
+ * кнопками. Вигадана правка була б гіршою за чесне «не зрозумів».
+ */
+async function applyNote(
+  env: Env, chatId: number, userId: string, said: string, locale: Locale
+): Promise<void> {
+  const edit = await readNote(said, env.ANTHROPIC_API_KEY ?? null,
+    (u) => logUsage({ operation: "note_to_profile", ...u }));
+  if (isEmptyEdit(edit)) { await send(env, chatId, say("noteUnclear", locale)); return; }
+
+  const before = await one<EditableProfile>(
+    "SELECT level_max, salary_min, salary_max, wishes FROM profiles WHERE user_id=?", userId);
+  if (!before) { await send(env, chatId, say("noted", locale)); return; }
+
+  const after: EditableProfile = { ...before };
+  const lines: string[] = [];
+
+  if (edit.levelMax != null) {
+    after.level_max = edit.levelMax;
+    lines.push(tf("editLevel", locale, { level: say(CAP_NAME[edit.levelMax]!, locale) }));
+  }
+  // У базі зарплата річна, а людина говорить про місяць. Одиниця вже коштувала
+  // нам мовчазної втрати «3000 євро» — тому перетворення тут явне.
+  if (edit.salaryMin != null) {
+    after.salary_min = yearlyFrom(edit.salaryMin);
+    lines.push(tf("editSalaryMin", locale, { sum: edit.salaryMin.toLocaleString("uk-UA") }));
+  }
+  if (edit.salaryMax != null) {
+    after.salary_max = yearlyFrom(edit.salaryMax);
+    lines.push(tf("editSalaryMax", locale, { sum: edit.salaryMax.toLocaleString("uk-UA") }));
+  }
+  const clauses = wishClauses(edit);
+  if (clauses) {
+    after.wishes = `${before.wishes ? `${before.wishes} ` : ""}${clauses}.`.slice(0, 1_000);
+    lines.push(tf("editWishes", locale, { text: clauses }));
+  }
+
+  await run(
+    `UPDATE profiles SET level_max=?, salary_min=?, salary_max=?, wishes=?,
+                         updated_at=datetime('now') WHERE user_id=?`,
+    after.level_max, after.salary_min, after.salary_max, after.wishes, userId);
+  await run(
+    `INSERT INTO profile_edits (id,user_id,source,said,before_json,after_json)
+     VALUES (?,?,'note',?,?,?)`,
+    uuid(), userId, said, JSON.stringify(before), JSON.stringify(after));
+
+  // Побажання змінились — переклад застарів. persistDerived перерахує його
+  // сам: він звіряє відбиток вихідного тексту, а той щойно став іншим.
+  if (clauses) await persistDerived(userId, env.ANTHROPIC_API_KEY ?? null);
+
+  await run(
+    `INSERT INTO delivery_requests (id,user_id)
+     SELECT ?,? WHERE NOT EXISTS (SELECT 1 FROM delivery_requests WHERE user_id=? AND handled_at IS NULL)`,
+    uuid(), userId, userId);
+  await run("UPDATE users SET last_interaction_at=datetime('now') WHERE id=?", userId);
+
+  await sendKeyboard(env, chatId,
+    `${say("noteApplied", locale)}\n\n${lines.map((l) => `• ${l}`).join("\n")}\n\n${say("noteComing", locale)}`,
+    [[{ text: say("noteUndo", locale), callback_data: "un:last" }]]);
+}
+
+/**
+ * Скасування останньої правки, зробленої з коментаря.
+ *
+ * Скасовуємо саме ту, яку людина щойно бачила: остання незакрита. Глибше не
+ * лізе навмисно — людина відповідає на екран перед собою, а не на історію.
+ */
+export async function handleUndoButton(
+  env: Env, chatId: number, data: string, callbackId: string | undefined, locale: Locale
+): Promise<boolean> {
+  if (data !== "un:last") return false;
+  if (callbackId) await ackButton(env, callbackId);
+
+  const user = await one<{ id: string }>("SELECT id FROM users WHERE telegram_chat_id=?", String(chatId));
+  if (!user) return true;
+
+  const last = await one<{ id: string; before_json: string }>(
+    `SELECT id, before_json FROM profile_edits
+      WHERE user_id=? AND undone_at IS NULL ORDER BY created_at DESC LIMIT 1`, user.id);
+  if (!last) { await send(env, chatId, say("undoNothing", locale)); return true; }
+
+  const before = JSON.parse(last.before_json) as EditableProfile;
+  await run(
+    `UPDATE profiles SET level_max=?, salary_min=?, salary_max=?, wishes=?,
+                         updated_at=datetime('now') WHERE user_id=?`,
+    before.level_max, before.salary_min, before.salary_max, before.wishes, user.id);
+  await run("UPDATE profile_edits SET undone_at=datetime('now') WHERE id=?", last.id);
+  await persistDerived(user.id, env.ANTHROPIC_API_KEY ?? null);
+  await send(env, chatId, say("undoDone", locale));
+  return true;
+}
+
 /** «Інша сума» — єдине місце, де в онбордингу лишився вільний текст. */
 export async function handleOnboardingText(
   env: Env, chatId: number, text: string, locale: Locale
@@ -312,12 +425,15 @@ export async function handleOnboardingText(
   if (row.step === "why") {
     const user = await one<{ id: string }>("SELECT id FROM users WHERE telegram_chat_id=?", String(chatId));
     const digestId = (JSON.parse(row.draft || "{}") as { digestId?: string }).digestId ?? "";
+    const said = text.slice(0, 1000);
     if (user) {
       await run(
         "UPDATE feedback SET reason='other', note=? WHERE user_id=? AND digest_id=? AND reaction='not_relevant'",
-        text.slice(0, 1000), user.id, digestId);
+        said, user.id, digestId);
     }
     await run("DELETE FROM bot_state WHERE chat_id=?", String(chatId));
+    // Слова людини мусять щось змінити, інакше «врахую» — неправда.
+    if (user) { await applyNote(env, chatId, user.id, said, locale); return true; }
     await send(env, chatId, say("noted", locale));
     return true;
   }
@@ -930,6 +1046,53 @@ const TUNED: Record<string, string> = {
   remote: "location_weight",
 };
 
+/**
+ * Щаблі стелі рівня. Ті самі числа, що levelTier у сканері.
+ *
+ * Четвертого щабля («head, director») тут немає навмисно: стеля «не вище за
+ * керівника» не означає нічого — вище нікого немає. Людина, якій підходить
+ * усе, просто не ставить стелі.
+ */
+const LEVEL_CAPS: Array<[number, CopyKey]> = [[1, "capJunior"], [2, "capMid"], [3, "capSenior"]];
+
+const levelCapKeyboard = (digestId: string, locale: Locale): Keyed[][] => [
+  LEVEL_CAPS.map(([tier, key]) => ({ text: say(key, locale), callback_data: `lv:${digestId}:${tier}` })),
+];
+
+/**
+ * Стеля рівня, обрана кнопкою після скарги «занадто senior».
+ *
+ * Пишемо в поле `level_max`, а не дописуємо слова в побажання. Слова довелося
+ * б потім розбирати назад, а розбір чужого тексту — саме те місце, де вже
+ * з'явився баг: перелік «No Senior, Lead, Head» розвалювався на комах і
+ * ставав переліком БАЖАНОГО. Поле не розбирається ніколи.
+ */
+export async function handleLevelCapButton(
+  env: Env, chatId: number, data: string, callbackId: string | undefined, locale: Locale
+): Promise<boolean> {
+  if (!data.startsWith("lv:")) return false;
+  if (callbackId) await ackButton(env, callbackId);
+
+  const tier = Number.parseInt(data.split(":")[2] ?? "", 10);
+  if (!LEVEL_CAPS.some(([t]) => t === tier)) return true;
+
+  const user = await one<{ id: string }>("SELECT id FROM users WHERE telegram_chat_id=?", String(chatId));
+  if (!user) return true;
+
+  await run("UPDATE profiles SET level_max=?, updated_at=datetime('now') WHERE user_id=?", tier, user.id);
+  // Нова добірка за запитом, а не завтра вранці: `nextrole-requests` ганяється
+  // кожні дві хвилини. Людина спитала прямо, чи чекати ранку, — не чекати.
+  await run(
+    `INSERT INTO delivery_requests (id,user_id)
+     SELECT ?,? WHERE NOT EXISTS (SELECT 1 FROM delivery_requests WHERE user_id=? AND handled_at IS NULL)`,
+    uuid(), user.id, user.id);
+  await run("UPDATE users SET last_interaction_at=datetime('now') WHERE id=?", user.id);
+
+  const name = say(LEVEL_CAPS.find(([t]) => t === tier)![1], locale);
+  await send(env, chatId, tf("learnedLevel", locale, { level: name }));
+  return true;
+}
+
 export async function handleWhyButton(
   env: Env, chatId: number, data: string, callbackId: string | undefined, locale: Locale
 ): Promise<boolean> {
@@ -970,6 +1133,17 @@ export async function handleWhyButton(
       `UPDATE user_tuning SET sphere_complaints = sphere_complaints + 1,
                               updated_at = datetime('now') WHERE user_id=?`, user.id);
     await send(env, chatId, say("learnedSphere", locale));
+    return true;
+  }
+
+  // «Занадто senior» вагою теж не лікується, і вгадувати тут не можна.
+  //
+  // Скарга прийшла словами: «"wrong role" не завжди точно передає проблему:
+  // сама сфера вакансії може підходити, але саме рівень ні». Вага зробила б
+  // невідповідність рівня дорожчою, але ми не знаємо, ЯКОГО рівня людина
+  // хоче — тож питаємо. Один зайвий дотик замість здогаду про чужу карʼєру.
+  if (reason === "level") {
+    await sendKeyboard(env, chatId, say("askLevelCap", locale), levelCapKeyboard(digestId, locale));
     return true;
   }
 
@@ -1175,8 +1349,9 @@ export async function continueBotOnboarding(
            { text: say("whyIndustry", locale), callback_data: `wh:${digestId}:industry` }],
           [{ text: say("whyRemote", locale),   callback_data: `wh:${digestId}:remote` },
            { text: say("whyStale", locale),    callback_data: `wh:${digestId}:stale` }],
-          [{ text: say("whySame", locale),     callback_data: `wh:${digestId}:same` },
-           { text: say("whyOther", locale),    callback_data: `wh:${digestId}:other` }],
+          [{ text: say("whyLevel", locale),    callback_data: `wh:${digestId}:level` },
+           { text: say("whySame", locale),     callback_data: `wh:${digestId}:same` }],
+          [{ text: say("whyOther", locale),    callback_data: `wh:${digestId}:other` }],
         ]);
       }
     }
