@@ -7,7 +7,8 @@ describe("порядок питань", () => {
   it("веде від сфер до зарплати й зупиняється", () => {
     expect(STEPS[0]).toBe("spheres");
     expect(nextStep("spheres")).toBe("wishes");
-    expect(nextStep("wishes")).toBe("industries");
+    expect(nextStep("wishes")).toBe("cv");
+    expect(nextStep("cv")).toBe("industries");
     expect(nextStep("salary")).toBeNull();
   });
 
@@ -124,7 +125,6 @@ describe("вільний текст поза командами", () => {
 describe("побажання в анкеті", () => {
   it("стоять одразу після сфер і мають кнопку «Пропустити»", () => {
     expect(nextStep("spheres")).toBe("wishes");
-    expect(nextStep("wishes")).toBe("industries");
     const rows = keyboard("wishes", emptyDraft(), "uk");
     expect(rows).toEqual([[{ text: "Пропустити", callback_data: "ob:wishes:__next" }]]);
   });
@@ -142,7 +142,7 @@ describe("правка по пунктах", () => {
     for (const step of EDITABLE) expect(data).toContain(`ed:${step}`);
     expect(data).toContain("ed:lang");
     expect(profileMenu("uk").flat().map((b) => b.text))
-      .toEqual(["Роль", "Галузь", "Місце", "Зарплата", "Побажання", "Мова", "Година"]);
+      .toEqual(["Роль", "Галузь", "Місце", "Зарплата", "Побажання", "Стек", "Мова", "Година"]);
   });
 
   it("клавіатура з префіксом ed: не плутається з онбордингом", () => {
@@ -259,5 +259,39 @@ describe("кнопка «своє» на питанні про місце", () =
   it("а на ролях лишається «Немає в списку» — там список справді є", () => {
     const texts = kb("spheres", emptyDraft(), "uk").flat().map((b) => b.text);
     expect(texts.some((t) => t.includes("Немає в списку"))).toBe(true);
+  });
+});
+
+import { currentOf as nowOf } from "./bot-onboarding.js";
+
+/**
+ * Аудит 01.09: сайт питав «стек, роки, мови» четвертим питанням, а крокова
+ * анкета бота не питала його ніколи — і не давала правити, бо в EDITABLE
+ * його теж не було. Тобто людина з бота не могла заповнити це поле в
+ * принципі. Воно йде в промпт до моделі, яка пише рядок «чому ти», тож
+ * пояснення для неї виходило біднішим, ніж для тієї самої людини з сайту.
+ */
+describe("стек, роки, мови — те саме поле в боті й на сайті", () => {
+  it("питається в анкеті", () => {
+    expect(STEPS).toContain("cv");
+    expect(nextStep("wishes")).toBe("cv");
+  });
+
+  it("має кнопку «Пропустити»: це не обов'язкове поле", () => {
+    const rows = keyboard("cv", emptyDraft(), "uk");
+    expect(rows.flat().map((b) => b.text)).toContain("Пропустити");
+  });
+
+  it("правиться з меню й пише саме cv_highlights", () => {
+    expect(EDITABLE).toContain("cv");
+    const upd = profileUpdateFor("cv", { ...emptyDraft(), cvHighlights: "8 років BD, Solana" });
+    expect(upd?.set).toContain("cv_highlights");
+    expect(upd?.params).toEqual(["8 років BD, Solana"]);
+  });
+
+  it("показує вже записане над питанням", () => {
+    expect(nowOf("cv", { ...emptyDraft(), cvHighlights: "Go, 6 років, EN/UA" }, "uk"))
+      .toContain("Go, 6 років, EN/UA");
+    expect(nowOf("cv", emptyDraft(), "uk")).toBeNull();
   });
 });

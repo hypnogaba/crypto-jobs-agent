@@ -13,9 +13,9 @@
 import { loadConfig } from "./config.js";
 import { D1Client } from "./d1.js";
 import { affected, notifyOwner } from "./notify.js";
-import { explainWithClaude, hasSearchSignal, matchPercent, meaningfulRoleWords, pickTop, roleText, roleWords,
+import { explainWithClaude, hasSearchSignal, meaningfulRoleWords, pickTop, roleText, roleWords,
          type CandidateJob, type Profile } from "./match.js";
-import { asLocale, formatWhen, matchLine, nextDelivery, salaryLine, say, thin, type Locale } from "./digest-copy.js";
+import { asLocale, formatWhen, nextDelivery, salaryLine, say, thin, type Locale } from "./digest-copy.js";
 import { summarize } from "./summary.js";
 import { costUsd } from "./pricing.js";
 import { extractSalary, type Salary } from "./salary.js";
@@ -375,10 +375,15 @@ export function formatDigest(
     const facts = [
       j.location ?? (j.remote ? say(locale, "remote") : null),
       j.remote && j.location ? say(locale, "remote") : null,
-      // Наскільки близько. Порядок у добірці й так за спаданням, але без
-      // числа різниця між першою і п'ятою невидима, а вона буває велика:
-      // у живій добірці перша тягнула на 74%, п'ята на 40%.
-      j.score === undefined ? null : matchLine(locale, matchPercent(j.score)),
+      // Відсотка збігу тут більше немає.
+      //
+      // Він відповідав на питання, якого людина не ставила. Їй потрібно
+      // вирішити, подаватись чи ні, а «Збіг 28%» на це не відповідає —
+      // лише підриває довіру до вакансії, яку ми самі ж і надіслали. Порядок
+      // у добірці вже за спаданням, і цього досить: перша — найкраща з того,
+      // що ми знайшли сьогодні. Число ж міряло відстань до нашої власної
+      // шкали, а не придатність роботи, і пояснити його в одному рядку
+      // неможливо.
       // Неправдоподібну вилку не показуємо взагалі: «від 1 000 USD» під
       // вакансією senior-рівня виглядає як зламаний продукт, і воно ним і є —
       // це або місячна сума, або уламок тексту, який розбір узяв за вилку.

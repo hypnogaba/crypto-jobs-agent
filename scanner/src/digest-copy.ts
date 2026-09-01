@@ -151,16 +151,6 @@ export function salaryLine(
   return `${say(locale, "to")} ${fmt(max!)}${cur}`;
 }
 
-/** «Збіг 78%» — одним рядком, мовою людини. */
-export const matchLine = (locale: Locale, percent: number): string => {
-  const map: Phrase = {
-    en: `Match ${percent}%`,
-    uk: `Збіг ${percent}%`,
-    fr: `Correspondance ${percent}%`,
-    ru: `Совпадение ${percent}%`,
-  };
-  return map[locale] ?? map.en;
-};
 
 export const thin = (locale: Locale, got: number, want: number): string => {
   const map: Phrase = {

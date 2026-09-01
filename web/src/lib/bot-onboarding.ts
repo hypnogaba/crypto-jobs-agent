@@ -19,22 +19,24 @@ import { timezoneFromCity, timeOptions, zoneName } from "./tz";
 import { monthlyFrom } from "./salary-period";
 import { timezoneFor } from "./geo";
 
-export type Step = "spheres" | "wishes" | "industries" | "where" | "city" | "tz" | "salary";
+export type Step = "spheres" | "wishes" | "cv" | "industries" | "where" | "city" | "tz" | "salary";
 
 /**
  * Порядок питань. «Побажання» одразу після сфер: людина щойно побачила
  * кнопки й знає, чого в них немає. «Година» після міста: якщо місто вже
  * назвало пояс, питання не ставиться.
  */
-export const STEPS: Step[] = ["spheres", "wishes", "industries", "where", "city", "tz", "salary"];
+export const STEPS: Step[] = ["spheres", "wishes", "cv", "industries", "where", "city", "tz", "salary"];
 
 /** Поля, які людина редагує по одному через /profile. Мова й година живуть у users, не в profiles. */
-export const EDITABLE: Step[] = ["spheres", "industries", "where", "salary", "wishes", "tz"];
+export const EDITABLE: Step[] = ["spheres", "industries", "where", "salary", "wishes", "cv", "tz"];
 
 export interface Draft {
   spheres: string[];
   /** Своя назва ролі, коли жодна сфера не підійшла. */
   customRole?: string | null;
+  /** Стек, роки, мови — те саме поле, що й четверте питання на сайті. */
+  cvHighlights?: string | null;
   /** Своя індустрія і своя локація — те саме для решти питань. */
   customIndustry?: string | null;
   customWhere?: string | null;
@@ -59,7 +61,7 @@ export interface Draft {
 export const emptyDraft = (): Draft => ({
   spheres: [], customRole: null, industries: [], customIndustry: null,
   customWhere: null,
-  remoteMode: null, location: null, wishes: null, timezone: null,
+  remoteMode: null, location: null, wishes: null, cvHighlights: null, timezone: null,
   salaryMin: null, salaryCurrency: null,
 });
 
@@ -130,6 +132,22 @@ const ASK: Record<Step, Phrase> = {
     uk: "3 з 3 · Де хочеш працювати?",
     fr: "3 sur 3 · Où voulez-vous travailler ?",
     ru: "3 из 3 · Где хочешь работать?",
+  },
+  /**
+   * Стек, роки, мови — питання, якого в боті не було зовсім.
+   *
+   * На сайті це четверте питання анкети, а крокова анкета бота його не
+   * питала й не давала правити: у списку EDITABLE його теж не було. Тобто
+   * людина з бота НІКОЛИ не могла його заповнити. Поле йде в промпт до
+   * моделі, яка пише рядок «чому ти» під кожною вакансією, тож пояснення для
+   * неї виходило біднішим, ніж для тієї самої людини з сайту. На бали воно
+   * не впливає — лише на слова, і саме тому пропуск був непомітним.
+   */
+  cv: {
+    en: "Stack, years, languages?\nTwo lines are enough — this sharpens the five you get. Or skip.",
+    uk: "Стек, роки, мови?\nДвох рядків досить — це уточнює ті п'ять, що приходять. Або пропусти.",
+    fr: "Stack, années, langues ?\nDeux lignes suffisent — cela affine les cinq reçues. Ou passez.",
+    ru: "Стек, годы, языки?\nДвух строк достаточно — это уточняет те пять, что приходят. Или пропусти.",
   },
   wishes: {
     en: "Anything important that is not in the buttons?\nWrite it, or skip.",
@@ -251,6 +269,7 @@ const WORD = {
   fWhere:      { en: "Place",      uk: "Місце",      fr: "Lieu",      ru: "Место" },
   fSalary:     { en: "Salary",     uk: "Зарплата",   fr: "Salaire",   ru: "Зарплата" },
   fWishes:     { en: "Wishes",     uk: "Побажання",  fr: "Souhaits",  ru: "Пожелания" },
+  fCv:         { en: "Stack",      uk: "Стек",       fr: "Stack",     ru: "Стек" },
   fLang:       { en: "Language",   uk: "Мова",       fr: "Langue",    ru: "Язык" },
   fTz:         { en: "Hour",       uk: "Година",     fr: "Heure",     ru: "Час" },
 } satisfies Record<string, Phrase>;
@@ -314,8 +333,8 @@ export function keyboard(step: Step, draft: Draft, locale: Locale, opts: Keyboar
   // всіх, а мовчазний вибір «найближчого» псує підбір гірше за порожнє поле.
   // Побажання — вільний текст: жодного списку тут бути не може, а єдина
   // кнопка дозволяє не відповідати.
-  if (step === "wishes") {
-    return [[{ text: say(WORD.skip, locale), callback_data: `${pre}:wishes:__next` }]];
+  if (step === "wishes" || step === "cv") {
+    return [[{ text: say(WORD.skip, locale), callback_data: `${pre}:${step}:__next` }]];
   }
 
   // Місто теж вільний текст, але «Пропустити» тут немає: питання ставиться
@@ -385,7 +404,7 @@ export const backButton = (locale: Locale): Button => ({
 export function fieldLabel(step: Step | "role" | "industry", locale: Locale): string {
   const map: Record<string, Phrase> = {
     spheres: WORD.fSpheres, industries: WORD.fIndustries, where: WORD.fWhere,
-    city: WORD.fWhere, salary: WORD.fSalary, wishes: WORD.fWishes, tz: WORD.fTz,
+    city: WORD.fWhere, salary: WORD.fSalary, wishes: WORD.fWishes, cv: WORD.fCv, tz: WORD.fTz,
     role: { en: "Your role", uk: "Своя роль", fr: "Votre rôle", ru: "Своя роль" },
     industry: { en: "Your industry", uk: "Своя галузь", fr: "Votre secteur", ru: "Своя отрасль" },
   };
@@ -397,7 +416,7 @@ export function profileMenu(locale: Locale): Button[][] {
   return [
     [b(WORD.fSpheres, "spheres"), b(WORD.fIndustries, "industries")],
     [b(WORD.fWhere, "where"), b(WORD.fSalary, "salary")],
-    [b(WORD.fWishes, "wishes")],
+    [b(WORD.fWishes, "wishes"), b(WORD.fCv, "cv")],
     [b(WORD.fLang, "lang"), b(WORD.fTz, "tz")],
   ];
 }
@@ -421,6 +440,8 @@ export function profileUpdateFor(step: Step, draft: Draft): { set: string; param
       return { set: "salary_min=?, salary_currency=?", params: [draft.salaryMin ?? null, draft.salaryCurrency ?? null] };
     case "wishes":
       return { set: "wishes=?", params: [draft.wishes?.trim() || null] };
+    case "cv":
+      return { set: "cv_highlights=?", params: [draft.cvHighlights?.trim() || null] };
     default:
       return null;
   }
@@ -483,6 +504,8 @@ export function currentOf(step: Step, draft: Draft, locale: Locale): string | nu
     }
     case "wishes":
       return draft.wishes?.trim() ? `«${draft.wishes.trim()}»` : null;
+    case "cv":
+      return draft.cvHighlights?.trim() ? `«${draft.cvHighlights.trim()}»` : null;
     default:
       return null;
   }

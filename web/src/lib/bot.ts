@@ -188,9 +188,10 @@ async function loadDraft(userId: string): Promise<Draft | null> {
   const p = await one<{ spheres: string; industries: string;
     remote_mode: string; location: string | null; salary_min: number | null; salary_currency: string | null;
     custom_role: string | null; custom_industry: string | null;
+    cv_highlights: string | null;
     wishes: string | null }>(
     `SELECT spheres,industries,remote_mode,location,salary_min,salary_currency,
-            custom_role,custom_industry,wishes
+            custom_role,custom_industry,cv_highlights,wishes
        FROM profiles WHERE user_id=?`, userId);
   if (!p) return null;
   const list = (raw: string | null): string[] => {
@@ -202,6 +203,7 @@ async function loadDraft(userId: string): Promise<Draft | null> {
     customIndustry: p.custom_industry,
     remoteMode: p.remote_mode, location: p.location,
     salaryMin: p.salary_min, salaryCurrency: p.salary_currency, wishes: p.wishes,
+    cvHighlights: p.cv_highlights,
   };
 }
 
@@ -320,11 +322,12 @@ export async function handleOnboardingText(
     return true;
   }
 
-  // Побажання: усе написане й є відповіддю, далі — наступне питання.
-  if (row.step === "wishes") {
+  // Побажання і стек: усе написане й є відповіддю, далі — наступне питання.
+  if (row.step === "wishes" || row.step === "cv") {
     const draft = readDraft(row.draft);
-    draft.wishes = text.slice(0, 1000).trim() || null;
-    await advance(env, chatId, "wishes", draft, locale, row.message_id, true);
+    const own = text.slice(0, row.step === "cv" ? 300 : 1000).trim() || null;
+    if (row.step === "cv") draft.cvHighlights = own; else draft.wishes = own;
+    await advance(env, chatId, row.step, draft, locale, row.message_id, true);
     return true;
   }
 
@@ -483,21 +486,22 @@ async function finishOnboarding(
 
   await run(
     `INSERT INTO profiles (user_id,mode,raw_input,spheres,custom_role,industries,custom_industry,
-                           remote_mode,location,salary_min,salary_currency,wishes,updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+                           remote_mode,location,salary_min,salary_currency,wishes,cv_highlights,updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
      ON CONFLICT(user_id) DO UPDATE SET
        mode=excluded.mode, raw_input=excluded.raw_input, spheres=excluded.spheres,
        custom_role=excluded.custom_role, industries=excluded.industries,
        custom_industry=excluded.custom_industry,
        remote_mode=excluded.remote_mode, location=excluded.location,
        salary_min=excluded.salary_min, salary_currency=excluded.salary_currency,
-       wishes=excluded.wishes,
+       wishes=excluded.wishes, cv_highlights=excluded.cv_highlights,
        updated_at=datetime('now')`,
     userId, "bot", null,
     JSON.stringify(draft.spheres), draft.customRole ?? null,
     JSON.stringify(draft.industries), draft.customIndustry ?? null,
     serializeModes(parseModes(draft.remoteMode)) || "remote_only", draft.location ?? null,
-    draft.salaryMin, draft.salaryCurrency, draft.wishes?.trim() || null);
+    draft.salaryMin, draft.salaryCurrency, draft.wishes?.trim() || null,
+    draft.cvHighlights?.trim() || null);
 
   await persistDerived(userId, env.ANTHROPIC_API_KEY ?? null);
 
@@ -603,9 +607,10 @@ async function openEditor(
    * одне на всі поля.
    */
   const now = currentLine(step, draft, locale);
+  const freeText = step === "wishes" || step === "cv";
   const ask = step === "wishes" ? askWishes(locale) : questionText(step, locale, { bare: true });
   const text = now ? `${now}\n\n${ask}` : ask;
-  const rows = step === "wishes" ? [] : keyboard(step, draft, locale, { prefix: "ed" });
+  const rows = freeText ? [] : keyboard(step, draft, locale, { prefix: "ed" });
   await showEdit(env, chatId, `edit:${step}`, draft, locale, messageId, text, rows);
 }
 
@@ -720,6 +725,12 @@ async function handleEditText(
   const user = await one<{ id: string }>("SELECT id FROM users WHERE telegram_chat_id=?", String(chatId));
   if (!user) return false;
   const draft = readDraft(row.draft);
+
+  if (row.step === "edit:cv") {
+    draft.cvHighlights = text.slice(0, 300).trim() || null;
+    await commitField(env, chatId, user.id, "cv", draft, locale, row.message_id);
+    return true;
+  }
 
   if (row.step === "edit:wishes") {
     draft.wishes = text.slice(0, 1000);
@@ -843,12 +854,14 @@ async function saveWholeProfile(env: Env, userId: string, draft: Draft): Promise
   await run(
     `UPDATE profiles SET spheres=?, custom_role=?, industries=?, custom_industry=?,
                          remote_mode=?, location=?, salary_min=?, salary_currency=?, wishes=?,
+                         cv_highlights=COALESCE(?, cv_highlights),
                          updated_at=datetime('now')
       WHERE user_id=?`,
     JSON.stringify(draft.spheres), draft.customRole ?? null,
     JSON.stringify(draft.industries), draft.customIndustry ?? null,
     serializeModes(parseModes(draft.remoteMode)) || "remote_only", draft.location ?? null,
-    draft.salaryMin, draft.salaryCurrency, draft.wishes?.trim() || null, userId);
+    draft.salaryMin, draft.salaryCurrency, draft.wishes?.trim() || null,
+    draft.cvHighlights?.trim() || null, userId);
   await persistDerived(userId, env.ANTHROPIC_API_KEY ?? null);
 }
 

@@ -50,6 +50,23 @@ const messages = (): string[] => [
 const profileWrite = () =>
   [...run.mock.calls].reverse().find((c) => String(c[0]).includes("UPDATE profiles SET spheres"));
 
+/**
+ * Значення одного поля із запису — ЗА ІМЕНЕМ, а не за позицією.
+ *
+ * Раніше тут стояло `.at(-2)`, і додавання ще одного стовпця в той самий
+ * UPDATE мовчки зсунуло індекс: тест почав читати сусіднє поле. Порядок
+ * параметрів — деталь запиту, і тест не має від неї залежати.
+ */
+const wroteField = (name: string): unknown => {
+  const call = profileWrite();
+  if (!call) return undefined;
+  const cols = String(call[0]).replace(/\s+/g, " ")
+    .match(/SET (.*?) WHERE/)?.[1]?.split(",")
+    .map((c) => c.trim().split("=")[0]!.trim()) ?? [];
+  const at = cols.indexOf(name);
+  return at < 0 ? undefined : call[1 + at];
+};
+
 beforeEach(() => {
   one.mockReset(); run.mockReset(); sendText.mockReset(); callTelegram.mockReset(); parseProfile.mockReset();
   callTelegram.mockImplementation(() => Promise.resolve({ ok: true, result: { message_id: 7 } }));
@@ -99,8 +116,7 @@ describe("текст на кроці правки", () => {
     parseProfile.mockResolvedValue({ ...empty() });
     await handleOnboardingText(env, 1, "тільки стартапи до 50 людей", "uk");
 
-    const wishes = String(profileWrite()!.at(-2));
-    expect(wishes).toBe("тільки стартапи до 50 людей");
+    expect(wroteField("wishes")).toBe("тільки стартапи до 50 людей");
   });
 
   it("надто коротке слово лишається підказкою про кнопки", async () => {
