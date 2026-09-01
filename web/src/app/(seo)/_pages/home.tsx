@@ -8,6 +8,7 @@ import { CV_MAX_BYTES } from "@/lib/cv";
 import { all, one } from "@/lib/db";
 import { t } from "@/lib/i18n";
 import { pathFor } from "@/lib/seo";
+import { ATTRIBUTED } from "@/lib/attributed";
 import { toLatin } from "@/lib/geo";
 import type { Locale } from "@/lib/vocab";
 
@@ -79,7 +80,7 @@ export default async function HomeBody({
   const bot = env.TELEGRAM_BOT_USERNAME ?? "mynextrole_bot";
 
   // Живі числа — доказ, що система працює просто зараз
-  const stats = await one<{ jobs: number; companies: number; sources: number; boards: number }>(`
+  const stats = await one<{ jobs: number; companies: number; sources: number }>(`
     SELECT (SELECT COUNT(*) FROM jobs_cache) jobs,
            (SELECT COUNT(DISTINCT company_key) FROM jobs_cache) companies,
            -- Рахуємо лише ті джерела, які справді опитуються. Мертві
@@ -88,13 +89,7 @@ export default async function HomeBody({
               WHERE NOT EXISTS (
                 SELECT 1 FROM sources_state s
                  WHERE s.source_name = c.ats_provider || ':' || c.ats_slug
-                   AND s.status = 'deprecated')) sources,
-           -- Дошки рахуємо окремо, і це не косметика. Раніше тут стояла одна
-           -- цифра з підписом «джерел», а рахувала вона сторінки кар'єри
-           -- компаній. Людина читала «дошки», відкривала /sources і бачила
-           -- сорок чотири. Цифра була правдива й виглядала брехнею.
-           (SELECT COUNT(*) FROM source_stats WHERE family IN ('board','aggregator','getro')) boards`)
-    .catch(() => null);
+                   AND s.status = 'deprecated')) sources`).catch(() => null);
 
   const feed = await all<FeedRow>(FEED_SQL).catch(() => [] as FeedRow[]);
 
@@ -292,7 +287,11 @@ export default async function HomeBody({
                     style={{ borderColor: "var(--rule)" }}>
                 <dl className="flex flex-wrap gap-x-8 gap-y-3">
                   {[
-                    [stats.boards, t(locale, "home.nBoards")],
+                    // Довжина того самого списку, який /sources малює поіменно.
+                    // Власний підрахунок тут уже одного разу розійшовся зі
+                    // сторінкою — 59 проти 21, — і саме таку розбіжність ця
+                    // правка й прибирає.
+                    [ATTRIBUTED.length, t(locale, "home.nBoards")],
                     [stats.sources, t(locale, "home.nSources")],
                     [stats.companies, t(locale, "home.nCompanies")],
                   ].map(([n, l]) => (

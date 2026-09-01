@@ -2,6 +2,7 @@ import Shell from "@/app/shell";
 import Footer from "@/app/footer";
 import { all, one } from "@/lib/db";
 import { t } from "@/lib/i18n";
+import { ATTRIBUTED } from "@/lib/attributed";
 import JsonLd from "@/app/json-ld";
 import { breadcrumbLd } from "@/lib/seo";
 import type { Locale } from "@/lib/vocab";
@@ -9,32 +10,9 @@ import type { Locale } from "@/lib/vocab";
 /**
  * Публічна сторінка джерел.
  *
- * Це не маркетинг, а зобов'язання: умови Remote OK і Remotive прямо вимагають
- * згадки назви й посилання, що індексується. Без цього вони ріжуть доступ до API.
+ * Сам перелік живе в lib/attributed.ts: його довжину показує ще й головна,
+ * і два списки розійшлися б першою ж правкою.
  */
-const ATTRIBUTED = [
-  { name: "Remote OK", url: "https://remoteok.com", note: "remote" },
-  { name: "Remotive", url: "https://remotive.com", note: "remote" },
-  { name: "Arbeitnow", url: "https://www.arbeitnow.com", note: "EU" },
-  { name: "Jobicy", url: "https://jobicy.com", note: "remote" },
-  { name: "Himalayas", url: "https://himalayas.app", note: "remote" },
-  { name: "Working Nomads", url: "https://www.workingnomads.com", note: "remote" },
-  { name: "Landing.jobs", url: "https://landing.jobs", note: "EU" },
-  { name: "The Muse", url: "https://www.themuse.com", note: "US" },
-  { name: "We Work Remotely", url: "https://weworkremotely.com", note: "remote" },
-  { name: "Jobspresso", url: "https://jobspresso.co", note: "remote" },
-  { name: "NoDesk", url: "https://nodesk.co", note: "remote" },
-  { name: "Cryptocurrency Jobs", url: "https://cryptocurrencyjobs.co", note: "web3" },
-  { name: "Hacker News «Who is hiring»", url: "https://news.ycombinator.com", note: "HN" },
-  { name: "Getro", url: "https://getro.com", note: "Getro" },
-  // Знайдені розвідкою по твіттеру 2026-08-30 і перевірені живим прогоном.
-  { name: "GermanTechJobs", url: "https://germantechjobs.de", note: "DE" },
-  { name: "Startups North", url: "https://startupsnorth.ca", note: "CA" },
-  { name: "Remotech", url: "https://remotech.ai", note: "remote" },
-  { name: "Remote Backend Jobs", url: "https://remotebackendjobs.com", note: "remote" },
-  { name: "Hireeing", url: "https://hireeing.com", note: "remote" },
-  { name: "We Love Product", url: "https://weloveproduct.co", note: "product" },
-];
 
 export default async function SourcesBody({ locale }: { locale: Locale }) {
   const stats = await one<{ sources: number; withAts: number }>(
