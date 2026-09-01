@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import Nav from "@/app/nav";
 import Footer from "@/app/footer";
@@ -6,6 +7,7 @@ import CvInput from "@/app/cv-input";
 import { CV_MAX_BYTES } from "@/lib/cv";
 import { all, one } from "@/lib/db";
 import { t } from "@/lib/i18n";
+import { pathFor } from "@/lib/seo";
 import { toLatin } from "@/lib/geo";
 import type { Locale } from "@/lib/vocab";
 
@@ -47,6 +49,14 @@ const FEED_SQL = `
                                 ORDER BY posted_at DESC, fetched_at DESC) dup
       FROM jobs_cache
       WHERE fetched_at >= datetime('now', '-3 day')
+        -- Лише те, про що сторінка й каже. Тут не було жодного відбору, і у
+        -- вітрині поруч із обіцянкою «крипта, web3 і IT» стояв лаборант та
+        -- фахівець із підготовки зразків. Перший же відвідувач бачив
+        -- протилежне тому, що ми щойно пообіцяли.
+        AND (tags LIKE '%"web3"%' OR tags LIKE '%"engineering"%' OR tags LIKE '%"data-ai"%'
+             OR tags LIKE '%"product"%' OR tags LIKE '%"design"%' OR tags LIKE '%"devrel"%'
+             OR tags LIKE '%"security"%' OR tags LIKE '%"qa"%' OR tags LIKE '%"ai"%'
+             OR tags LIKE '%"fintech"%')
     )
     WHERE dup = 1
   )
@@ -69,7 +79,7 @@ export default async function HomeBody({
   const bot = env.TELEGRAM_BOT_USERNAME ?? "mynextrole_bot";
 
   // Живі числа — доказ, що система працює просто зараз
-  const stats = await one<{ jobs: number; companies: number; sources: number }>(`
+  const stats = await one<{ jobs: number; companies: number; sources: number; boards: number }>(`
     SELECT (SELECT COUNT(*) FROM jobs_cache) jobs,
            (SELECT COUNT(DISTINCT company_key) FROM jobs_cache) companies,
            -- Рахуємо лише ті джерела, які справді опитуються. Мертві
@@ -78,7 +88,13 @@ export default async function HomeBody({
               WHERE NOT EXISTS (
                 SELECT 1 FROM sources_state s
                  WHERE s.source_name = c.ats_provider || ':' || c.ats_slug
-                   AND s.status = 'deprecated')) sources`).catch(() => null);
+                   AND s.status = 'deprecated')) sources,
+           -- Дошки рахуємо окремо, і це не косметика. Раніше тут стояла одна
+           -- цифра з підписом «джерел», а рахувала вона сторінки кар'єри
+           -- компаній. Людина читала «дошки», відкривала /sources і бачила
+           -- сорок чотири. Цифра була правдива й виглядала брехнею.
+           (SELECT COUNT(*) FROM source_stats WHERE family IN ('board','aggregator','getro')) boards`)
+    .catch(() => null);
 
   const feed = await all<FeedRow>(FEED_SQL).catch(() => [] as FeedRow[]);
 
@@ -160,6 +176,18 @@ export default async function HomeBody({
             </h1>
 
             <p className="lede rise rise-3 mt-7">{t(locale, "home.lede")}</p>
+
+            {/* Кому це — і скільки коштує.
+                Слова про ціну на головній не було ЖОДНОГО разу: відповідь
+                жила лише у FAQ, куди більшість не зайде. «Скільки це коштує»
+                — перше мовчазне питання шукача роботи, і воно лишалось без
+                відповіді рівно там, де людина вирішує, чи лишатись. */}
+            <p className="rise rise-3 mt-4 text-sm" style={{ color: "var(--ink-2)", maxWidth: "62ch" }}>
+              {t(locale, "home.forWho")}
+            </p>
+            <p className="rise rise-3 mt-3 text-sm" style={{ color: "var(--ok)" }}>
+              {t(locale, "home.free")}
+            </p>
 
             {/* Єдина дія на сторінці — написати одне речення. Тому це рядок,
                 а не анкета: скріпка і стрілка всередині, решта нижче й тихо. */}
@@ -256,17 +284,28 @@ export default async function HomeBody({
             </div>
 
             {stats && (
-              <dl className="mt-4 flex gap-8 border-t pt-4" style={{ borderColor: "var(--rule)" }}>
-                {[
-                  [stats.companies, t(locale, "home.nCompanies")],
-                  [stats.sources, t(locale, "home.nSources")],
-                ].map(([n, l]) => (
-                  <div key={String(l)}>
-                    <dt className="mono text-lg" style={{ color: "var(--ember)" }}>{num(Number(n))}</dt>
-                    <dd className="eyebrow mt-0.5">{String(l)}</dd>
-                  </div>
-                ))}
-              </dl>
+              /* Цифри ведуть на /sources — поіменний список із посиланнями,
+                 який перевіряється щодня. Він існував і був недосяжним із
+                 головної навіть через підвал. Цифра, яку не можна
+                 перевірити, гірша за її відсутність. */
+              <Link href={pathFor(locale, "/sources")} className="sources-link mt-4 block border-t pt-4"
+                    style={{ borderColor: "var(--rule)" }}>
+                <dl className="flex flex-wrap gap-x-8 gap-y-3">
+                  {[
+                    [stats.boards, t(locale, "home.nBoards")],
+                    [stats.sources, t(locale, "home.nSources")],
+                    [stats.companies, t(locale, "home.nCompanies")],
+                  ].map(([n, l]) => (
+                    <div key={String(l)}>
+                      <dt className="mono text-lg" style={{ color: "var(--ember)" }}>{num(Number(n))}</dt>
+                      <dd className="eyebrow mt-0.5">{String(l)}</dd>
+                    </div>
+                  ))}
+                </dl>
+                <span className="mono mt-2 block text-xs" style={{ color: "var(--faint)" }}>
+                  {t(locale, "home.seeSources")}
+                </span>
+              </Link>
             )}
           </aside>
         </div>
@@ -288,6 +327,14 @@ export default async function HomeBody({
             </div>
           ))}
         </div>
+        {/* Ці кроки описують шлях із сайту, але людина так само часто
+            починає прямо в боті — і тоді третій крок їй не потрібен. Профіль
+            один на обидва входи: анкета питає те саме, поля ті самі, правити
+            можна звідки завгодно. Сказати це вголос дешевше, ніж лишити
+            людину гадати, чи вона щось пропустила. */}
+        <p className="mt-4 text-sm" style={{ color: "var(--muted)", maxWidth: "62ch" }}>
+          {t(locale, "home.sameEverywhere")}
+        </p>
       </section>
 
       {/* ══ У TELEGRAM ══ Сайт обіцяє доставку в месенджер — тут він її показує.
