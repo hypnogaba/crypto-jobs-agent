@@ -960,21 +960,89 @@ export default async function Admin({ searchParams }: {
   // зареєструвався — заповнив анкету — прив'язав Telegram — отримав добірку —
   // відповів на неї. Кожен щабель, який не пройшли, це наша недоробка.
   const funnel = await one<{ registered: number; profiled: number; connected: number;
-    delivered: number; reacted: number }>(`
+    delivered: number; reacted: number; applied: number }>(`
     SELECT (SELECT COUNT(*) FROM users) registered,
            (SELECT COUNT(*) FROM profiles
              WHERE (spheres IS NOT NULL AND spheres NOT IN ('', '[]'))
                 OR (custom_role IS NOT NULL AND trim(custom_role) <> '')) profiled,
            (SELECT COUNT(*) FROM users WHERE telegram_chat_id IS NOT NULL) connected,
            (SELECT COUNT(DISTINCT user_id) FROM sent WHERE status='sent') delivered,
-           (SELECT COUNT(DISTINCT user_id) FROM feedback) reacted`);
+           (SELECT COUNT(DISTINCT user_id) FROM feedback) reacted,
+           -- Останній щабель лійки й єдиний, який означає результат для
+           -- ЛЮДИНИ, а не для нас. Усе вище показує, що система спрацювала;
+           -- цей рядок показує, що вона була потрібна.
+           (SELECT COUNT(DISTINCT user_id) FROM sent WHERE applied_at IS NOT NULL) applied`);
+
+  /**
+   * Чи повертаються люди.
+   *
+   * Головне число продукту, і досі його не було видно ніде: стовпець
+   * `sent.applied_at` заповнювався з першого дня, а панель його не читала.
+   *
+   * Тут дві різні мірки, і плутати їх дорого. «Подач» рахується за днем
+   * САМОЇ подачі (`applied_at`), а не за днем, коли картку надіслали: за
+   * днем надсилання виходить, скільки з тієї добірки колись знадобилось, і
+   * це відповідь на інше питання. Перший же перегляд цих чисел показав
+   * різницю: за днем надсилання виглядало, ніби подаються всі, а за днем
+   * подачі видно, що 30 подач зробили дев'ять людей.
+   *
+   * «Активні» — це будь-який слід за день: подача, реакція під добіркою або
+   * запит «ще п'ять». Просто отримати повідомлення не рахується: доставку
+   * робимо ми, а не людина.
+   */
+  const byDay = await all<{ d: string; cards: number; reached: number; active: number; applies: number }>(`
+    -- Групування, а не підзапит на кожен день. Перша версія питала sent
+    -- окремо для кожної дати й коштувала 6040 прочитаних рядків; ця дає ті
+    -- самі числа за 1609. Панель відкривають десятки разів на день, і саме
+    -- через такий рахунок наживо тут уже одного разу з'явилось source_stats.
+    WITH act AS (
+      SELECT user_id, date(applied_at) d FROM sent WHERE applied_at IS NOT NULL
+      UNION SELECT user_id, date(created_at) FROM feedback
+      UNION SELECT user_id, date(requested_at) FROM delivery_requests
+    ),
+    snt AS (
+      SELECT date(sent_at) d, COUNT(*) cards, COUNT(DISTINCT user_id) reached
+        FROM sent WHERE status='sent' AND sent_at IS NOT NULL GROUP BY 1
+    ),
+    app AS (
+      SELECT date(applied_at) d, COUNT(*) applies FROM sent WHERE applied_at IS NOT NULL GROUP BY 1
+    ),
+    a AS (SELECT d, COUNT(DISTINCT user_id) active FROM act GROUP BY 1)
+    SELECT snt.d, snt.cards, snt.reached,
+           COALESCE(a.active,0) active, COALESCE(app.applies,0) applies
+      FROM snt LEFT JOIN a ON a.d=snt.d LEFT JOIN app ON app.d=snt.d
+     ORDER BY snt.d DESC LIMIT 14`);
+
+  /**
+   * Когорти за днем ПЕРШОЇ добірки.
+   *
+   * День 1 це сам день першої добірки, тож день 7 стоїть на `+6`. Порожня
+   * клітинка означає «той день ще не настав», а не нуль: когорта, якій два
+   * дні, не може мати сьомого дня, і показувати там нуль було б брехнею.
+   */
+  const cohorts = await all<{ d0: string; n: number; d2: number; d3: number; d7: number }>(`
+    WITH act AS (
+      SELECT user_id, date(applied_at) d FROM sent WHERE applied_at IS NOT NULL
+      UNION SELECT user_id, date(created_at) FROM feedback
+      UNION SELECT user_id, date(requested_at) FROM delivery_requests
+    ),
+    f AS (
+      SELECT user_id, MIN(date(sent_at)) d0 FROM sent
+       WHERE status='sent' AND sent_at IS NOT NULL GROUP BY user_id
+    )
+    SELECT f.d0, COUNT(DISTINCT f.user_id) n,
+           COUNT(DISTINCT CASE WHEN a.d=date(f.d0,'+1 day') THEN f.user_id END) d2,
+           COUNT(DISTINCT CASE WHEN a.d=date(f.d0,'+2 day') THEN f.user_id END) d3,
+           COUNT(DISTINCT CASE WHEN a.d=date(f.d0,'+6 day') THEN f.user_id END) d7
+      FROM f LEFT JOIN act a ON a.user_id=f.user_id
+     GROUP BY f.d0 ORDER BY f.d0 DESC LIMIT 14`);
 
   // Пошти тут навмисно немає: панель відкривають на людях і показують з
   // екрана. А от нік є: за «06df703e» неможливо ні впізнати людину, ні
   // написати їй, і саме це власник хоче зробити, дивлячись на цей список.
   const people = await all<{ id: string; created_at: string | null; locale: string; status: string;
     tg: number; country: string | null; spheres: string | null; custom_role: string | null; sent: number;
-    more: number; nope: number; last_seen: string | null;
+    more: number; nope: number; applied: number; last_seen: string | null;
     nick: string | null; person: string | null }>(`
     SELECT u.id, u.created_at, u.locale, u.status,
            u.telegram_username nick, u.telegram_name person,
@@ -983,7 +1051,8 @@ export default async function Admin({ searchParams }: {
            p.country, p.spheres, p.custom_role,
            (SELECT COUNT(*) FROM sent WHERE user_id=u.id AND status='sent') sent,
            (SELECT COUNT(*) FROM feedback WHERE user_id=u.id AND reaction='more') more,
-           (SELECT COUNT(*) FROM feedback WHERE user_id=u.id AND reaction='not_relevant') nope
+           (SELECT COUNT(*) FROM feedback WHERE user_id=u.id AND reaction='not_relevant') nope,
+           (SELECT COUNT(*) FROM sent WHERE user_id=u.id AND applied_at IS NOT NULL) applied
       FROM users u LEFT JOIN profiles p ON p.user_id = u.id
      ${filter.where ? `WHERE ${filter.where}` : ""}
      ORDER BY u.created_at DESC LIMIT ? OFFSET ?`,
@@ -1164,12 +1233,14 @@ export default async function Admin({ searchParams }: {
                 { label: "Прив'язали Telegram", n: funnel?.connected ?? 0, note: "без цього добірку нікуди слати" },
                 { label: "Отримали добірку", n: funnel?.delivered ?? 0, note: "хоч одна доставлена" },
                 { label: "Відповіли на неї", n: funnel?.reacted ?? 0, note: "«ще п'ять» або «не те»" },
+                { label: "Подались", n: funnel?.applied ?? 0, note: "натиснули «Податися» хоч раз" },
               ]} />
               <div className="card overflow-x-auto">
                 <table className="board">
                   <thead>
                     <tr><th>людина</th><th>прийшла</th><th>анкета</th><th>TG</th>
-                        <th className="num">добірок</th><th>реакції</th><th>остання дія</th></tr>
+                        <th className="num">добірок</th><th className="num">подач</th>
+                        <th>реакції</th><th>остання дія</th></tr>
                   </thead>
                   <tbody>
                     {people.map((x) => (
@@ -1205,6 +1276,14 @@ export default async function Admin({ searchParams }: {
                           <span className="sr-only">{x.tg ? "прив'язано" : "немає"}</span>
                         </td>
                         <td className="num text-xs">{x.sent}</td>
+                        {/* Подачі окремим стовпцем, а не серед реакцій: реакція
+                            каже, що людина нас почула, а подача — що ми були
+                            їй потрібні. Це різні речі, і зливати їх в одну
+                            колонку означало б втратити другу. */}
+                        <td className="num text-xs"
+                            style={{ color: x.applied > 0 ? "var(--ok)" : "var(--faint)" }}>
+                          {x.applied > 0 ? x.applied : "—"}
+                        </td>
                         <td className="mono text-xs" style={{ color: "var(--muted)" }}>
                           {x.more + x.nope === 0 ? "—" : (
                             <>
@@ -1252,6 +1331,77 @@ export default async function Admin({ searchParams }: {
                   </div>
                 </div>
               )}
+            </div>
+          </Block>
+
+          {/* Чи повертаються люди.
+              Стоїть одразу під лійкою навмисно: лійка каже, скільки дійшло
+              до першої добірки, а це — чи прийшов хтось на другу. Без
+              другого числа перше нічого не означає. */}
+          <Block id="retention" title="Чи повертаються"
+                 lede="Подача рахується за днем, коли людина її зробила, а не за днем, коли ми надіслали картку. Активний день — це подача, реакція під добіркою або запит «ще п'ять»: отримати повідомлення це наша дія, а не її.">
+            <div className="grid gap-6 lg:grid-cols-2">
+              <div className="card overflow-x-auto">
+                <table className="board">
+                  <thead>
+                    <tr><th>день</th><th className="num">карток</th><th className="num">кому</th>
+                        <th className="num">активні</th><th className="num">подач</th></tr>
+                  </thead>
+                  <tbody>
+                    {byDay.length === 0 ? (
+                      <tr><td colSpan={5} style={{ color: "var(--muted)" }}>ще жодної доставки</td></tr>
+                    ) : byDay.map((r, i) => (
+                      <tr key={r.d} className="stripe"
+                          style={{ "--c": r.active > 0 ? "var(--ok)" : "var(--warn)" } as React.CSSProperties}>
+                        <td className="mono text-xs">
+                          {r.d}
+                          {/* Сьогоднішній рядок ще не повний: доставка йде за
+                              місцевою годиною кожного, тож частина дня попереду. */}
+                          {i === 0 && <span className="ml-2" style={{ color: "var(--faint)" }}>день триває</span>}
+                        </td>
+                        <td className="num text-xs">{r.cards}</td>
+                        <td className="num text-xs">{r.reached}</td>
+                        <td className="num text-xs" style={{ color: "var(--ink)" }}>{r.active}</td>
+                        <td className="num text-xs" style={{ color: r.applies > 0 ? "var(--ok)" : "var(--faint)" }}>
+                          {r.applies > 0 ? r.applies : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="card overflow-x-auto">
+                <table className="board">
+                  <thead>
+                    <tr><th>перша добірка</th><th className="num">людей</th>
+                        <th className="num">день 2</th><th className="num">день 3</th><th className="num">день 7</th></tr>
+                  </thead>
+                  <tbody>
+                    {cohorts.length === 0 ? (
+                      <tr><td colSpan={5} style={{ color: "var(--muted)" }}>ще жодної когорти</td></tr>
+                    ) : cohorts.map((c) => (
+                      <tr key={c.d0} className="stripe"
+                          style={{ "--c": "var(--rule-2)" } as React.CSSProperties}>
+                        <td className="mono text-xs">{c.d0}</td>
+                        <td className="num text-xs">{c.n}</td>
+                        {([["+1 day", c.d2], ["+2 day", c.d3], ["+6 day", c.d7]] as const).map(([off, v]) => {
+                          // Той день ще не настав — клітинка порожня, а не нуль.
+                          const due = new Date(`${c.d0}T00:00:00Z`);
+                          due.setUTCDate(due.getUTCDate() + Number(off.split(" ")[0]));
+                          const arrived = due <= new Date();
+                          return (
+                            <td key={off} className="num text-xs"
+                                style={{ color: !arrived ? "var(--faint)" : v > 0 ? "var(--ok)" : "var(--bad)" }}>
+                              {!arrived ? "·" : `${v} · ${Math.round((v / Math.max(1, c.n)) * 100)}%`}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </Block>
 
