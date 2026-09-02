@@ -13,6 +13,10 @@ export const RELEASES: Release[] = [
     "date": "2026-09-01",
     "changes": [
       {
+        "hash": "660f079",
+        "subject": "Найважливіше число продукту лежало в базі й не показувалось ніде"
+      },
+      {
         "hash": "a102b96",
         "subject": "Перелік заборон читався як перелік бажаного, а побажання різались на 160 символах"
       },
@@ -953,4 +957,4 @@ export const RELEASES: Release[] = [
   }
 ];
 
-export const GENERATED_AT = "2026-09-01 14:48";
+export const GENERATED_AT = "2026-09-01 20:25";

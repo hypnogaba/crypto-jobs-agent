@@ -120,7 +120,14 @@ async function main(): Promise<void> {
     try {
       const boards = (await repo.listBoards()).filter((b) => !skip.has(b.name));
       if (boards.length) {
-        const runs = await mapLimit(boards, 4, (b) => runSource(b.name, () => fetchBoard(b, {}, cfg.freshnessDays)));
+        // Ніша успадковується від дошки, як від колекції Getro поруч. Без
+        // цього jobstash.xyz віддавав 1651 крипто-вакансію, з яких тег web3
+        // мали 36: правило дивиться в назву, а «Senior Backend Engineer» у
+        // крипто-компанії слова «crypto» в назві не має й мати не мусить.
+        const runs = await mapLimit(boards, 4, (b) => runSource(b.name, async () => {
+          const jobs = await fetchBoard(b, {}, cfg.freshnessDays);
+          return b.tags?.length ? jobs.map((j) => ({ ...j, inheritedTags: b.tags })) : jobs;
+        }));
         boardResults.push(...runs);
         const jobs = prepare(runs.flatMap((r) => r.jobs), cfg.freshnessDays, now);
         await repo.upsertJobs(jobs);

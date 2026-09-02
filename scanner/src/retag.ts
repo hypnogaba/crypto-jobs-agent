@@ -14,14 +14,23 @@
  * без рівня й ішов junior-ам) викочено наступного дня — і вона так само
  * пролежала мертвою, доки скан не запустили руками.
  *
- * ДОДАЄМО, НЕ ЗАМІНЮЄМО. Успадкованих від компанії тегів (ніша з колекції
- * Getro, «europe» від Personio) з рядка кеша не відновити — вони приходять
- * зі списку компаній під час скану. Тому тут лише доповнення: новий тег
- * з'являється, жоден наявний не зникає. Прибирання зайвого — справа
- * наступного справжнього скану, який перезаписує теги цілком і з правильним
- * успадкуванням. Ці двоє не конфліктують: скан завжди правіший.
+ * ДОДАЄМО, НЕ ЗАМІНЮЄМО. Новий тег з'являється, жоден наявний не зникає.
+ * Прибирання зайвого — справа наступного справжнього скану, який перезаписує
+ * теги цілком. Ці двоє не конфліктують: скан завжди правіший.
+ *
+ * Ніша ДЖЕРЕЛА відновлюється, і це друга половина роботи. Раніше її тут не
+ * було зовсім («з рядка кеша не відновити»), і це правда лише для тегів, що
+ * приходять від КОМПАНІЇ. Ніша дошки й колекції прив'язана до `source`, а
+ * `source` у рядку кеша є. Тому перед перетегуванням ми питаємо базу, які
+ * джерела нішеві, і передаємо це як inheritedTags.
+ *
+ * Без цього перетегування крипто-дошок не дало б нічого: правило дивиться в
+ * назву вакансії, а «Senior Backend Engineer» у крипто-компанії слова
+ * «crypto» в назві не має. Саме через це 2113 крипто-вакансій лежали в кеші
+ * без тега `web3`.
  */
 import { loadConfig } from "./config.js";
+import { wranglerFetch } from "./wrangler-fetch.js";
 import { D1Client } from "./d1.js";
 import { deriveTags } from "./tags.js";
 
@@ -40,13 +49,14 @@ export interface RetagChange { id: string; added: string[]; tags: string[] }
  * Що змінилося б. Чиста функція — саме вона й перевіряється тестом, бо решта
  * файлу це два запити до D1.
  */
-export function planRetag(rows: Row[]): RetagChange[] {
+export function planRetag(rows: Row[], nicheBySource: Map<string, string[]> = new Map()): RetagChange[] {
   const out: RetagChange[] = [];
   for (const r of rows) {
     const old = parse(r.tags);
     const derived = deriveTags({
       url: "", company: r.company, title: r.title, location: null,
       remote: r.remote === 1, postedAt: null, source: r.source,
+      inheritedTags: nicheBySource.get(r.source),
     });
     const added = derived.filter((t) => !old.includes(t));
     // «other» ставиться лише тоді, коли не знайшлось нічого іншого. Тут воно
@@ -70,15 +80,32 @@ async function main(): Promise<void> {
     return;
   }
 
-  const cfg = loadConfig();
-  const d1 = new D1Client({ accountId: cfg.cfAccountId, databaseId: cfg.cfDatabaseId, token: cfg.cfApiToken });
+  const cfg = process.env.VIA_WRANGLER
+    ? { cfAccountId: "x", cfDatabaseId: "x", cfApiToken: "x" }
+    : loadConfig();
+  const d1 = new D1Client(
+    { accountId: cfg.cfAccountId, databaseId: cfg.cfDatabaseId, token: cfg.cfApiToken },
+    process.env.VIA_WRANGLER ? { fetchImpl: wranglerFetch, attempts: 1, timeoutMs: 600_000 } : {});
 
   const rows = await d1.query<Row>(
     `SELECT id,title,company,source,remote,tags FROM jobs_cache
       WHERE fetched_at >= datetime('now', ?)`, [`-${days} day`]);
   console.log(`У вікні ${days} дн.: ${rows.length} вакансій.`);
 
-  const plan = planRetag(rows);
+  // Нішеві джерела: дошки й колекції Getro, які оголосили свій тег. Два
+  // маленькі запити замість здогадів по назві вакансії.
+  const niche = new Map<string, string[]>();
+  for (const b of await d1.query<{ name: string; tags: string }>(
+    "SELECT name, tags FROM country_boards WHERE tags IS NOT NULL AND tags <> '[]'")) {
+    niche.set(b.name, parse(b.tags));
+  }
+  for (const c of await d1.query<{ collection_id: string; tags: string }>(
+    "SELECT collection_id, tags FROM getro_collections WHERE tags IS NOT NULL AND tags <> '[]'")) {
+    niche.set(`getro:${c.collection_id}`, parse(c.tags));
+  }
+  console.log(`Нішевих джерел: ${niche.size}.`);
+
+  const plan = planRetag(rows, niche);
   if (plan.length === 0) { console.log("Теги вже відповідають правилам — міняти нема чого."); return; }
 
   const gained = new Map<string, number>();

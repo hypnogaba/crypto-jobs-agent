@@ -51,3 +51,30 @@ describe("planRetag", () => {
     expect(plan[0]!.added).toEqual(["remote"]);
   });
 });
+
+describe("ніша джерела", () => {
+  // Живий випадок 02.09: jobstash.xyz віддавав 1651 крипто-вакансію, з яких
+  // тег web3 мали 36. Правило дивиться в назву, а назва про крипту мовчить.
+  const row = {
+    id: "j1", title: "Senior Backend Engineer", company: "Helius",
+    // remote: 0 навмисно — інакше рядок отримує ще й тег «remote», і
+    // перевірка перестає бути про нішу.
+    source: "board:global-jobstash", remote: 0, tags: '["engineering"]',
+  };
+
+  it("без ніші джерела тег не з'являється — саме так і було", () => {
+    expect(planRetag([row])).toEqual([]);
+  });
+
+  it("з нішею джерела вакансія нарешті стає крипто-вакансією", () => {
+    const niche = new Map([["board:global-jobstash", ["web3"]]]);
+    const [change] = planRetag([row], niche);
+    expect(change?.added).toEqual(["web3"]);
+    expect(change?.tags).toEqual(["engineering", "web3"]);
+  });
+
+  it("чуже джерело чужу нішу не бере", () => {
+    const niche = new Map([["board:global-jobstash", ["web3"]]]);
+    expect(planRetag([{ ...row, source: "board:dou-python" }], niche)).toEqual([]);
+  });
+});

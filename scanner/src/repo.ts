@@ -30,12 +30,13 @@ export class Repo {
    */
   async listBoards(): Promise<Board[]> {
     const rows = await this.d1.query<{ name: string; label: string; country: string;
-      feed_url: string; kind: string; salary_period: string | null }>(
-      `SELECT name,label,country,feed_url,kind,salary_period
+      feed_url: string; kind: string; salary_period: string | null; tags: string | null }>(
+      `SELECT name,label,country,feed_url,kind,salary_period,tags
          FROM country_boards WHERE enabled=1 ORDER BY country,name`);
     return rows.map((r) => ({
       name: r.name, label: r.label, country: r.country, feedUrl: r.feed_url, kind: r.kind,
       salaryPeriod: r.salary_period ?? "year",
+      tags: parseTags(r.tags),
     }));
   }
 
