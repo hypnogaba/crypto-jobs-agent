@@ -741,6 +741,20 @@ export function parseNextPayload(html: string, source: string, country: string |
     const location = str(node.location)
       || [str(a.locality), str(a.country)].filter(Boolean).join(", ") || null;
 
+    // Ніша — з того, що дошка каже про САМУ вакансію, а не з того, що ми
+    // думаємо про дошку.
+    //
+    // Спокуса була позначити весь jobstash.xyz як крипту: він зветься
+    // web3-дошкою, і 1651 його вакансія лежала в кеші без тега. Але вибірка
+    // показала поруч Ava Labs і Chainalysis з одного боку та Optiver, PayPay
+    // і EQT Ventures з іншого. Це дошка «web3 і фінанси», і гуртовий тег
+    // збрехав би приблизно на половині рядків.
+    //
+    // При цьому сама дошка знає відповідь: у записі лежать її власні теги
+    // («Web3», «Trading») і опис організації («operates crypto and stablecoin
+    // payment infrastructure»). Читаємо їх, а не здогадуємось.
+    const niche = nicheOf(node);
+
     out.push({
       url, company, title, location,
       remote: a.isRemote === true || str(node.locationType).toUpperCase() === "REMOTE"
@@ -748,9 +762,42 @@ export function parseNextPayload(html: string, source: string, country: string |
       postedAt: iso(str(node.datePosted)),
       source, country,
       description: str(node.summary) || null,
+      ...(niche.length ? { inheritedTags: niche } : {}),
     });
   }
   return out;
+}
+
+/** Слова, за якими впізнаємо крипто-роботодавця в описі, що дала дошка. */
+const CRYPTO_WORDS = /\b(crypto|web3|blockchain|defi|onchain|on-chain|stablecoin|digital assets?|dao|nft|token|protocol|ethereum|solana|bitcoin|layer ?2|zk|validator|staking)\b/i;
+
+/**
+ * Ніша вакансії за тим, що про неї сказала сама дошка.
+ *
+ * Три джерела в одному записі, усі від дошки, жодного здогаду з нашого боку:
+ * її власні теги (`tags[].name` — «Web3», «Trading»), підписи під карткою
+ * (`infoTags[].label` — категорія, рівень) і опис організації, який пише
+ * прямо, чим вона займається.
+ *
+ * Порожньо — не «не крипта», а «дошка про це не сказала». Такий рядок і далі
+ * проходить звичайні правила з tags.ts.
+ */
+export function nicheOf(node: Record<string, unknown>): string[] {
+  const bits: string[] = [];
+  const push = (v: unknown) => { const x = str(v); if (x) bits.push(x); };
+
+  for (const t of Array.isArray(node.tags) ? node.tags : []) {
+    if (t && typeof t === "object") push((t as Record<string, unknown>).name);
+  }
+  for (const t of Array.isArray(node.infoTags) ? node.infoTags : []) {
+    if (t && typeof t === "object") push((t as Record<string, unknown>).label);
+  }
+  const org = node.organization;
+  if (org && typeof org === "object") {
+    const o = org as Record<string, unknown>;
+    push(o.name); push(o.summary); push(o.description);
+  }
+  return CRYPTO_WORDS.test(bits.join(" ")) ? ["web3"] : [];
 }
 
 /**
