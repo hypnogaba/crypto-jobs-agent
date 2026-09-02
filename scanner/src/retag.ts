@@ -38,6 +38,7 @@ import { loadConfig } from "./config.js";
 import { wranglerFetch } from "./wrangler-fetch.js";
 import { D1Client } from "./d1.js";
 import { deriveTags, withCompanyTags } from "./tags.js";
+import { refreshSiteStats } from "./site-stats.js";
 
 interface Row {
   id: string; title: string; company: string; company_key: string;
@@ -141,6 +142,11 @@ async function main(): Promise<void> {
     params: [JSON.stringify(c.tags), c.id],
   })));
   console.log(`Записано: ${plan.length} рядків.`);
+
+  // Числа на публічних сторінках рахуються за тегами, тож після
+  // перетегування вони застаріли рівно в ту мить, коли ми їх змінили.
+  await refreshSiteStats(d1);
+  console.log("Числа для сайту оновлено.");
 }
 
 if (process.argv[1]?.endsWith("retag.js")) await main();

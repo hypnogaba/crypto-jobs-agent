@@ -1,4 +1,5 @@
 import { all } from "@/lib/db";
+import { siteStats } from "@/lib/site-stats";
 import { INDUSTRIES, SPHERES } from "@/lib/vocab";
 
 /**
@@ -131,31 +132,17 @@ export async function jobsFor(tag: string, limit = PAGE_SIZE): Promise<ListedJob
       LIMIT ?`, like(tag), limit);
 }
 
-/** Скільки таких вакансій усього. Число в леде, а не окраса: воно живе. */
-export async function countFor(tag: string): Promise<number> {
-  const rows = await all<{ n: number }>(
-    `SELECT count(*) n FROM jobs_cache
-      WHERE fetched_at >= datetime('now','-3 day') AND tags LIKE ?`, like(tag));
-  return rows[0]?.n ?? 0;
-}
+/** Скільки таких вакансій усього. Те саме джерело, що й на сторінці-вузлі. */
+export const countFor = async (tag: string): Promise<number> =>
+  (await countsByTag()).get(tag) ?? 0;
 
 /**
- * Числа для ВСІХ добірок одним запитом.
+ * Числа для ВСІХ добірок. Рахує їх сканер, ми лише читаємо.
  *
- * Сторінка-вузол показує двадцять два числа, і перший її варіант питав їх
- * двадцятьма двома окремими запитами. Кожен коштував 83 408 прочитаних
- * рядків, тобто одне відкриття сторінки коштувало **1.8 мільйона**. Це не
- * гіпотеза: саме через це добовий лічильник бази підскочив до 38 мільйонів.
- *
- * Один запит із `json_each` і GROUP BY дає ті самі двадцять два числа за
- * 147 842 рядки, тобто вдванадцятеро дешевше. Тут `json_each` доречний
- * саме тому, що групування по тегу інакше не написати.
+ * Перший варіант цієї сторінки питав двадцять два числа двадцятьма двома
+ * запитами по 83 408 прочитаних рядків кожен, тобто одне відкриття коштувало
+ * 1.8 мільйона. Другий рахував їх одним запитом за 147 842. Третій, оцей,
+ * не рахує нічого: числа лежать у `site_stats`, куди їх кладе скан.
  */
-export async function countsByTag(): Promise<Map<string, number>> {
-  const rows = await all<{ tag: string; n: number }>(
-    `SELECT t.value AS tag, count(*) AS n
-       FROM jobs_cache j, json_each(j.tags) t
-      WHERE j.fetched_at >= datetime('now','-3 day')
-      GROUP BY t.value`);
-  return new Map(rows.map((r) => [r.tag, r.n]));
-}
+export const countsByTag = async (): Promise<Map<string, number>> =>
+  (await siteStats()).tagCounts;

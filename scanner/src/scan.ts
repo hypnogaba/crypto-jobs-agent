@@ -10,6 +10,7 @@ import { fetchBoard } from "./sources/boards.js";
 import { fetchGetro } from "./sources/getro.js";
 import { mapLimit, runSource } from "./http.js";
 import { notifyOwner } from "./notify.js";
+import { refreshSiteStats } from "./site-stats.js";
 
 /**
  * Колекції Getro, підтверджені живими.
@@ -239,6 +240,15 @@ async function main(): Promise<void> {
       await repo.refreshSourceStats();
     } catch (e) {
       console.log(`Підсумки джерел не оновились: ${e instanceof Error ? e.message : e}`);
+    }
+
+    // Числа для публічних сторінок — там же й з тієї ж причини. Поки цього
+    // не було, головна рахувала їх на КОЖНЕ відкриття по чверть мільйона
+    // прочитаних рядків, і це давало дві третини всього навантаження бази.
+    try {
+      await refreshSiteStats(d1);
+    } catch (e) {
+      console.log(`Числа для сайту не оновились: ${e instanceof Error ? e.message : e}`);
     }
 
     const total = await repo.countJobs();

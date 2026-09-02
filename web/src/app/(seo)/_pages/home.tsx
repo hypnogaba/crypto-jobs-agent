@@ -5,7 +5,7 @@ import Footer from "@/app/footer";
 import { startOnboarding } from "@/app/actions";
 import CvInput from "@/app/cv-input";
 import { CV_MAX_BYTES } from "@/lib/cv";
-import { all, one } from "@/lib/db";
+import { siteStats, type FeedRow } from "@/lib/site-stats";
 import { t } from "@/lib/i18n";
 import { pathFor } from "@/lib/seo";
 import { ATTRIBUTED } from "@/lib/attributed";
@@ -18,52 +18,6 @@ import type { Locale } from "@/lib/vocab";
  */
 const cvMax = (s: string): string =>
   s.replace("{max}", String(Math.round(CV_MAX_BYTES / (1024 * 1024))));
-
-type FeedRow = {
-  company: string;
-  title: string;
-  location: string | null;
-  remote: number;
-  url: string;
-};
-
-/**
- * Найсвіжіше з кешу.
- *
- * Два вкладені проходи, а не один. Якщо ранжувати по компанії до того, як
- * схлопнуто геоклони, компанія, у якої двоє найновіших рядків — клони одного
- * оголошення, вилітає зі списку цілком.
- *
- * Вікно «-3 доби» — усталене визначення живої вакансії в цьому проєкті:
- * так само рахує /admin і так само добирає кандидатів сканер. Кеш нічого не
- * видаляє, тож свіжість — це вікно, а не DELETE. Індекс idx_jobs_fetched є.
- */
-const FEED_SQL = `
-  SELECT company, title, location, remote, url
-  FROM (
-    SELECT company, title, location, remote, url, posted_at, fetched_at,
-           ROW_NUMBER() OVER (PARTITION BY company_key
-                              ORDER BY posted_at DESC, fetched_at DESC) per_company
-    FROM (
-      SELECT company, company_key, title, location, remote, url, posted_at, fetched_at,
-             ROW_NUMBER() OVER (PARTITION BY dedupe_key
-                                ORDER BY posted_at DESC, fetched_at DESC) dup
-      FROM jobs_cache
-      WHERE fetched_at >= datetime('now', '-3 day')
-        -- Лише те, про що сторінка й каже. Тут не було жодного відбору, і у
-        -- вітрині поруч із обіцянкою «крипта, web3 і IT» стояв лаборант та
-        -- фахівець із підготовки зразків. Перший же відвідувач бачив
-        -- протилежне тому, що ми щойно пообіцяли.
-        AND (tags LIKE '%"web3"%' OR tags LIKE '%"engineering"%' OR tags LIKE '%"data-ai"%'
-             OR tags LIKE '%"product"%' OR tags LIKE '%"design"%' OR tags LIKE '%"devrel"%'
-             OR tags LIKE '%"security"%' OR tags LIKE '%"qa"%' OR tags LIKE '%"ai"%'
-             OR tags LIKE '%"fintech"%')
-    )
-    WHERE dup = 1
-  )
-  WHERE per_company <= 2
-  ORDER BY posted_at DESC, fetched_at DESC
-  LIMIT 10`;
 
 export default async function HomeBody({
   locale,
@@ -79,19 +33,18 @@ export default async function HomeBody({
   const env = getCloudflareContext().env as unknown as Record<string, string | undefined>;
   const bot = env.TELEGRAM_BOT_USERNAME ?? "mynextrole_bot";
 
-  // Живі числа — доказ, що система працює просто зараз
-  const stats = await one<{ jobs: number; companies: number; sources: number }>(`
-    SELECT (SELECT COUNT(*) FROM jobs_cache) jobs,
-           (SELECT COUNT(DISTINCT company_key) FROM jobs_cache) companies,
-           -- Рахуємо лише ті джерела, які справді опитуються. Мертві
-           -- лишаються в таблиці як історія, але обіцяти їх людині нечесно.
-           (SELECT COUNT(*) FROM companies c
-              WHERE NOT EXISTS (
-                SELECT 1 FROM sources_state s
-                 WHERE s.source_name = c.ats_provider || ':' || c.ats_slug
-                   AND s.status = 'deprecated')) sources`).catch(() => null);
-
-  const feed = await all<FeedRow>(FEED_SQL).catch(() => [] as FeedRow[]);
+  /**
+   * Живі числа й вітрина — доказ, що система працює просто зараз.
+   *
+   * Раніше обидва рахувались тут-таки, на кожне відкриття сторінки: 74 612
+   * прочитаних рядків D1 на числа й 161 379 на стрічку, разом чверть
+   * мільйона з кожного відвідувача, людини чи бота. За добу це давало дві
+   * третини всього навантаження бази при сімнадцяти живих людях.
+   *
+   * Тепер їх рахує сканер наприкінці прогону, тобто рівно тоді, коли вони
+   * змінюються. Сторінка читає п'ять рядків за первинним ключем.
+   */
+  const { home: stats, feed } = await siteStats();
 
   /**
    * Локація в стрічці.

@@ -595,7 +595,7 @@ describe("футер першої добірки", () => {
 });
 
 // ── Вікно кандидатів: спершу своє, потім свіже ────────────────
-import { onTopicSql } from "./digest.js";
+import { fetchCandidateRows, onTopicSql, roleSql } from "./digest.js";
 
 describe("onTopicSql", () => {
   it("сфери шукаються з лапками, щоб не збігатись частиною чужого тега", () => {
@@ -634,6 +634,53 @@ describe("onTopicSql", () => {
     expect(r.sql).toMatch(/j\.tags LIKE \? OR \(LOWER/);
     // «lead» — загальне слово, тож окремим АБО стає лише «community».
     expect(r.params).toEqual(['%"devrel"%', "%community%", "%lead%", "%community%"]);
+  });
+});
+
+describe("roleSql — вікно спершу набирає роль", () => {
+  it("віддає ту саму умову, що й роль усередині onTopicSql", () => {
+    const r = roleSql({ customRole: "community manager" });
+    expect(r.sql).toBe("(CASE WHEN (LOWER(j.title) LIKE ? AND LOWER(j.title) LIKE ?)" +
+      " OR LOWER(j.title) LIKE ? THEN 1 ELSE 0 END)");
+    expect(r.params).toEqual(["%community%", "%manager%", "%community%"]);
+  });
+
+  it("без своєї ролі це просто нуль, і сортування нічого не міняє", () => {
+    expect(roleSql({ customRole: null })).toEqual({ sql: "0", params: [] });
+  });
+});
+
+describe("fetchCandidateRows — порядок параметрів", () => {
+  /**
+   * Ці два тести стережуть саме те, що ламається мовчки. Умова ролі стоїть у
+   * запиті ТРИЧІ (у списку колонок, у вікні над company_key і всередині
+   * умови теми), і параметри до них ідуть одним пласким списком. Помилка в
+   * порядку не дає ні помилки SQL, ні порожньої відповіді — вона дає ЧУЖУ
+   * добірку, і помітити це можна лише очима на живих даних.
+   */
+  const profile = { spheres: ["engineering"], customRole: "community manager",
+                    customRoleEn: null, country: null } as never;
+
+  it("роль іде першою в сортуванні й у стелі на компанію", async () => {
+    let sql = "";
+    const d1 = { query: async (q: string) => { sql = q; return []; } } as never;
+    await fetchCandidateRows(d1, profile, "u1");
+    expect(sql).toMatch(/ORDER BY by_role DESC, posted_at DESC/);
+    expect(sql).toMatch(/PARTITION BY j\.company_key\s+ORDER BY \(CASE WHEN/);
+  });
+
+  it("параметрів рівно стільки, скільки знаків питання", async () => {
+    let sql = "", params: unknown[] = [];
+    const d1 = { query: async (q: string, p: unknown[]) => { sql = q; params = p; return []; } } as never;
+    await fetchCandidateRows(d1, profile, "u1");
+    expect(params).toHaveLength((sql.match(/\?/g) ?? []).length);
+    // Двічі роль (колонка й вікно), потім тема, потім двічі користувач.
+    expect(params).toEqual([
+      "%community%", "%manager%", "%community%",
+      "%community%", "%manager%", "%community%",
+      '%"engineering"%', "%community%", "%manager%", "%community%",
+      "u1", "u1",
+    ]);
   });
 });
 

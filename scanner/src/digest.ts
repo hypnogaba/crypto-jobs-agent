@@ -14,6 +14,7 @@ import { loadConfig } from "./config.js";
 import { D1Client } from "./d1.js";
 import { affected, notifyOwner } from "./notify.js";
 import { retireUnreachable } from "./orphans.js";
+import { mapLimit } from "./http.js";
 import { countriesOf, explainWithClaude, hasSearchSignal, meaningfulRoleWords, pickTop, roleText, roleWords,
          type CandidateJob, type Profile } from "./match.js";
 import { asLocale, formatWhen, nextDelivery, salaryLine, say, thin, type Locale } from "./digest-copy.js";
@@ -618,8 +619,44 @@ export function onTopicSql(p: Pick<Profile, "spheres" | "customRole" | "customRo
     params.push(`%"${s}"%`);
   }
 
-  // Своя роль — ті самі слова й те саме правило «всі разом», що в
-  // matchesCustomRole. Одне джерело правди: roleWords.
+  const role = roleClauses(p);
+  clauses.push(...role.clauses);
+  params.push(...role.params);
+
+  if (clauses.length === 0) return { sql: "0", params: [] };
+  return { sql: `(CASE WHEN ${clauses.join(" OR ")} THEN 1 ELSE 0 END)`, params };
+}
+
+/**
+ * Та сама умова, але лише про РОЛЬ, яку людина назвала сама.
+ *
+ * Винесена окремо, бо вікно кандидатів має ставити ці рядки першими. Причина
+ * виміряна 02.09 на живому профілі: людина написала «комуніті менеджер», а в
+ * анкеті стоїть ще й сфера «інженерія». Умові вікна відповідало 8 129 свіжих
+ * рядків, з них справді community лише 86 — і у вікно з 1 200 найновіших за
+ * датою входило ДЕСЯТЬ із них. Тобто 88% єдиних доречних вакансій відпадало
+ * ще до оцінювання, хоча в балі роль (12) удвічі важча за сферу (6). У
+ * добірку людині йшли Game Designer, QA Engineer і Engineering Manager.
+ *
+ * Широка сфера завжди дає тисячі рядків, вузька роль — десятки. Сортування
+ * за датою між ними не розрізняє, тож роль програвала завжди.
+ */
+export function roleSql(p: Pick<Profile, "customRole" | "customRoleEn">): {
+  sql: string; params: unknown[];
+} {
+  const { clauses, params } = roleClauses(p);
+  if (clauses.length === 0) return { sql: "0", params: [] };
+  return { sql: `(CASE WHEN ${clauses.join(" OR ")} THEN 1 ELSE 0 END)`, params };
+}
+
+function roleClauses(p: Pick<Profile, "customRole" | "customRoleEn">): {
+  clauses: string[]; params: unknown[];
+} {
+  const clauses: string[] = [];
+  const params: unknown[] = [];
+
+  // Ті самі слова й те саме правило «всі разом», що в matchesCustomRole.
+  // Одне джерело правди: roleWords.
   const words = roleWords(roleText(p)).slice(0, ROLE_WORDS_IN_SQL);
   if (words.length > 0) {
     clauses.push(`(${words.map(() => "LOWER(j.title) LIKE ?").join(" AND ")})`);
@@ -627,9 +664,7 @@ export function onTopicSql(p: Pick<Profile, "spheres" | "customRole" | "customRo
   }
 
   // І окремо — значуще слово ролі саме по собі, щоб у вікно заходили часткові
-  // збіги: «Community Growth Coordinator» для «комуніті менеджера». Без цього
-  // partiallyMatchesRole не мав би на чому спрацювати: вікно наповнюється
-  // сферами, а вузька роль у них не вміщається.
+  // збіги: «Community Growth Coordinator» для «комуніті менеджера».
   //
   // Слова беруться вже без загальних («manager», «senior»): інакше один
   // «менеджер» затягнув би у вікно половину кеша.
@@ -638,8 +673,7 @@ export function onTopicSql(p: Pick<Profile, "spheres" | "customRole" | "customRo
     params.push(`%${w}%`);
   }
 
-  if (clauses.length === 0) return { sql: "0", params: [] };
-  return { sql: `(CASE WHEN ${clauses.join(" OR ")} THEN 1 ELSE 0 END)`, params };
+  return { clauses, params };
 }
 
 /**
@@ -731,6 +765,18 @@ export async function fetchCandidateRows(
    * Порожній список лишає поведінку як була: проходять тільки вакансії без
    * країни, тобто глобальні.
    */
+  /**
+   * Роль людини набирає вікно ПЕРШОЮ, і лише потім його добиває свіжість.
+   *
+   * Без цього широка сфера з тисячами рядків витісняла вузьку роль з
+   * десятками: у живого профілю з ролі «комуніті менеджер» і сфери
+   * «інженерія» у вікно заходило 10 із 86 доречних рядків.
+   *
+   * Той самий пріоритет стоїть і всередині стелі «три вакансії на компанію»:
+   * інакше компанія з пʼятьма інженерними оголошеннями витісняла б власну
+   * community-вакансію ще до того, як та побачить вікно.
+   */
+  const role = roleSql(profile);
   const mine = countriesOf(profile);
   const countrySql = mine.length > 0
     ? `AND (j.country IS NULL OR j.country IN (${mine.map(() => "?").join(",")}))`
@@ -790,8 +836,9 @@ export async function fetchCandidateRows(
     // Разом на живих профілях: 799 472 прочитаних рядки D1 на шість добірок
     // → 174 041, тобто −78%. На одну добірку це близько 160 000 → 35 000.
     `SELECT * FROM (
-       SELECT j.*, ROW_NUMBER() OVER (
-         PARTITION BY j.company_key ORDER BY j.posted_at DESC, j.fetched_at DESC
+       SELECT j.*, ${role.sql} AS by_role, ROW_NUMBER() OVER (
+         PARTITION BY j.company_key
+         ORDER BY ${role.sql} DESC, j.posted_at DESC, j.fetched_at DESC
        ) AS rn
        FROM jobs_cache j
        WHERE ${topic.sql} = 1
@@ -802,8 +849,9 @@ export async function fetchCandidateRows(
            SELECT 1 FROM sent s WHERE s.user_id = ? AND s.dedupe_key = j.dedupe_key)
      )
      WHERE rn <= 3
-     ORDER BY posted_at DESC, fetched_at DESC
-     LIMIT ${limit}`, [...topic.params, ...mine, userId, userId]);
+     ORDER BY by_role DESC, posted_at DESC, fetched_at DESC
+     LIMIT ${limit}`,
+    [...role.params, ...role.params, ...topic.params, ...mine, userId, userId]);
 }
 
 /** Рядок бази → кандидат для оцінювання. */
@@ -1151,7 +1199,23 @@ async function main(): Promise<void> {
 
   const ctx: RunContext = { d1, cfg, now, botToken, force, requested, delivered: 0, modelFails: 0 };
   const broke: string[] = [];
-  for (const u of users) {
+  /**
+   * Скільки людей обслуговуємо водночас.
+   *
+   * Тут стояв послідовний цикл, і на двадцяти чотирьох профілях це було
+   * непомітно. Але одна СПРАВЖНЯ доставка коштує близько трьох секунд:
+   * запит кандидатів, виклик моделі за поясненнями, надсилання. Майже всі
+   * обирають дев'яту годину, тож двісті людей означали б десять хвилин в
+   * одному годинному запуску, а тисяча — п'ятдесят, тобто запуски почали б
+   * накладатись один на одного.
+   *
+   * Чотири, а не двадцять. Стеля тут не наша: Telegram приймає тридцять
+   * повідомлень на секунду, D1 не любить довгих паралельних транзакцій, а
+   * модель гірше поводиться на сплесках. Чотири дають чотириразовий виграш
+   * і лишаються далеко від усіх трьох меж.
+   */
+  const LANES = 4;
+  await mapLimit(users, LANES, async (u) => {
     // Одна людина не має права зупинити решту: збій — у журнал і далі.
     try {
       await deliverTo(u, ctx);
@@ -1160,7 +1224,7 @@ async function main(): Promise<void> {
       console.log(`  ${u.id.slice(0, 8)}: збій, пропускаю — ${why}`);
       broke.push(`${u.id.slice(0, 8)}: ${why}`);
     }
-  }
+  });
 
   console.log(`Добірка: оброблено ${users.length} профілів, доставлено ${ctx.delivered}.`);
 
