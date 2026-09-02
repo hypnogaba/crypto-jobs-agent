@@ -110,24 +110,52 @@ export const PAGE_SIZE = 60;
 /**
  * Вікно свіжості те саме, що й у доставці: три доби. Кеш нічого не видаляє
  * одразу, тож без цієї умови сторінка показувала б вакансії, яких на дошці
- * вже немає, — а обіцянка «тільки живі посилання» стоїть на головній.
+ * вже немає, а обіцянка «тільки живі посилання» стоїть на головній.
+ *
+ * Тег шукається через LIKE з лапками, а не через `json_each`, і це не
+ * стилістика. Поміряно на живій базі 02.09: той самий перелік коштує 91 125
+ * прочитаних рядків через `json_each` і 33 341 через LIKE. Лапки обов'язкові
+ * (`%"qa"%`), інакше «qa» знайдеться всередині «security». Той самий прийом
+ * з тієї ж причини стоїть в `onTopicSql` у сканері.
  */
+const like = (tag: string): string => `%"${tag}"%`;
+
 export async function jobsFor(tag: string, limit = PAGE_SIZE): Promise<ListedJob[]> {
   return all<ListedJob>(
     `SELECT id,title,company,location,remote,url,posted_at,
             salary_min,salary_max,salary_currency,source
        FROM jobs_cache
       WHERE fetched_at >= datetime('now','-3 day')
-        AND EXISTS (SELECT 1 FROM json_each(jobs_cache.tags) WHERE value = ?)
+        AND tags LIKE ?
       ORDER BY posted_at DESC, fetched_at DESC
-      LIMIT ?`, tag, limit);
+      LIMIT ?`, like(tag), limit);
 }
 
 /** Скільки таких вакансій усього. Число в леде, а не окраса: воно живе. */
 export async function countFor(tag: string): Promise<number> {
   const rows = await all<{ n: number }>(
     `SELECT count(*) n FROM jobs_cache
-      WHERE fetched_at >= datetime('now','-3 day')
-        AND EXISTS (SELECT 1 FROM json_each(jobs_cache.tags) WHERE value = ?)`, tag);
+      WHERE fetched_at >= datetime('now','-3 day') AND tags LIKE ?`, like(tag));
   return rows[0]?.n ?? 0;
+}
+
+/**
+ * Числа для ВСІХ добірок одним запитом.
+ *
+ * Сторінка-вузол показує двадцять два числа, і перший її варіант питав їх
+ * двадцятьма двома окремими запитами. Кожен коштував 83 408 прочитаних
+ * рядків, тобто одне відкриття сторінки коштувало **1.8 мільйона**. Це не
+ * гіпотеза: саме через це добовий лічильник бази підскочив до 38 мільйонів.
+ *
+ * Один запит із `json_each` і GROUP BY дає ті самі двадцять два числа за
+ * 147 842 рядки, тобто вдванадцятеро дешевше. Тут `json_each` доречний
+ * саме тому, що групування по тегу інакше не написати.
+ */
+export async function countsByTag(): Promise<Map<string, number>> {
+  const rows = await all<{ tag: string; n: number }>(
+    `SELECT t.value AS tag, count(*) AS n
+       FROM jobs_cache j, json_each(j.tags) t
+      WHERE j.fetched_at >= datetime('now','-3 day')
+      GROUP BY t.value`);
+  return new Map(rows.map((r) => [r.tag, r.n]));
 }

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { JOBS_PAGES, countFor } from "@/lib/jobs-pages";
+import { JOBS_PAGES, countsByTag } from "@/lib/jobs-pages";
 import { SITE } from "@/lib/seo";
 
 /**
@@ -20,10 +20,9 @@ export const generateMetadata = async (): Promise<Metadata> => ({
 });
 
 export default async function Page() {
-  // Один запит на добірку, двадцять два запити на сторінку. Це дорожче за
-  // решту сайту, тож числа тут — не окраса: порожня добірка має бути видно
-  // порожньою, інакше людина йде в неї даремно.
-  const counts = await Promise.all(JOBS_PAGES.map((p) => countFor(p.tag)));
+  // Одним запитом на всі двадцять два числа. Окремі запити коштували 1.8
+  // мільйона прочитаних рядків на одне відкриття сторінки (див. countsByTag).
+  const counts = await countsByTag();
 
   return (
     <main className="mx-auto w-full max-w-5xl px-6 py-16">
@@ -31,13 +30,13 @@ export default async function Page() {
       <p className="lede mt-5">{LEDE}</p>
 
       <ul className="ruled card mt-10">
-        {JOBS_PAGES.map((p, i) => (
+        {JOBS_PAGES.map((p) => (
           <li key={p.slug} className="flex items-baseline justify-between gap-4 px-6 py-4">
             <span>
               <Link href={`/jobs/${p.slug}`} className="link font-medium">{p.title}</Link>
               <span className="mt-1 block text-sm" style={{ color: "var(--ink-2)" }}>{p.lede}</span>
             </span>
-            <span className="mono text-xs" style={{ color: "var(--muted)" }}>{counts[i]}</span>
+            <span className="mono text-xs" style={{ color: "var(--muted)" }}>{counts.get(p.tag) ?? 0}</span>
           </li>
         ))}
       </ul>
