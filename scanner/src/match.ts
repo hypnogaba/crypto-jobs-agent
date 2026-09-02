@@ -940,6 +940,26 @@ export function countriesOf(p: Pick<Profile, "country" | "location" | "locationE
   return placeOf(wishesText(p)).countries;
 }
 
+/**
+ * Вакансія в одній із країн людини.
+ *
+ * Стовпець `country` заповнює лише національна дошка, яка сама себе оголосила
+ * («це вакансія з України»). Глобальні джерела — ATS компаній, агрегатори,
+ * колекції — не кажуть про країну нічого, і в кеші вона в них порожня: на
+ * 02.09 країна стояла в 2 069 рядках із 34 718, тобто в 6%.
+ *
+ * Наслідок був тихий і дорогий: резерв місцевих місць спирався саме на цей
+ * стовпець, тож людина в Парижі місцевих вакансій не отримувала ніколи,
+ * хоча 289 французьких рядків лежали в кеші й прийшли з ATS французьких
+ * компаній. Тому країну беремо ще й з тексту локації — тим самим розбором,
+ * яким її вже бере оцінювання поруч.
+ */
+export function inCountries(job: CandidateJob, mine: string[]): boolean {
+  if (mine.length === 0) return false;
+  if (job.country) return mine.includes(job.country);
+  return placeOf(job.location).countries.some((c) => mine.includes(c));
+}
+
 export function reachable(job: CandidateJob, p: Profile): boolean {
   if (job.remote) return true;
   if (remoteOnly(p.remoteMode)) return true;   // там свій штраф, -6 за onsite
@@ -1033,7 +1053,7 @@ export function pickTop(jobs: CandidateJob[], p: Profile, limit = 5, now = new D
   if (localSlots > 0) {
     for (const job of scored) {
       if (picked.length >= localSlots) break;
-      if (!job.country || !mine.includes(job.country)) continue;
+      if (!inCountries(job, mine)) continue;
       take(job);
     }
   }

@@ -543,6 +543,28 @@ describe("pickTop — місце під локальні", () => {
     expect(top).toHaveLength(5);
   });
 
+  it("країну бере з тексту локації, коли дошка її не оголосила", () => {
+    // 289 французьких вакансій лежали в кеші з country=NULL: їх приносять
+    // ATS французьких компаній, а не національна дошка. Резерв дивився лише
+    // на стовпець, тож людина в Парижі місцевого не бачила ніколи.
+    const fr: Profile = { ...p, country: "FR" };
+    const paris = job({ id: "p1", companyKey: "fr-1", company: "FR 1",
+                        location: "Paris, France" });
+    const jobs = [...Array.from({ length: 8 }, (_, i) => globalJob(`g${i}`)), paris];
+    expect(pickTop(jobs, fr, 5).map((j) => j.id)).toContain("p1");
+  });
+
+  it("чужа країна в тексті локації резерву не заповнює", () => {
+    // Дзеркало попереднього: якби розбір локації віддавав FR будь-чому,
+    // Берлін зайшов би сюди силою резерву попри нижчий бал.
+    const fr: Profile = { ...p, country: "FR" };
+    const berlin = job({ id: "de1", companyKey: "de-1", company: "DE 1",
+                         location: "Berlin, Germany",
+                         postedAt: new Date().toISOString() });
+    const jobs = [...Array.from({ length: 8 }, (_, i) => globalJob(`g${i}`)), berlin];
+    expect(pickTop(jobs, fr, 5).map((j) => j.id)).not.toContain("de1");
+  });
+
   it("не резервує місця, коли країни в профілі немає", () => {
     const jobs = [...Array.from({ length: 8 }, (_, i) => globalJob(`g${i}`))];
     const top = pickTop(jobs, p, 5);

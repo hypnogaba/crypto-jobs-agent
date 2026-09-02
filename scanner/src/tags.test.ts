@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveTags } from "./tags.js";
+import { deriveTags, withCompanyTags } from "./tags.js";
 import type { RawJob } from "./types.js";
 
 const j = (o: Partial<RawJob>): RawJob => ({
@@ -89,5 +89,24 @@ describe("безпека — не фінансовий комплаєнс", () =
     expect(j("Senior Application Security Engineer")).toContain("security");
     expect(j("GRC Manager")).toContain("security");
     expect(j("Penetration Tester")).toContain("security");
+  });
+});
+
+describe("withCompanyTags — ніша каталогу доходить до вакансії", () => {
+  it("додає галузевий тег компанії", () => {
+    expect(withCompanyTags(["engineering"], ["web3"])).toEqual(["engineering", "web3"]);
+  });
+  it("не додає сферу: компанія про посаду нічого не знає", () => {
+    expect(withCompanyTags(["finance-legal"], ["engineering"])).toEqual(["finance-legal"]);
+  });
+  it("прибирає «other», щойно ніша знайшлась", () => {
+    expect(withCompanyTags(["other"], ["web3"])).toEqual(["web3"]);
+  });
+  it("нічого не змінює, коли компанія без тегів", () => {
+    const tags = ["engineering", "remote"];
+    expect(withCompanyTags(tags, [])).toBe(tags);
+  });
+  it("не дублює те, що вже є", () => {
+    expect(withCompanyTags(["web3"], ["web3"])).toEqual(["web3"]);
   });
 });

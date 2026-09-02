@@ -13,7 +13,7 @@
 import { loadConfig } from "./config.js";
 import { D1Client } from "./d1.js";
 import { affected, notifyOwner } from "./notify.js";
-import { explainWithClaude, hasSearchSignal, meaningfulRoleWords, pickTop, roleText, roleWords,
+import { countriesOf, explainWithClaude, hasSearchSignal, meaningfulRoleWords, pickTop, roleText, roleWords,
          type CandidateJob, type Profile } from "./match.js";
 import { asLocale, formatWhen, nextDelivery, salaryLine, say, thin, type Locale } from "./digest-copy.js";
 import { summarize } from "./summary.js";
@@ -718,6 +718,22 @@ export async function fetchCandidateRows(
   d1: D1Client, profile: Profile, userId: string, limit = CANDIDATE_WINDOW,
 ): Promise<CandidateRow[]> {
   const topic = onTopicSql(profile);
+  /**
+   * Країни людини як СПИСОК, а не як рядок.
+   *
+   * Тут стояло `j.country = ?` з `profile.country` як параметром, а в
+   * профілі лежить кома-список: «CZ,AT,HU,SK». Рівність не спрацьовувала
+   * жодного разу, тобто людина, яка назвала чотири країни, не бачила
+   * НІЧОГО з національних дощок — рівно та сама вада, яку вже виправили в
+   * `pickTop`, тільки в іншому місці й на день пізніше.
+   *
+   * Порожній список лишає поведінку як була: проходять тільки вакансії без
+   * країни, тобто глобальні.
+   */
+  const mine = countriesOf(profile);
+  const countrySql = mine.length > 0
+    ? `AND (j.country IS NULL OR j.country IN (${mine.map(() => "?").join(",")}))`
+    : "AND j.country IS NULL";
   return d1.query<CandidateRow>(
     // Вікно кандидатів. Чотири правила, кожне з реального прогону:
     //
@@ -779,14 +795,14 @@ export async function fetchCandidateRows(
        FROM jobs_cache j
        WHERE ${topic.sql} = 1
          AND j.fetched_at >= datetime('now', '-3 day')
-         AND (j.country IS NULL OR j.country = ?)
+         ${countrySql}
          AND NOT EXISTS (SELECT 1 FROM sent s WHERE s.user_id = ? AND s.job_id = j.id)
          AND NOT EXISTS (
            SELECT 1 FROM sent s WHERE s.user_id = ? AND s.dedupe_key = j.dedupe_key)
      )
      WHERE rn <= 3
      ORDER BY posted_at DESC, fetched_at DESC
-     LIMIT ${limit}`, [...topic.params, profile.country ?? null, userId, userId]);
+     LIMIT ${limit}`, [...topic.params, ...mine, userId, userId]);
 }
 
 /** Рядок бази → кандидат для оцінювання. */

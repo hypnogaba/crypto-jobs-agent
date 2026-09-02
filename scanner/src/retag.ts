@@ -18,11 +18,16 @@
  * Прибирання зайвого — справа наступного справжнього скану, який перезаписує
  * теги цілком. Ці двоє не конфліктують: скан завжди правіший.
  *
- * Ніша ДЖЕРЕЛА відновлюється, і це друга половина роботи. Раніше її тут не
- * було зовсім («з рядка кеша не відновити»), і це правда лише для тегів, що
- * приходять від КОМПАНІЇ. Ніша дошки й колекції прив'язана до `source`, а
- * `source` у рядку кеша є. Тому перед перетегуванням ми питаємо базу, які
- * джерела нішеві, і передаємо це як inheritedTags.
+ * Ніша ДЖЕРЕЛА відновлюється, і це друга половина роботи. Ніша дошки й
+ * колекції прив'язана до `source`, а `source` у рядку кеша є. Тому перед
+ * перетегуванням ми питаємо базу, які джерела нішеві, і передаємо це як
+ * inheritedTags.
+ *
+ * Ніша КОМПАНІЇ відновлюється так само, і колись тут стояло, що це
+ * неможливо. У рядку кеша лежить `company_key`, а в каталозі компаній —
+ * тег ніші, тож зв'язок є. Це важливо саме для тих джерел, які про нішу
+ * мовчать: вакансія Binance приїжджає і через `lever:binance` з тегом, і
+ * через колекцію Getro без тега, і другий запис стирав перший.
  *
  * Без цього перетегування крипто-дошок не дало б нічого: правило дивиться в
  * назву вакансії, а «Senior Backend Engineer» у крипто-компанії слова
@@ -32,10 +37,11 @@
 import { loadConfig } from "./config.js";
 import { wranglerFetch } from "./wrangler-fetch.js";
 import { D1Client } from "./d1.js";
-import { deriveTags } from "./tags.js";
+import { deriveTags, withCompanyTags } from "./tags.js";
 
 interface Row {
-  id: string; title: string; company: string; source: string; remote: number; tags: string;
+  id: string; title: string; company: string; company_key: string;
+  source: string; remote: number; tags: string;
 }
 
 const parse = (raw: string): string[] => {
@@ -49,15 +55,19 @@ export interface RetagChange { id: string; added: string[]; tags: string[] }
  * Що змінилося б. Чиста функція — саме вона й перевіряється тестом, бо решта
  * файлу це два запити до D1.
  */
-export function planRetag(rows: Row[], nicheBySource: Map<string, string[]> = new Map()): RetagChange[] {
+export function planRetag(
+  rows: Row[],
+  nicheBySource: Map<string, string[]> = new Map(),
+  nicheByCompany: Map<string, string[]> = new Map(),
+): RetagChange[] {
   const out: RetagChange[] = [];
   for (const r of rows) {
     const old = parse(r.tags);
-    const derived = deriveTags({
+    const derived = withCompanyTags(deriveTags({
       url: "", company: r.company, title: r.title, location: null,
       remote: r.remote === 1, postedAt: null, source: r.source,
       inheritedTags: nicheBySource.get(r.source),
-    });
+    }), nicheByCompany.get(r.company_key) ?? []);
     const added = derived.filter((t) => !old.includes(t));
     // «other» ставиться лише тоді, коли не знайшлось нічого іншого. Тут воно
     // означало б, що правила мовчать про рядок, у якого теги вже є, — і
@@ -88,7 +98,7 @@ async function main(): Promise<void> {
     process.env.VIA_WRANGLER ? { fetchImpl: wranglerFetch, attempts: 1, timeoutMs: 600_000 } : {});
 
   const rows = await d1.query<Row>(
-    `SELECT id,title,company,source,remote,tags FROM jobs_cache
+    `SELECT id,title,company,company_key,source,remote,tags FROM jobs_cache
       WHERE fetched_at >= datetime('now', ?)`, [`-${days} day`]);
   console.log(`У вікні ${days} дн.: ${rows.length} вакансій.`);
 
@@ -105,7 +115,17 @@ async function main(): Promise<void> {
   }
   console.log(`Нішевих джерел: ${niche.size}.`);
 
-  const plan = planRetag(rows, niche);
+  // Ніша компанії. Джерело каже про нішу не завжди — вакансія Binance
+  // приїжджає і через `lever:binance`, і через колекцію Getro без тегів, —
+  // а каталог компаній знає її незалежно від того, хто приніс рядок.
+  const byCompany = new Map<string, string[]>();
+  for (const c of await d1.query<{ slug: string; tags: string }>(
+    "SELECT slug, tags FROM companies WHERE tags IS NOT NULL AND tags <> '[]'")) {
+    byCompany.set(c.slug, parse(c.tags));
+  }
+  console.log(`Компаній з нішею: ${byCompany.size}.`);
+
+  const plan = planRetag(rows, niche, byCompany);
   if (plan.length === 0) { console.log("Теги вже відповідають правилам — міняти нема чого."); return; }
 
   const gained = new Map<string, number>();

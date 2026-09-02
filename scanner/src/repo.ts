@@ -1,4 +1,5 @@
 import { summarize } from "./summary.js";
+import { withCompanyTags } from "./tags.js";
 import { extractSalary } from "./salary.js";
 import type { D1Client, D1Statement } from "./d1.js";
 import type { AtsProvider, Company, NormalizedJob, SourceStatus } from "./types.js";
@@ -22,6 +23,24 @@ export interface GetroCollection { id: number; tags: string[] }
 
 export class Repo {
   constructor(private readonly d1: D1Client) {}
+
+  /**
+   * Ніша кожної компанії, один раз на прогін.
+   *
+   * Читається ліниво й кешується: `upsertJobs` викликається чотири рази за
+   * скан (драбина, дошки, зростання), і чотири однакові запити були б
+   * платою за нічого. Порожній результат — не помилка: у першому скані
+   * каталог компаній ще порожній.
+   */
+  private companyTagsCache: Map<string, string[]> | null = null;
+
+  private async companyTags(): Promise<Map<string, string[]>> {
+    if (this.companyTagsCache) return this.companyTagsCache;
+    const rows = await this.d1.query<{ slug: string; tags: string }>(
+      "SELECT slug,tags FROM companies WHERE tags IS NOT NULL AND tags <> '[]'");
+    this.companyTagsCache = new Map(rows.map((r) => [r.slug, parseTags(r.tags)]));
+    return this.companyTagsCache;
+  }
 
   // ── національні дошки ──────────────────────────────────────
   /**
@@ -103,7 +122,11 @@ export class Repo {
   // ── вакансії ───────────────────────────────────────────────
   async upsertJobs(jobs: NormalizedJob[]): Promise<void> {
     if (jobs.length === 0) return;
+    // Ніша компанії додається саме тут, а не в сходинках: інакше джерело,
+    // яке віддало ту саму вакансію другим, стирало б її своїм `tags=excluded`.
+    const byCompany = await this.companyTags();
     const statements: D1Statement[] = jobs.map((j) => {
+      const tags = withCompanyTags(j.tags, byCompany.get(j.companyKey) ?? []);
       // Сирий текст оголошення в базу не пишемо ніколи — лише витяг.
       const summary = summarize(j.description, j.company);
       // Вилка з тексту — лише коли джерело не дало її окремим полем. Повний
@@ -133,7 +156,7 @@ export class Repo {
         params: [
           crypto.randomUUID(), j.url, j.company, j.companyKey, j.title, j.location,
           j.remote ? 1 : 0, salaryMin, salaryMax, salaryCurrency,
-          j.source, JSON.stringify(j.tags), j.dedupeKey, j.postedAt, j.fetchedAt,
+          j.source, JSON.stringify(tags), j.dedupeKey, j.postedAt, j.fetchedAt,
           j.country ?? null, summary, summary ? j.fetchedAt : null,
         ],
       };

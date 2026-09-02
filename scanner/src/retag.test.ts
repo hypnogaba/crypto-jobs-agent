@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { planRetag } from "./retag.js";
 
 const row = (o: Partial<Parameters<typeof planRetag>[0][number]> = {}) => ({
-  id: "j1", title: "Senior Product Designer", company: "Acme",
+  id: "j1", title: "Senior Product Designer", company: "Acme", company_key: "acme",
   source: "greenhouse:acme", remote: 0, tags: '["product","senior"]', ...o });
 
 describe("planRetag", () => {
@@ -76,5 +76,31 @@ describe("ніша джерела", () => {
   it("чуже джерело чужу нішу не бере", () => {
     const niche = new Map([["board:global-jobstash", ["web3"]]]);
     expect(planRetag([{ ...row, source: "board:dou-python" }], niche)).toEqual([]);
+  });
+});
+
+describe("planRetag — ніша компанії", () => {
+  const crypto = new Map([["binance", ["web3"]]]);
+
+  it("вакансія відомої крипто-компанії дістає нішу, хоч джерело мовчить", () => {
+    // Живий випадок 02.09: «Binance Accelerator Program — QA (Content)»
+    // приїхала колекцією Getro без тегів і лежала в кеші як marketing.
+    const plan = planRetag([row({
+      company: "Binance", company_key: "binance", source: "getro:1513",
+      title: "Binance Accelerator Program - QA (Content)", tags: '["marketing"]',
+    })], new Map(), crypto);
+    expect(plan[0]!.added).toEqual(["web3"]);
+  });
+
+  it("чужа компанія нішу не дістає", () => {
+    expect(planRetag([row({ company_key: "acme", tags: '["design","product","senior"]' })],
+      new Map(), crypto)).toEqual([]);
+  });
+
+  it("сфери від компанії не беремо: у Binance є і бекендери, і юристи", () => {
+    const plan = planRetag([row({
+      company_key: "binance", title: "Legal Counsel", tags: '["finance-legal"]',
+    })], new Map(), new Map([["binance", ["web3", "engineering"]]]));
+    expect(plan[0]!.added).toEqual(["web3"]);
   });
 });

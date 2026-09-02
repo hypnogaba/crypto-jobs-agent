@@ -2,6 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 import { Repo } from "./repo.js";
 import type { NormalizedJob } from "./types.js";
 
+/**
+ * Подвійник D1. `query` тут не декорація: `upsertJobs` читає ніші компаній
+ * перед записом, і тест без цього методу падав би на порожньому каталозі.
+ */
+const d1 = (batch: unknown, companies: Array<{ slug: string; tags: string }> = []) =>
+  ({ batch, query: async () => companies } as never);
+
 const job = (over: Partial<NormalizedJob> = {}): NormalizedJob => ({
   url: "https://jobs.ashbyhq.com/acme/1", company: "Acme", companyKey: "acme",
   title: "Ops Associate", location: "Remote", remote: true, postedAt: null,
@@ -12,7 +19,7 @@ const job = (over: Partial<NormalizedJob> = {}): NormalizedJob => ({
 describe("upsertJobs", () => {
   it("зберігає витяг, а не сирий текст оголошення", async () => {
     const batch = vi.fn().mockResolvedValue(undefined);
-    const repo = new Repo({ batch } as never);
+    const repo = new Repo(d1(batch));
     const raw = "About the Role\n\nYou will own the trade lifecycle for equities and crypto every day.";
     await repo.upsertJobs([job({ description: raw })]);
 
@@ -25,7 +32,7 @@ describe("upsertJobs", () => {
 
   it("бере вилку з тексту, коли джерело не дало її полем; поле — важливіше", async () => {
     const batch = vi.fn().mockResolvedValue(undefined);
-    const repo = new Repo({ batch } as never);
+    const repo = new Repo(d1(batch));
     const raw = "About the Role\n\nYou will own the trade lifecycle.\n\nCompensation: $120,000 - $150,000 per year.";
     await repo.upsertJobs([job({ description: raw }), job({ url: "https://x.test/2", description: raw, salaryMin: 90_000, salaryCurrency: "EUR" })]);
     const [a, b] = batch.mock.calls[0]![0] as Array<{ params: unknown[] }>;
@@ -36,7 +43,7 @@ describe("upsertJobs", () => {
 
   it("лишає summary порожнім, коли тексту немає", async () => {
     const batch = vi.fn().mockResolvedValue(undefined);
-    const repo = new Repo({ batch } as never);
+    const repo = new Repo(d1(batch));
     await repo.upsertJobs([job()]);
     const [stmt] = batch.mock.calls[0]![0] as Array<{ params: unknown[] }>;
     // Два останні параметри — summary і summary_at.
@@ -89,5 +96,26 @@ describe("rememberGetroCollection", () => {
     await repo.rememberGetroCollection(321, null, null);
     const [, params] = execute.mock.calls[0]! as [string, unknown[]];
     expect(params[2]).toBe("Колекція 321");
+  });
+});
+
+describe("upsertJobs — ніша компанії", () => {
+  it("додає нішу з каталогу, хоч джерело її не дало", async () => {
+    // Живий випадок: вакансію Binance того самого дня приносить і
+    // `lever:binance` з тегом ніші, і колекція Getro без тега. Другий запис
+    // ставить `tags=excluded.tags` і стирає перший.
+    const batch = vi.fn().mockResolvedValue(undefined);
+    const repo = new Repo(d1(batch, [{ slug: "binance", tags: '["web3"]' }]));
+    await repo.upsertJobs([job({ companyKey: "binance", tags: ["marketing"] })]);
+    const [stmt] = batch.mock.calls[0]![0] as Array<{ params: unknown[] }>;
+    expect(stmt!.params).toContain(JSON.stringify(["marketing", "web3"]));
+  });
+
+  it("чужу компанію не чіпає", async () => {
+    const batch = vi.fn().mockResolvedValue(undefined);
+    const repo = new Repo(d1(batch, [{ slug: "binance", tags: '["web3"]' }]));
+    await repo.upsertJobs([job({ companyKey: "acme", tags: ["marketing"] })]);
+    const [stmt] = batch.mock.calls[0]![0] as Array<{ params: unknown[] }>;
+    expect(stmt!.params).toContain(JSON.stringify(["marketing"]));
   });
 });

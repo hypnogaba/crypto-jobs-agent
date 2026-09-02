@@ -85,3 +85,30 @@ export function deriveTags(job: RawJob): string[] {
   if (tags.size === 0) tags.add("other");
   return [...tags];
 }
+
+/**
+ * Ніша компанії, яку ми ВЖЕ знаємо, доходить до її вакансії.
+ *
+ * Виміряно 02.09: у каталозі 312 компаній із тегом `web3`, і 173 свіжих
+ * вакансій цих самих компаній лежали в кеші без нього. Причина не в тому, що
+ * успадкування не написане — у R1 і в дошках воно є, — а в тому, що ОСТАННІЙ
+ * запис перемагає: `upsertJobs` ставить `tags=excluded.tags`, тож вакансія
+ * Binance, знайдена спершу через `lever:binance` з тегом ніші, а потім того
+ * самого дня через колекцію Getro без тегів, лишалась без ніші.
+ *
+ * Тому ніша компанії додається В ОДНОМУ місці — перед самим записом, — а не
+ * в кожній сходинці драбини окремо. Чотири виклики `upsertJobs` означали б
+ * чотири нагоди забути про п'ятий.
+ *
+ * Беремо лише галузеві теги. Сфера («engineering», «sales») — це про посаду,
+ * і компанія про неї нічого не знає: у Binance є і бекендери, і юристи.
+ */
+const INDUSTRY_TAGS = new Set(INDUSTRY_RULES.map(([tag]) => tag));
+
+export function withCompanyTags(tags: string[], companyTags: string[]): string[] {
+  const extra = companyTags.filter((t) => INDUSTRY_TAGS.has(t) && !tags.includes(t));
+  if (extra.length === 0) return tags;
+  // «other» означає «не знаємо нічого». Щойно дізнались — воно зайве.
+  const kept = tags.filter((t) => t !== "other");
+  return [...kept, ...extra];
+}
