@@ -12,7 +12,8 @@ import { DEFAULT_LOCALE, isLocale } from "@/lib/i18n";
 import { safeTimezone } from "@/lib/digest-time";
 import { FEEDBACK_LIMITS, ONBOARD_LIMITS, checkRate, recordFailure } from "@/lib/ratelimit";
 import { INDUSTRIES, SPHERES, needsCity, parseModes, serializeModes, type Locale } from "@/lib/vocab";
-import { persistDerived } from "@/lib/profile-country";
+import { persistProfile } from "@/lib/profile-write";
+import { PENDING_COOKIE, createPending, dropPending, pendingById } from "@/lib/pending";
 import { pathFor } from "@/lib/seo";
 import { sendText } from "@/lib/telegram-send";
 
@@ -281,17 +282,26 @@ export async function saveProfile(formData: FormData): Promise<void> {
 
   if (!user) {
     await guardOnboarding();
-    // Ще немає акаунта — створюємо мовчки, без пошти й пароля.
-    // Особа людини — це її Telegram, і вона підтвердить її наступним кроком.
-    // Просити тут пароль означало б поставити анкету посеред дії.
-    const id = uuid();
-    await run(
-      `INSERT INTO users (id,locale,timezone,delivery_hour,last_interaction_at)
-       VALUES (?,?,?,9,datetime('now'))`,
-      id, await detectLocale(), timezone);
-    await persistProfile(id, draft?.text ?? "", draft?.source ?? "freetext", profile);
+    /**
+     * Акаунта ще немає, і тут він не створюється.
+     *
+     * Раніше створювався: рядок у `users`, сесія в куці, і жодного способу
+     * зв'язку. Виміряно 02.09 — сім таких акаунтів із двадцяти чотирьох,
+     * 105 добірок, нуль подач, двоє вже без сесії. Кука на тридцять днів
+     * була єдиним ключем, і разом із нею людина втрачала все написане.
+     *
+     * Тепер анкета чекає в `pending_signups`, а акаунт народжується в мить,
+     * коли бот приймає токен. Нічого не горить доти, і нема кого потім
+     * прибирати.
+     */
+    const { id } = await createPending({
+      locale: await detectLocale(), timezone, profile,
+      rawInput: draft?.text ?? "", source: draft?.source ?? "freetext",
+    });
     await dropDraft();
-    await createSession(id);
+    (await cookies()).set(PENDING_COOKIE, id, {
+      httpOnly: true, sameSite: "lax", secure: true, path: "/", maxAge: 7 * 86_400,
+    });
     redirect("/telegram");
   }
 
@@ -309,49 +319,6 @@ export async function saveProfile(formData: FormData): Promise<void> {
   redirect(back);
 }
 
-async function persistProfile(
-  userId: string, rawInput: string | null, source: string,
-  p: { spheres: string[]; industries: string[]; customRole: string | null;
-       customIndustry: string | null;
-       remoteMode: string;
-       location: string | null; levelMax: number | null;
-       salaryMin: number | null; salaryMax: number | null; salaryCurrency: string | null;
-       wishes: string | null; cvHighlights: string | null }
-): Promise<void> {
-  // Без нового тексту (null) три текстові стовпці лишаються як були: раніше
-  // редагування без чернетки ставило cv_text=NULL, raw_input='' і
-  // mode='freetext', і резюме зникало з профілю мовчки.
-  const keepText = rawInput === null;
-  // Резюме це чи тези — каже чернетка, а не довжина рядка. Стара мірка
-  // («більше 800 символів») робила з довгих тез резюме: mode='cv',
-  // raw_input=NULL, і слова людини зникали з профілю.
-  const isCv = source === "cv";
-  const textCols = keepText
-    ? "mode=profiles.mode, raw_input=profiles.raw_input, cv_text=profiles.cv_text"
-    : "mode=excluded.mode, raw_input=excluded.raw_input, cv_text=excluded.cv_text";
-  await run(
-    `INSERT INTO profiles (user_id,mode,raw_input,cv_text,spheres,custom_role,industries,custom_industry,remote_mode,location,level_max,salary_min,salary_max,salary_currency,wishes,cv_highlights,updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
-     ON CONFLICT(user_id) DO UPDATE SET
-       ${textCols},
-       spheres=excluded.spheres, custom_role=excluded.custom_role,
-       industries=excluded.industries, custom_industry=excluded.custom_industry,
-       remote_mode=excluded.remote_mode, location=excluded.location,
-       level_max=excluded.level_max,
-       salary_min=excluded.salary_min, salary_max=excluded.salary_max,
-       salary_currency=excluded.salary_currency,
-       wishes=excluded.wishes, cv_highlights=excluded.cv_highlights,
-       updated_at=datetime('now')`,
-    userId, isCv ? "cv" : "freetext",
-    isCv || keepText ? null : rawInput,   // файл резюме не зберігаємо, лише розібраний текст
-    isCv ? rawInput!.slice(0, 20_000) : null,
-    JSON.stringify(p.spheres), p.customRole,
-    JSON.stringify(p.industries), p.customIndustry,
-    p.remoteMode, p.location, p.levelMax, p.salaryMin, p.salaryMax, p.salaryCurrency, p.wishes, p.cvHighlights);
-  await persistDerived(userId, (await env()).ANTHROPIC_API_KEY ?? null);
-
-}
-
 /** «Прислати 5 зараз» після анкети: один відкритий запит на людину. */
 export async function requestFirstFive(): Promise<void> {
   const user = await requireUser();
@@ -361,6 +328,30 @@ export async function requestFirstFive(): Promise<void> {
     uuid(), user.id, user.id);
   await run("UPDATE users SET last_interaction_at=datetime('now') WHERE id=?", user.id);
   redirect("/dashboard?queued=1");
+}
+
+/**
+ * «Я підключив» на кроці 03/03.
+ *
+ * Сторінка не може створити сесію сама: куку в Next дозволено ставити лише
+ * в дії або в маршруті, а не під час малювання. Та й перевіряти базу на
+ * кожне відкриття сторінки не варто — бот пише в неї, а не в цю вкладку.
+ *
+ * Тому дія: людина каже, що готово, ми дивимось у рядок анкети. Забрана —
+ * віддаємо сесію й кабінет. Ні — лишаємо на місці з тим самим посиланням,
+ * бо єдине, що тут можна зробити, це таки натиснути кнопку в Telegram.
+ */
+export async function finishPending(): Promise<void> {
+  const jar = await cookies();
+  const id = jar.get(PENDING_COOKIE)?.value;
+  const pending = id ? await pendingById(id) : null;
+  if (!pending) redirect(await homePath());
+  if (!pending.claimedUserId) redirect("/telegram?waiting=1");
+
+  await createSession(pending.claimedUserId);
+  await dropPending(pending.id);
+  jar.delete(PENDING_COOKIE);
+  redirect("/dashboard");
 }
 
 // ── акаунт ───────────────────────────────────────────────────

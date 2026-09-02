@@ -166,7 +166,7 @@ const PLACES: Array<[string, RegExp]> = [
   // Порядок має значення: перший збіг перемагає. Країни, де людей найбільше,
   // стоять вище — не з поваги, а щоб рідкісний омонім не перехопив частий
   // випадок.
-  ["UA", word("ukraine|ukraina|україна|украина|kyiv|kiev|київ|киев|lviv|львів|львов|kharkiv|харків|харьков|odesa|odessa|одеса|одесса|dnipro|дніпро|днепр|vinnytsia|вінниця|ivano-frankivsk|івано-франківськ|ternopil|тернопіль|zhytomyr|житомир|chernivtsi|чернівці|rivne|рівне|poltava|полтава")],
+  ["UA", word("ukraine|ukraina|україна|украина|kyiv|kiev|київ|киев|lviv|львів|львов|kharkiv|харків|харьков|odesa|odessa|одеса|одесса|dnipro|дніпро|днепр|vinnytsia|вінниця|ivano-frankivsk|івано-франківськ|ternopil|тернопіль|zhytomyr|житомир|chernivtsi|чернівці|rivne|рівне|poltava|полтава|zaporizhzhia|zaporozhye|запоріжжя|запорожье|kherson|херсон|mykolaiv|nikolaev|миколаїв|николаев|chernihiv|чернігів|чернигов|sumy|суми|cherkasy|черкаси|kropyvnytskyi|кропивницький|khmelnytskyi|хмельницький|uzhhorod|uzhgorod|ужгород|lutsk|луцьк|kryvyi rih|kryvyi rig|кривий ріг|кривой рог|mariupol|маріуполь|мариуполь|kremenchuk|кременчук|bila tserkva|біла церква|brovary|бровари|irpin|ірпінь|bucha|буча")],
   ["PL", word("poland|polska|польща|польша|warsaw|warszawa|варшава|krakow|kraków|краків|краков|wroclaw|wrocław|вроцлав|gdansk|gdańsk|гданськ|poznan|poznań|познань|katowice|катовіце|lodz|łódź|лодзь|szczecin|lublin|люблін|rzeszow|rzeszów|gdynia|bydgoszcz")],
   ["DE", word("germany|deutschland|німеччина|германия|berlin|берлін|берлин|munich|münchen|muenchen|мюнхен|hamburg|гамбург|frankfurt|франкфурт|cologne|köln|koeln|кельн|кёльн|stuttgart|штутгарт|düsseldorf|duesseldorf|дюссельдорф|leipzig|лейпциг|dresden|дрезден|nuremberg|nürnberg|нюрнберг|hannover|bremen|бремен|karlsruhe|mannheim|essen|dortmund|bonn|бонн")],
   ["FR", word("france|франція|франция|paris|париж|lyon|ліон|лион|marseille|марсель|toulouse|тулуза|bordeaux|бордо|nantes|нант|lille|лілль|лилль|strasbourg|страсбург|montpellier|монпельє|rennes|grenoble|гренобль|sophia antipolis")],
@@ -183,7 +183,7 @@ const PLACES: Array<[string, RegExp]> = [
   ["IE", word("ireland|éire|ірландія|ирландия|dublin|дублін|дублин|cork|корк|galway|голуей|limerick|лімерик|waterford")],
   ["AT", word("austria|österreich|oesterreich|австрія|австрия|vienna|wien|відень|вена|graz|грац|linz|лінц|линц|salzburg|зальцбург|innsbruck|інсбрук|klagenfurt")],
   ["CH", word("switzerland|schweiz|suisse|svizzera|швейцарія|швейцария|zurich|zürich|цюрих|geneva|genève|genf|женева|basel|базель|bern|берн|lausanne|лозанна|lugano|zug|цуг|winterthur")],
-  ["SE", word("sweden|sverige|швеція|швеция|stockholm|стокгольм|gothenburg|göteborg|goteborg|гетеборг|гётеборг|malmo|malmö|мальме|мальмё|uppsala|уппсала|lund|линчепинг|linköping")],
+  ["SE", word("sweden|sverige|швеція|швеция|stockholm|стокгольм|gothenburg|göteborg|goteborg|гетеборг|гётеборг|malmo|malmö|мальме|мальмё|uppsala|уппсала|lund|linkoping|linköping|линчепинг|norrkoping|norrköping|норрчепінг|vasteras|västerås|orebro|örebro|helsingborg|jonkoping|jönköping|umea|umeå|vaxjo|växjö|sundsvall")],
   ["NO", word("norway|norge|норвегія|норвегия|oslo|осло|bergen|берген|trondheim|тронгейм|stavanger|ставангер|tromso|tromsø")],
   ["DK", word("denmark|danmark|данія|дания|copenhagen|københavn|kobenhavn|копенгаген|aarhus|århus|орхус|odense|оденсе|aalborg|ольборг")],
   ["FI", word("finland|suomi|фінляндія|финляндия|helsinki|гельсінкі|хельсинки|espoo|еспоо|tampere|тампере|turku|турку|oulu|оулу|vantaa")],

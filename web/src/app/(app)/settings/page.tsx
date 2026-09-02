@@ -41,7 +41,7 @@ export default async function Settings({ searchParams }: { searchParams: Promise
       {/* Друге місце, де це видно: сюди людина заходить міняти годину
           доставки — і саме тут має дізнатись, що доставки поки не буде
           взагалі, бо каналу немає. */}
-      {!user.telegramChatId && <NoTelegramNote locale={locale} />}
+      {!user.telegramChatId && <NoTelegramNote locale={locale} userId={user.id} />}
 
       <form action={saveSettings}>
         <div className="ruled card">

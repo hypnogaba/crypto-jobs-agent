@@ -377,6 +377,17 @@ const P = {
     fr: "Bien reçu. Merci — c'est comme ça que ça s'améliore.",
     ru: "Принял. Спасибо — именно так оно и становится лучше.",
   },
+  /**
+   * Кабінет існує з першого дня, і жодне повідомлення про нього не казало.
+   * Людина, підключена до бота, не знала, що на сайті лежить її історія,
+   * анкета й пауза — тож і не поверталась туди ніколи.
+   */
+  cabinet: {
+    en: "You also have a cabinet on the site: the history of every batch, your profile, the delivery hour and a pause button. One-time link, 15 minutes:",
+    uk: "У тебе є ще й кабінет на сайті: історія всіх добірок, анкета, година доставки й пауза. Разове посилання, 15 хвилин:",
+    fr: "Vous avez aussi un espace sur le site : l'historique de chaque sélection, votre profil, l'heure d'envoi et une pause. Lien à usage unique, 15 minutes :",
+    ru: "У тебя есть ещё и кабинет на сайте: история всех подборок, анкета, час доставки и пауза. Разовая ссылка, 15 минут:",
+  },
   siteLink: {
     en: "One-time sign-in link, valid for 15 minutes:",
     uk: "Разове посилання для входу, дійсне 15 хвилин:",

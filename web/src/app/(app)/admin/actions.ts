@@ -16,7 +16,7 @@ import { requireAdmin } from "@/lib/auth";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { all, one, run } from "@/lib/db";
 import { safeJobUrl } from "@/lib/safe-url";
-import { deriveCountry } from "@/lib/geo";
+import { deriveCountries } from "@/lib/geo";
 import { INTAKE_LIMIT, atsApi, atsListInPage, boardName, classify, countJobs, diagnose,
          diagnoseHttp, feedInPage, getroIdInPage, jobPostingCount, labelOf, nextPayloadJobs, tidy,
          type Provider } from "@/lib/source-link";
@@ -643,7 +643,11 @@ export async function recountCountries(): Promise<void> {
     "SELECT user_id, location, country FROM profiles WHERE location IS NOT NULL AND location <> ''");
 
   for (const r of rows) {
-    const next = deriveCountry(r.location);
+    // Кома-список, точно як у `persistDerived`. Тут стояв `deriveCountry`,
+    // який віддає ОДНУ країну, — тобто кнопка «перерахувати» перетворювала
+    // «CZ,AT,HU,SK» на «CZ» і мовчки звужувала людині географію до першої
+    // з чотирьох названих нею країн.
+    const next = deriveCountries(r.location).join(",") || null;
     // Пишемо лише зміну: зайвий UPDATE на кожен профіль нічого не дає.
     if (next !== r.country) {
       await run("UPDATE profiles SET country=? WHERE user_id=?", next, r.user_id);

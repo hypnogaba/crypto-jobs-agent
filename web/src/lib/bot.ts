@@ -1358,6 +1358,24 @@ export async function continueBotOnboarding(
   }
 }
 
+/**
+ * Разове посилання в кабінет.
+ *
+ * Було всередині /site, а потрібне ще в одному місці: одразу після
+ * прив'язки. Кабінет існує з першого дня, і жоден рядок бота про нього не
+ * казав — тому людина, яка зареєструвалась через бота, не знала, що на сайті
+ * лежить її історія, анкета, година доставки й пауза.
+ */
+export async function sendSiteLink(
+  env: Env, chatId: number, userId: string, locale: Locale, intro: "siteLink" | "cabinet" = "siteLink",
+): Promise<void> {
+  const token = crypto.randomUUID().replace(/-/g, "");
+  await run("UPDATE users SET connect_token=?, connect_expires_at=? WHERE id=?",
+    token, new Date(Date.now() + 15 * 60_000).toISOString(), userId);
+  const base = env.SITE_URL ?? "https://nextrole.info";
+  await send(env, chatId, `${say(intro, locale)}\n${base}/enter?token=${token}`);
+}
+
 export async function handleCommand(
   env: Env, chatId: number, text: string, locale: Locale = "en"
 ): Promise<void> {
@@ -1438,14 +1456,9 @@ export async function handleCommand(
       break;
     }
 
-    case "/site": {
-      const token = crypto.randomUUID().replace(/-/g, "");
-      await run("UPDATE users SET connect_token=?, connect_expires_at=? WHERE id=?",
-        token, new Date(Date.now() + 15 * 60_000).toISOString(), user!.id);
-      const base = env.SITE_URL ?? "https://nextrole.info";
-      await send(env, chatId, `${say("siteLink", locale)}\n${base}/enter?token=${token}`);
+    case "/site":
+      await sendSiteLink(env, chatId, user!.id, locale);
       break;
-    }
 
     // Відгук просто в чаті: людина живе тут, а не на сайті.
     case "/feedback":

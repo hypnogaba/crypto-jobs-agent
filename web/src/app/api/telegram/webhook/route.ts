@@ -4,8 +4,10 @@ import { one, run } from "@/lib/db";
 import { WEBHOOK_401_LIMITS, checkRate, recordFailure } from "@/lib/ratelimit";
 import { handleCommand, startBotOnboarding, continueBotOnboarding,
          handleOnboardingButton, handleOnboardingText, handleWhyButton, handleLevelCapButton, handleUndoButton, handleDocument,
-         handleDeleteButton, handleEditButton, handleFirstButton, handleLangButton, handleStartButton, sendFirstOffer } from "@/lib/bot";
+         handleDeleteButton, handleEditButton, handleFirstButton, handleLangButton, handleStartButton, sendFirstOffer,
+         sendSiteLink } from "@/lib/bot";
 import { freeTextAction } from "@/lib/bot-onboarding";
+import { claimPending } from "@/lib/pending";
 import { isLocale } from "@/lib/i18n";
 import { CV_MAX_BYTES } from "@/lib/cv";
 import type { Locale } from "@/lib/vocab";
@@ -141,6 +143,27 @@ async function handle(env: Env, raw: unknown): Promise<void> {
   if (startToken) {
     const user = await one<{ id: string; connect_expires_at: string | null }>(
       "SELECT id,connect_expires_at FROM users WHERE connect_token=?", startToken);
+
+    /**
+     * Анкета з сайту, у якої ще немає акаунта.
+     *
+     * Це головний шлях реєстрації з сайту, відколи акаунт народжується саме
+     * тут. Підтвердження кнопкою тут НЕ питаємо: воно захищає від прив'язки
+     * чужого наявного акаунта, а тут прив'язувати нічого — акаунт з'явиться
+     * рівно від цього дотику.
+     */
+    if (!user) {
+      const claimed = await claimPending(startToken, String(chatId));
+      if (claimed) {
+        // Мова анкети, а не мова Telegram: людина щойно писала про себе на
+        // сайті саме нею, і бот має відповісти тією ж.
+        const mine = isLocale(claimed.locale) ? claimed.locale : locale;
+        await send(env, chatId, botCopy("linked", mine));
+        await sendSiteLink(env, chatId, claimed.userId, mine, "cabinet");
+        await sendFirstOffer(env, chatId, claimed.userId, mine);
+        return;
+      }
+    }
 
     const fresh = user?.connect_expires_at && new Date(user.connect_expires_at).getTime() > Date.now();
     if (!user || !fresh) {
@@ -347,6 +370,12 @@ async function bindChat(
     `UPDATE users SET telegram_chat_id=?, connect_token=NULL, connect_expires_at=NULL,
        last_interaction_at=datetime('now') WHERE id=?`,
     String(chatId), user.id);
+  // Акаунт міг лежати на паузі саме через відсутність Telegram — тепер
+  // причина зникла. Ручної паузи («/pause») це не скасовує: там людина
+  // вирішила сама, і прив'язка чату не є скасуванням її рішення.
+  await run(
+    `UPDATE users SET status='active', paused_reason=NULL, paused_at=NULL
+      WHERE id=? AND paused_reason='no_telegram'`, user.id);
   await send(env, chatId, botCopy("linked", locale));
   await sendFirstOffer(env, chatId, user.id, locale);
 }

@@ -189,3 +189,21 @@ describe("countryFromLocation — розширений словник", () => {
     expect(countryFromLocation("")).toBeNull();
   });
 });
+
+describe("міста, яких бракувало живим профілям", () => {
+  // Обидва рядки лежали в базі 02.09 і давали порожню країну, тобто людина
+  // не отримувала ні місцевих вакансій, ні національних дощок.
+  it("Херсон — це Україна", () => {
+    expect(countryFromLocation("Kherson")).toBe("UA");
+    expect(countryFromLocation("Херсон")).toBe("UA");
+  });
+  it("Норрчепінг — це Швеція", () => {
+    expect(countryFromLocation("Norrkoping")).toBe("SE");
+    expect(countryFromLocation("Norrköping")).toBe("SE");
+  });
+  it("решта обласних центрів теж", () => {
+    for (const city of ["Миколаїв", "Чернігів", "Ужгород", "Кривий Ріг", "Запоріжжя"]) {
+      expect(countryFromLocation(city)).toBe("UA");
+    }
+  });
+});

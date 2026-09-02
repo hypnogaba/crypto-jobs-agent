@@ -13,6 +13,7 @@
 import { loadConfig } from "./config.js";
 import { D1Client } from "./d1.js";
 import { affected, notifyOwner } from "./notify.js";
+import { retireUnreachable } from "./orphans.js";
 import { countriesOf, explainWithClaude, hasSearchSignal, meaningfulRoleWords, pickTop, roleText, roleWords,
          type CandidateJob, type Profile } from "./match.js";
 import { asLocale, formatWhen, nextDelivery, salaryLine, say, thin, type Locale } from "./digest-copy.js";
@@ -1132,6 +1133,11 @@ async function main(): Promise<void> {
   )).map((r) => r.user_id));
   if (requested.size > 0) console.log(`Запитів «ще»: ${requested.size}`);
   if (requestsOnly && requested.size === 0) return;
+
+  // Акаунти без Telegram: пауза, а через п'ятнадцять днів — видалення.
+  // Стоїть перед вибором адресатів навмисно: поставлені на паузу цим
+  // кроком уже не потраплять у розсилку цього ж прогону.
+  await retireUnreachable(d1, now);
 
   const where = ["u.status = 'active'"];
   const params: unknown[] = [];

@@ -174,7 +174,7 @@ export default async function Dashboard(
       {/* Стоїть над списком, а не лише в порожньому стані: людина з добіркою
           на екрані впевнена, що все гаразд, — а насправді її акаунт тримає
           сама лише кука цього браузера. */}
-      {!user.telegramChatId && <NoTelegramNote locale={locale} />}
+      {!user.telegramChatId && <NoTelegramNote locale={locale} userId={user.id} />}
 
       {/* Посилання, а не форма: порядок має лишатись в адресі, щоб його можна
           було зберегти в закладках і щоб «назад» повертало попередній вид. */}
