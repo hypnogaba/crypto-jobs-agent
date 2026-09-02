@@ -1,4 +1,5 @@
-import type { D1Client } from "./d1.js";
+import { loadConfig } from "./config.js";
+import { D1Client } from "./d1.js";
 
 /**
  * Числа для публічних сторінок, пораховані один раз на скан.
@@ -93,3 +94,19 @@ export async function refreshSiteStats(d1: D1Client): Promise<void> {
       [key, value]);
   }
 }
+
+/**
+ * Запуск руками: `node dist/site-stats.js`.
+ *
+ * Потрібен рівно двічі в житті: одразу після викочування, щоб сторінки не
+ * стояли порожні до першого нічного скану, і коли щось пішло не так і числа
+ * треба перерахувати негайно.
+ */
+async function main(): Promise<void> {
+  const cfg = loadConfig();
+  const d1 = new D1Client({ accountId: cfg.cfAccountId, databaseId: cfg.cfDatabaseId, token: cfg.cfApiToken });
+  await refreshSiteStats(d1);
+  console.log("Числа для сайту оновлено.");
+}
+
+if (process.argv[1]?.endsWith("site-stats.js")) await main();
