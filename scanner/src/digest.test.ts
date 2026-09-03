@@ -398,7 +398,7 @@ const user = (o: Partial<UserRow> = {}): UserRow => ({
 const ctxOf = (d1: unknown, o: Partial<RunContext> = {}): RunContext => ({
   d1: d1 as RunContext["d1"], cfg: { anthropicApiKey: null } as RunContext["cfg"],
   now: new Date("2026-08-28T10:05:00Z"), // п'ятниця, 12:05 у Парижі — година 9 вже минула
-  botToken: "tok", force: false, requested: new Set(), delivered: 0, ...o });
+  botToken: "tok", force: false, requested: new Set(), delivered: 0, modelFails: [], ...o });
 
 const pendingRows = [
   [/status='pending'/, [{ digest_id: "dg-1", created_at: "2026-08-28 09:00:00" }]],
@@ -1083,5 +1083,135 @@ describe("картка говорить мовою людини", () => {
     const text = formatDigest([j({ roleLine: null, summary: english })], "uk");
     expect(text).toContain("Berlin");
     expect(text).toContain("віддалено");
+  });
+});
+
+import { isPrepareTime, PREPARE_LEAD_HOURS } from "./digest.js";
+
+/**
+ * Добірка готується заздалегідь, а о дев'ятій лише надсилається.
+ *
+ * 03.09 виклик моделі впав рівно в мить доставки, і людина отримала п'ять
+ * карток із шаблонним рядком — назавжди, бо добірка йде раз на день. Якщо
+ * готувати за дві години, той самий збій коштує лише повтору: до її години
+ * лишається ще дві спроби, і жодна невдала не доходить до людини.
+ *
+ * Побічний виграш: о дев'ятій, коли доставка майже в усіх, зникає і виклик
+ * моделі, і важкий запит кандидатів — той самий пік, на якому вранці
+ * спіткнувся D1.
+ */
+describe("підготовка добірки заздалегідь", () => {
+  const at = (iso: string) => new Date(iso);
+
+  it("готуємо за дві години до її власної години", () => {
+    expect(PREPARE_LEAD_HOURS).toBe(2);
+    // 07:00 у Києві — це 04:00 UTC.
+    expect(isPrepareTime({ timezone: "Europe/Kyiv", delivery_hour: 9 }, at("2026-09-04T04:00:00Z")))
+      .toBe(true);
+  });
+
+  it("не готуємо ні раніше, ні пізніше", () => {
+    const u = { timezone: "Europe/Kyiv", delivery_hour: 9 };
+    expect(isPrepareTime(u, at("2026-09-04T03:00:00Z"))).toBe(false); // 06:00
+    expect(isPrepareTime(u, at("2026-09-04T05:00:00Z"))).toBe(false); // 08:00
+    expect(isPrepareTime(u, at("2026-09-04T06:00:00Z"))).toBe(false); // 09:00
+  });
+
+  /** Година доставки 1 означає підготовку о 23:00 попередньої доби. */
+  it("переходить через північ", () => {
+    expect(isPrepareTime({ timezone: "UTC", delivery_hour: 1 }, at("2026-09-04T23:00:00Z")))
+      .toBe(true);
+    expect(isPrepareTime({ timezone: "UTC", delivery_hour: 0 }, at("2026-09-04T22:00:00Z")))
+      .toBe(true);
+  });
+
+  it("рахує годину в поясі людини, а не в нашому", () => {
+    // 07:00 у Нью-Йорку — це 11:00 UTC.
+    expect(isPrepareTime({ timezone: "America/New_York", delivery_hour: 9 }, at("2026-09-04T11:00:00Z")))
+      .toBe(true);
+    expect(isPrepareTime({ timezone: "America/New_York", delivery_hour: 9 }, at("2026-09-04T04:00:00Z")))
+      .toBe(false);
+  });
+
+  it("невідомий пояс не ламає перевірку", () => {
+    expect(isPrepareTime({ timezone: "Marsландія", delivery_hour: 9 }, at("2026-09-04T07:00:00Z")))
+      .toBe(true);
+  });
+});
+
+describe("прогін підготовки", () => {
+  const candidates: Array<[RegExp, unknown[]]> = [
+    [/FROM jobs_cache j/, [{
+      id: "j1", company: "Acme", company_key: "acme", title: "Backend Engineer",
+      location: null, remote: 1, url: "https://acme.test/1", tags: '["engineering"]',
+      posted_at: "2026-09-04T06:00:00.000Z", salary_min: null, salary_max: null,
+      salary_currency: null, dedupe_key: "acme|backend", summary: "A job.",
+      source: "ashby:acme", country: null,
+    }]],
+  ];
+  // 05:05 UTC — 07:05 у Парижі, тобто дві години до дев'ятої. Четвер.
+  const atPrepare = new Date("2026-09-03T05:05:00Z");
+
+  it("збирає добірку й НЕ шле її", async () => {
+    const f = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const { d1, batched } = fakeD1(candidates);
+    const ctx = ctxOf(d1, { now: atPrepare });
+    await deliverTo(user(), ctx);
+
+    const insert = batched.find((b) => /INSERT OR IGNORE INTO sent/.test(b.sql));
+    expect(insert, "добірка мусить бути записана").toBeDefined();
+    expect(insert!.params[6], "і саме як pending").toBe("pending");
+    expect(ctx.delivered).toBe(0);
+    expect(f).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Головне правило раннього прогону. Записана добірка з шаблонним рядком
+   * лишилась би такою назавжди: вакансії потрапили б у sent, тобто вибули б
+   * з розгляду, і о її годині ми надіслали б саме їх.
+   */
+  it("модель мовчала — не пише НІЧОГО, лишаючи шанс наступній годині", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    // Ключ є, але API відмовляє: саме те, що сталося 03.09.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("nope", { status: 429 }));
+    const { d1, batched } = fakeD1(candidates);
+    const ctx = ctxOf(d1, {
+      now: atPrepare,
+      cfg: { anthropicApiKey: "k" } as RunContext["cfg"],
+    });
+    await deliverTo(user(), ctx);
+
+    expect(batched.some((b) => /INSERT OR IGNORE INTO sent/.test(b.sql)),
+      "нічого не записано, вакансії лишились у розгляді").toBe(false);
+    expect(ctx.delivered).toBe(0);
+  });
+
+  /**
+   * У годину доставки поводимось навпаки: шаблонний рядок краще за мовчання
+   * цілого дня, бо іншої спроби вже не буде.
+   */
+  it("у годину доставки мовчання моделі не спиняє добірку", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const f = vi.fn(async (url: string) => new Response(
+      String(url).includes("anthropic") ? "nope" : "{}",
+      { status: String(url).includes("anthropic") ? 429 : 200 }));
+    vi.spyOn(globalThis, "fetch").mockImplementation(f as never);
+    const { d1, batched } = fakeD1(candidates);
+    const ctx = ctxOf(d1, {
+      now: new Date("2026-09-03T07:05:00Z"), // 09:05 у Парижі
+      cfg: { anthropicApiKey: "k" } as RunContext["cfg"],
+    });
+    await deliverTo(user(), ctx);
+    expect(batched.some((b) => /INSERT OR IGNORE INTO sent/.test(b.sql))).toBe(true);
+    expect(ctx.delivered).toBe(1);
+  });
+
+  it("кабінетним заздалегідь не готуємо: запис і Є доставкою", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const { d1, batched } = fakeD1(candidates);
+    await deliverTo(user({ telegram_chat_id: null }), ctxOf(d1, { now: atPrepare }));
+    // О сьомій у них нічого не відбувається — їхня година дев'ята.
+    expect(batched.some((b) => /INSERT OR IGNORE INTO sent/.test(b.sql))).toBe(false);
   });
 });

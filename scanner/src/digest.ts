@@ -105,6 +105,39 @@ export function hadDigestToday(timezone: string, now: Date, createdAts: string[]
 }
 
 /**
+ * За скільки годин до доставки готуємо добірку.
+ *
+ * Дві, а не одна. Одна дала б лише один повтор, а щогодинний прогін ходить
+ * рівно раз на годину: збій о 07:05 виправлявся б о 08:05, і якби той теж
+ * не вдався, людина о 09:00 отримала б бідну добірку. Дві години дають три
+ * спроби на модель, і жодна невдала не доходить до людини.
+ *
+ * Більше двох не варто: вакансії застаріли б, а вигоди від четвертої спроби
+ * вже немає.
+ */
+export const PREPARE_LEAD_HOURS = 2;
+
+/**
+ * Чи пора ГОТУВАТИ добірку цій людині.
+ *
+ * 03.09 виклик моделі впав рівно в мить доставки, і людина отримала п'ять
+ * карток із шаблонним рядком. Виправити було нічим: добірка йде раз на день,
+ * і надіслане вже надіслане.
+ *
+ * Тепер підбір і доставка розведені в часі. О годині мінус дві добірка
+ * збирається й лягає в sent як `pending`; о її годині прогін лише надсилає
+ * готове — без моделі й без важкого запиту кандидатів. Це заразом знімає
+ * навантаження з дев'ятої години, коли доставка майже в усіх.
+ */
+export function isPrepareTime(
+  u: { timezone: string; delivery_hour: number }, now: Date
+): boolean {
+  // Через північ: година доставки 1 означає підготовку о 23:00 напередодні.
+  const want = (u.delivery_hour - PREPARE_LEAD_HOURS + 24) % 24;
+  return hourIn(u.timezone, now) === want;
+}
+
+/**
  * Чи пора слати планову добірку.
  *
  * Рівно в обрану годину — завжди, як і було. Пізніше того самого дня — лише
@@ -1123,6 +1156,14 @@ export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
     return;
   }
 
+  /**
+   * Чи це прогін підготовки: добірку збираємо, але не шлемо.
+   *
+   * Живе тут, а не всередині гілки розкладу, бо потрібен аж наприкінці —
+   * у місці, де ми або надсилаємо, або лишаємо `pending` до її години.
+   */
+  let prepareOnly = false;
+
   // Що вже було за останні дві доби: і для розкладу, і для денної стелі.
   const recent = await d1.query<{ created_at: string; sent_at: string | null; status: string }>(
     "SELECT created_at, sent_at, status FROM sent WHERE user_id=? AND created_at >= datetime('now','-2 day')", [u.id]);
@@ -1200,7 +1241,20 @@ export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
     const handled = await d1.query<{ handled_at: string }>(
       "SELECT handled_at FROM delivery_requests WHERE user_id=? AND handled_at >= datetime('now','-2 day')", [u.id]);
     if (scheduledServedToday(u.timezone, now, recent, handled.map((r) => r.handled_at))) return;
-    if (!isDue(u, now, hadDigestToday(u.timezone, now, recent.map((r) => r.created_at)))) return;
+    /**
+     * Година підготовки — теж привід зібрати добірку, просто без надсилання.
+     *
+     * Прапорець несемо далі: саме він вирішує, чи слати готове зараз, чи
+     * лишити його як `pending` до її власної години.
+     */
+    // Кабінетним не готуємо заздалегідь: у них запис у sent і Є появою
+    // добірки на сайті, тобто розводити підбір і доставку в часі нема чого —
+    // ранній запис просто пересунув би їм доставку на дві години раніше.
+    const preparing = !cabinetOnly && isPrepareTime(u, now)
+      && !hadDigestToday(u.timezone, now, recent.map((r) => r.created_at));
+    if (!preparing
+        && !isDue(u, now, hadDigestToday(u.timezone, now, recent.map((r) => r.created_at)))) return;
+    prepareOnly = preparing;
   }
 
   // Денна стеля стосується лише «ще п'ять»: планова ранкова добірка — одна
@@ -1300,8 +1354,26 @@ export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
   // локацію й теги. Витяг з тексту оголошення діставався за кілька рядків
   // нижче й ішов у картку окремим абзацом, повз модель. Тепер він — сировина
   // для обох рядків: саме з нього береться те одне речення про суть роботи.
+  const failsBefore = ctx.modelFails.length;
   const pitch = await pitchWithClaude(top, profile, cfg.anthropicApiKey, undefined,
     (u) => { if (!u.ok) ctx.modelFails.push(u.status); return logUsage(d1, "match_reason", u); }, locale, summaries);
+
+  /**
+   * Підготовка без моделі не записується взагалі.
+   *
+   * Це і є весь сенс раннього прогону. Записана добірка з шаблонним рядком
+   * лишилась би такою назавжди: вакансії потрапили б у sent, тобто вибули б
+   * з розгляду, і о її годині ми надіслали б саме їх. Не записавши нічого,
+   * ми лишаємо наступній годині повний шанс — і до її години таких шансів
+   * ще два.
+   *
+   * У годину доставки поводимось навпаки: краще шаблонний рядок, ніж мовчання
+   * цілого дня. Там ця гілка не спрацьовує.
+   */
+  if (prepareOnly && ctx.modelFails.length > failsBefore) {
+    console.log(`  ${u.id.slice(0, 8)}: модель мовчала на підготовці, спробую наступної години`);
+    return;
+  }
 
   // id рядка sent народжується тут, до форматування: він стоїть у посиланні
   // «Податися», тож має бути відомий раніше, ніж текст піде в Telegram.
@@ -1341,6 +1413,18 @@ export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
              bornSent ? "sent" : "pending", bornSent ? now.toISOString() : null,
              dedupeById.get(j.id) ?? null, j.score ?? null],
   })));
+
+  /**
+   * Підготовка закінчується тут: добірка лежить у sent як `pending`.
+   *
+   * О її годині прогін знайде цей рядок гілкою «дотиснути непроставлене» й
+   * просто надішле готове — без моделі й без запиту кандидатів. Саме тому
+   * дев'ята година перестає бути піком навантаження.
+   */
+  if (prepareOnly) {
+    console.log(`  ${u.id.slice(0, 8)}: підготовано ${withWhy.length} на ${u.delivery_hour}:00`);
+    return;
+  }
 
   // Менше за п'ять через стелю — не «тонкий день», а «решта завтра».
   const capped = onRequest && allowance < DIGEST_SIZE;
