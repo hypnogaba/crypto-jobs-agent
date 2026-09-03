@@ -99,9 +99,9 @@ export default async function HomeBody({
     // приїжджали з бази, рядок був якийсь із п'яти й до вакансії не пасував —
     // менеджеру партнерств діставався бекенд і Go. Тепер обидві пари підібрані.
     { company: "Connecta Consulting", title: "International Partnerships Manager",
-      place: "Paris", salary: 4000, why: "tg.why4" },
+      place: "Paris", salary: 4000, role: "tg.role4", why: "tg.why4" },
     { company: "Everstar", title: "Senior Platform Engineer",
-      place: "Paris, Lyon", salary: 5700, why: "tg.why1" },
+      place: "Paris, Lyon", salary: 5700, role: "tg.role1", why: "tg.why1" },
   ];
 
   return (
@@ -320,6 +320,9 @@ export default async function HomeBody({
                           <b>{i + 1}</b> · <b>{j.company}</b> — {j.title}
                         </p>
                         <p className="tgmock-meta">{j.place} · {num(j.salary)} EUR</p>
+                        {/* Дві фрази, як у справжній картці: спершу що це за
+                            робота, потім чому вона саме цій людині. */}
+                        <p className="tgmock-role">{t(locale, j.role)}</p>
                         <p className="tgmock-why">
                           {t(locale, "dash.why")}: <i>{t(locale, j.why)}</i>
                         </p>

@@ -173,10 +173,11 @@ describe("describeError", () => {
 });
 
 describe("стеля 4096", () => {
-  const job = (i: number, summary: string, why = "why") => ({
+  // Другий аргумент — рядок про роль: саме він тепер відкриває картку.
+  const job = (i: number, roleLine: string, why = "why") => ({
     id: `j${i}`, company: `Company ${i}`, companyKey: `c${i}`, title: "Senior Engineer",
     location: "Paris", remote: true, url: `https://x.test/${i}`, tags: [], postedAt: null,
-    salaryMin: null, salaryCurrency: null, why, summary, sentId: `sent-${i}` });
+    salaryMin: null, salaryCurrency: null, why, roleLine, sentId: `sent-${i}` });
 
   it("clampSummary ріже по слову і ставить трикрапку", () => {
     expect(clampSummary("short")).toBe("short");
@@ -193,14 +194,14 @@ describe("стеля 4096", () => {
     expect(fitTelegram(text)).toBe(text);
   });
 
-  it("довше за 3900 — спершу зникають описи, потім хвіст", () => {
-    // Описи по 500 після clampSummary плюс довгі назви — п'ять карток не влазять у 3900.
+  it("довше за 3900 — спершу зникають рядки про роль, потім хвіст", () => {
+    // Рядки про роль плюс довгі назви — п'ять карток не влазять у 3900.
     const jobs = Array.from({ length: 5 }, (_, i) =>
       ({ ...job(i, "lorem ipsum ".repeat(200), "w".repeat(700)), title: "Senior Engineer ".repeat(25) }));
     const text = fitDigest(jobs, "en");
     expect(text.length).toBeLessThanOrEqual(DIGEST_MAX);
     expect(text).not.toContain("lorem ipsum");
-    expect(text).toContain("Why you: ");
+    expect(text).toContain("Why it's for you: ");
     // Без описів усе ще задовго (5 × 700 «чому ти») — карток стає менше, але
     // жоден тег не розірваний.
     expect(text.match(/<a /g)!.length).toBeLessThan(5);
@@ -728,5 +729,92 @@ describe("hideRow", () => {
   it("під добіркою немає ряду з номерами: він читався як оцінка", () => {
     expect(hideRow(["a1", "b2", "c3"], "uk")).toEqual([]);
     expect(hideRow([], "uk")).toEqual([]);
+  });
+});
+
+// ── Тіло картки: рядок про роль і рядок про людину ────────────
+import { tidyCompany, tidyLocation } from "./digest.js";
+
+describe("тіло картки", () => {
+  const card = (o: object = {}) => ({
+    id: "j1", company: "Acme", companyKey: "acme", title: "Partnerships Manager",
+    location: "Paris", remote: true, url: "https://x.test/1", tags: [], postedAt: null,
+    salaryMin: null, salaryCurrency: null, sentId: "s1",
+    why: "це твоя сфера", roleLine: "Вести партнерства з протоколами.", ...o });
+
+  /**
+   * Обидва рядки разом — у цьому й уся зміна. Досі картка показувала або
+   * витяг з оголошення, або «чому ти», і в одній добірці стояли обидва
+   * різновиди: три картки з абзацом переказу, дві з фразою про профіль.
+   */
+  it("показує спершу роль, потім «Чому тобі»", () => {
+    const text = formatDigest([card()], "uk");
+    expect(text).toContain("Вести партнерства з протоколами.");
+    expect(text).toContain("Чому тобі: це твоя сфера");
+    expect(text.indexOf("Вести партнерства")).toBeLessThan(text.indexOf("Чому тобі"));
+  });
+
+  it("без рядка про роль картка все одно ціла", () => {
+    const text = formatDigest([card({ roleLine: null })], "uk");
+    expect(text).toContain("Чому тобі: це твоя сфера");
+    expect(text).toContain("Податися");
+  });
+
+  it("підпис перекладений", () => {
+    expect(formatDigest([card()], "fr")).toContain("Pourquoi c'est pour vous:");
+    expect(formatDigest([card()], "ru")).toContain("Почему тебе:");
+    expect(formatDigest([card()], "en")).toContain("Why it's for you:");
+  });
+
+  /**
+   * JobStash кладе в location весь текст оголошення. Такий рядок ішов у
+   * картку цілим англійським абзацом під українським заголовком.
+   */
+  it("абзац замість локації в картку не потрапляє", () => {
+    const dump = "REMOTE (US/Canada/Brazil/Poland/UK/India) Full-time AI Risk Decisioning platform that helps organizations manage onboarding, fraud, credit and compliance risks";
+    const text = formatDigest([card({ location: dump })], "uk");
+    expect(text).not.toContain("Decisioning");
+    expect(text).toContain("віддалено");
+  });
+
+  it("домен у назві компанії не стає посиланням", () => {
+    expect(formatDigest([card({ company: "Oscilar.com" })], "uk")).toContain("<b>Oscilar</b>");
+  });
+});
+
+describe("tidyLocation", () => {
+  it("короткі локації лишає як є", () => {
+    expect(tidyLocation("Warsaw, Poland")).toBe("Warsaw, Poland");
+    expect(tidyLocation("  Remote - United States ")).toBe("Remote - United States");
+  });
+  it("з абзацу бере перше речення, а без нього — нічого", () => {
+    expect(tidyLocation("Berlin, Germany. " + "x".repeat(200))).toBe("Berlin, Germany.");
+    expect(tidyLocation("y".repeat(200))).toBeNull();
+  });
+  it("зрізає хвіст пунктуації", () => {
+    expect(tidyLocation("Belgrade, Serbia;")).toBe("Belgrade, Serbia");
+    expect(tidyLocation("Paris -")).toBe("Paris");
+  });
+  it("порожнє — це null, а не порожній рядок", () => {
+    expect(tidyLocation("   ")).toBeNull();
+    expect(tidyLocation(null)).toBeNull();
+  });
+});
+
+describe("tidyCompany", () => {
+  it("знімає доменний хвіст", () => {
+    expect(tidyCompany("Oscilar.com")).toBe("Oscilar");
+    expect(tidyCompany("helius.dev")).toBe("Helius");
+    // Незнайомий домен лишається як є, але з великої: це все ще назва.
+    expect(tidyCompany("jito.network")).toBe("Jito.network");
+  });
+  it("ключ з адреси пишеться з великої", () => {
+    expect(tidyCompany("jetbrains")).toBe("Jetbrains");
+    expect(tidyCompany("hellofresh")).toBe("Hellofresh");
+  });
+  it("звичайні назви не чіпає", () => {
+    for (const name of ["Acme Inc.", "A&B Labs", "Ledger", "Monad Foundation", "Café Corp", "iExec"]) {
+      expect(tidyCompany(name)).toBe(name);
+    }
   });
 });

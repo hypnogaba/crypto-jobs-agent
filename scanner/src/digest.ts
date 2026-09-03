@@ -15,14 +15,14 @@ import { D1Client } from "./d1.js";
 import { affected, notifyOwner } from "./notify.js";
 import { retireUnreachable } from "./orphans.js";
 import { mapLimit } from "./http.js";
-import { countriesOf, explainWithClaude, hasSearchSignal, meaningfulRoleWords, pickTop, roleText, roleWords,
+import { countriesOf, hasSearchSignal, meaningfulRoleWords, pickTop, pitchWithClaude, roleText, roleWords,
          type CandidateJob, type Profile } from "./match.js";
 import { asLocale, formatWhen, nextDelivery, salaryLine, say, thin, type Locale } from "./digest-copy.js";
 import { summarize } from "./summary.js";
 import { costUsd } from "./pricing.js";
 import { extractSalary, type Salary } from "./salary.js";
 import { plausibleSalary } from "./money.js";
-import { applyTranslations, d1Store, translateJobs } from "./translate.js";
+import { cachedRoleLines, d1Store, saveRoleLines } from "./roleline.js";
 
 const DIGEST_SIZE = 5;
 
@@ -292,6 +292,14 @@ export const DIGEST_MAX = 3900;
  */
 const SUMMARY_MAX = 500;
 
+/**
+ * Скільки символів на рядок про роль.
+ *
+ * Промпт просить до 90, але просити — не гарантувати, а два речення тут
+ * зайві: далі йде «чому тобі», і разом вони мають читатись за десять секунд.
+ */
+export const ROLE_LINE_MAX = 160;
+
 export function clampSummary(s: string | null | undefined, max = SUMMARY_MAX): string | null {
   if (!s) return null;
   if (s.length <= max) return s;
@@ -321,6 +329,11 @@ export function stripHtml(s: string): string {
 
 export type DigestJob = CandidateJob & {
   why: string; summary?: string | null;
+  /**
+   * Одне речення про суть роботи мовою людини — те, що модель написала
+   * разом із «чому ти». Порожньо — картка починається одразу з «чому тобі».
+   */
+  roleLine?: string | null;
   /** id рядка sent — саме він стоїть у посиланні «Податися». */
   sentId: string;
   /**
@@ -348,6 +361,50 @@ export interface FormatOptions {
 }
 
 /**
+ * Локація, якою її можна показати.
+ *
+ * Дошки на кшталт JobStash віддають у полі location весь текст оголошення:
+ * «REMOTE (US/Canada/Brazil/Poland/UK/India) Full-time AI Risk Decisioning™
+ * platform that helps organizations manage onboarding, fraud, credit…» —
+ * і це йшло в картку цілим абзацом англійською, під українським заголовком.
+ * У кеші таких рядків близько півтори сотні.
+ *
+ * Правило просте: локація — це кілька слів. Довше — беремо перше речення, а
+ * як і воно завелике, то краще без локації взагалі: поруч є ознака
+ * «віддалено», і вона не бреше.
+ */
+export function tidyLocation(raw: string | null | undefined): string | null {
+  // Хвіст пунктуації йде разом із довжиною: Greenhouse віддає «Belgrade,
+  // Serbia;» зі списку, і крапка з комою в картці виглядає як обрив рядка.
+  const s = (raw ?? "").replace(/\s+/g, " ").trim().replace(/[;,·|\-\s]+$/, "");
+  if (!s) return null;
+  if (s.length <= LOCATION_MAX) return s;
+  const head = s.split(/(?<=[.;!?])\s/)[0]!.trim().replace(/[;,]$/, "");
+  return head.length > 0 && head.length <= LOCATION_MAX ? head : null;
+}
+
+/** Скільки символів локації ще схожі на локацію, а не на абзац. */
+const LOCATION_MAX = 60;
+
+/**
+ * Назва компанії без доменного хвоста: «Oscilar.com» → «Oscilar».
+ *
+ * Джерела з твіттера й агрегаторів кладуть у поле компанії домен. Telegram
+ * бачить у ньому адресу і сам робить із назви компанії посилання — на сайт,
+ * якого ми не перевіряли й не мали наміру рекомендувати. Посилання в картці
+ * рівно одне, і веде воно через наш «Податися».
+ */
+export function tidyCompany(name: string): string {
+  const raw = name.trim();
+  const m = /^([\p{L}\d][\p{L}\d&'-]{1,30})\.(?:com|io|net|org|xyz|ai|co|app|info|dev|finance|tech)$/iu.exec(raw);
+  const stem = m ? m[1]! : raw;
+  // Частина джерел віддає назву ключем з адреси: «jetbrains», «hellofresh».
+  // Велика літера не поверне справжнє написання (HelloFresh), але рядок
+  // перестає читатись як технічний ідентифікатор.
+  return /\p{Lu}/u.test(stem) ? stem : stem.charAt(0).toUpperCase() + stem.slice(1);
+}
+
+/**
  * Яке привітання пасує годині.
  *
  * Межі навмисно широкі: «ранок» до одинадцятої накриває планову добірку в
@@ -370,15 +427,16 @@ export function formatDigest(
     if (i > 0) { lines.push("─────────────"); lines.push(""); }
 
     // Компанія окремим рядком: очі шукають саме її, а не назву посади.
-    lines.push(`${i + 1}. <b>${escapeHtml(j.company)}</b>`);
+    lines.push(`${i + 1}. <b>${escapeHtml(tidyCompany(j.company))}</b>`);
     lines.push(escapeHtml(j.title));
 
     // Другий рядок збираємо лише з того, що справді відоме. «Вилку не вказано»
     // п'ять разів поспіль — це не інформація, а шум: у першій справжній
     // добірці так було в усіх п'яти вакансіях.
+    const where = tidyLocation(j.location);
     const facts = [
-      j.location ?? (j.remote ? say(locale, "remote") : null),
-      j.remote && j.location ? say(locale, "remote") : null,
+      where ?? (j.remote ? say(locale, "remote") : null),
+      j.remote && where ? say(locale, "remote") : null,
       // Відсотка збігу тут більше немає.
       //
       // Він відповідав на питання, якого людина не ставила. Їй потрібно
@@ -397,12 +455,19 @@ export function formatDigest(
     if (facts.length) lines.push(escapeHtml(facts.join(" · ")));
 
     lines.push("");
-    // Опис самої вакансії. Рядок «чому ти» був однаковий на всі п'ять
-    // позицій, бо будувався з профілю, а профіль один. Старі добірки
-    // опису не мають — для них лишається попередній рядок.
-    const summary = withSummaries ? clampSummary(j.summary) : null;
-    if (summary) lines.push(escapeHtml(summary));
-    else lines.push(`${escapeHtml(say(locale, "why"))}: ${escapeHtml(j.why)}`);
+    // Спершу одне речення про саму роботу, потім — чому вона цій людині.
+    //
+    // Досі тут стояв або витяг з оголошення, або рядок «чому ти», але
+    // ніколи обидва. Виходило дві різні картки в одній добірці: у трьох
+    // абзац переказу вакансії, у двох — фраза про профіль. Гірше, витяг
+    // жив мовою оголошення, тож українська добірка мала англійські абзаци.
+    //
+    // Тепер обидва рядки пише модель мовою людини: перший каже, що це за
+    // робота, другий — навіщо вона саме їй. Опису бракує (стара добірка,
+    // модель без ключа) — лишається сам «чому тобі», і картка все ще ціла.
+    const role = withSummaries ? clampSummary(j.roleLine, ROLE_LINE_MAX) : null;
+    if (role) { lines.push(escapeHtml(role)); lines.push(""); }
+    lines.push(`${escapeHtml(say(locale, "why"))}: ${escapeHtml(j.why)}`);
     lines.push("");
     // Посилання веде через сайт: один клік і відкриває роботодавця, і лишає
     // слід «подався» у кабінеті. Тому в href — id рядка sent, а не URL.
@@ -444,18 +509,18 @@ export function fitDigest(
 }
 
 /**
- * Картки мовою людини: назва й опис — перекладені, компанія — ні.
+ * Рядок про роль мовою людини, зі спільного кеша.
  *
- * Без ANTHROPIC_API_KEY або для англійської повертає ті самі об'єкти:
- * поведінка байт у байт як до появи перекладу. Збій — оригінал.
+ * Потрібен там, де моделі не питали: відкладена добірка з бази знає лише
+ * `why_fits`, а речення про роль лежить у job_i18n, куди його поклала та
+ * добірка, для якої його й написали. Кеш порожній — картка йде без нього.
  */
-export async function localizeJobs(jobs: DigestJob[], locale: Locale, ctx: RunContext): Promise<DigestJob[]> {
-  if (locale === "en" || !ctx.cfg.anthropicApiKey) return jobs;
-  const tr = await translateJobs(
-    jobs.map((j) => ({ id: j.id, title: j.title, summary: j.summary ?? null })),
-    locale, ctx.cfg.anthropicApiKey, d1Store(ctx.d1),
-    { onUsage: (u) => { if (!u.ok) ctx.modelFails++; return logUsage(ctx.d1, "translate", u); } });
-  return applyTranslations(jobs, tr);
+export async function withRoleLines(jobs: DigestJob[], locale: Locale, ctx: RunContext): Promise<DigestJob[]> {
+  const need = jobs.filter((j) => !j.roleLine && j.id).map((j) => j.id);
+  if (need.length === 0) return jobs;
+  const cached = await cachedRoleLines(need, locale, d1Store(ctx.d1));
+  if (cached.size === 0) return jobs;
+  return jobs.map((j) => (j.roleLine ? j : { ...j, roleLine: cached.get(j.id) ?? null }));
 }
 
 /** Облік викликів моделі. Не має права зламати доставку: впав запис — добірка все одно йде. */
@@ -970,7 +1035,7 @@ export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
       why: r.why_fits, summary: r.summary }));
     const sent = await sendTelegram(
       botToken!, u.telegram_chat_id!,
-      fitDigest(await localizeJobs(retry, locale, ctx), locale, DIGEST_MAX,
+      fitDigest(await withRoleLines(retry, locale, ctx), locale, DIGEST_MAX,
         { hour: hourIn(u.timezone, now) }),
       digestId, locale, fetch, retry.map((j) => j.sentId).filter((x): x is string => Boolean(x)));
     if (sent.ok) {
@@ -1069,8 +1134,6 @@ export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
     return;
   }
 
-  const why = await explainWithClaude(top, profile, cfg.anthropicApiKey, undefined,
-    (u) => { if (!u.ok) ctx.modelFails++; return logUsage(d1, "match_reason", u); }, locale);
   const digestId = crypto.randomUUID();
 
   // Вилка з повного тексту — лише для тих, у кого її ще немає: повний текст
@@ -1099,17 +1162,33 @@ export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
     })));
   }
 
+  // Текст картки — ПІСЛЯ витягу з оголошення, не до нього.
+  //
+  // Раніше модель писала «чому ти» першою дією, тобто бачила лише назву,
+  // локацію й теги. Витяг з тексту оголошення діставався за кілька рядків
+  // нижче й ішов у картку окремим абзацом, повз модель. Тепер він — сировина
+  // для обох рядків: саме з нього береться те одне речення про суть роботи.
+  const pitch = await pitchWithClaude(top, profile, cfg.anthropicApiKey, undefined,
+    (u) => { if (!u.ok) ctx.modelFails++; return logUsage(d1, "match_reason", u); }, locale, summaries);
+
   // id рядка sent народжується тут, до форматування: він стоїть у посиланні
   // «Податися», тож має бути відомий раніше, ніж текст піде в Telegram.
   const withWhy = top.map((j, i) => {
     const sal = j.salaryMin == null && j.salaryMax == null ? salaries.get(j.id) : undefined;
     return {
-      ...j, why: why[i]!, summary: summaries.get(j.id) ?? j.summary ?? null,
+      ...j, why: pitch[i]!.why, roleLine: pitch[i]!.role,
+      summary: summaries.get(j.id) ?? j.summary ?? null,
       salaryMin: sal?.min ?? j.salaryMin, salaryMax: sal?.max ?? j.salaryMax,
       salaryCurrency: sal?.currency ?? j.salaryCurrency,
       sentId: crypto.randomUUID(),
     };
   });
+
+  // Рядок про роль — у спільний кеш: він залежить від вакансії та мови, а не
+  // від людини. Наступна людина з тією ж мовою і відкладена добірка цієї
+  // самої візьмуть його звідти, без другого запиту до моделі.
+  await saveRoleLines(
+    withWhy.map((j) => ({ id: j.id, title: j.title, role: j.roleLine })), locale, d1Store(d1));
 
   // Спершу pending, і лише після 200 OK від Telegram — sent. Раніше рядки
   // писались одразу як sent, і якщо процес падав між записом і відправкою,
@@ -1135,7 +1214,7 @@ export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
   const capped = onRequest && allowance < DIGEST_SIZE;
   // Година В ЛЮДИНИ, а не в нас: сервер стоїть у Європі, а вітаємось ми з
   // тим, у кого зараз може бути ранок або ніч.
-  const text = fitDigest(await localizeJobs(withWhy, locale, ctx), locale, DIGEST_MAX,
+  const text = fitDigest(await withRoleLines(withWhy, locale, ctx), locale, DIGEST_MAX,
     { capped, trialWhen, hour: hourIn(u.timezone, now) });
   if (botToken && u.telegram_chat_id) {
     // Номери кнопок «не цікавить» мусять збігатися з нумерацією в тексті,

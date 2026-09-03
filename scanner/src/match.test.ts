@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { customIndustryBonus, explainLocally, explainSystem, linksToAggregator, pickTop, reachable, scoreJob, wishBonus, type CandidateJob, type Profile } from "./match.js";
+import { customIndustryBonus, explainLocally, pitchSystem, linksToAggregator, pickTop, reachable, scoreJob, wishBonus, type CandidateJob, type Profile } from "./match.js";
 
 const p: Profile = {
   userId: "u1", spheres: ["partnerships", "devrel"], industries: ["web3"],
@@ -342,13 +342,14 @@ describe("побажання (wishes)", () => {
     expect(wished.score - plain.score).toBe(2);
     expect(scoreJob(job(), { ...p, wishes: "kubernetes" }).score).toBe(scoreJob(job(), p).score);
   });
-  it("системний промпт називає мову словом", () => {
-    expect(explainSystem("fr")).toContain("Answer in French");
-    expect(explainSystem("uk")).toContain("Answer in Ukrainian");
+  it("системний промпт називає мову словом і просить обидва рядки", () => {
+    expect(pitchSystem("fr")).toContain("Answer in French");
+    expect(pitchSystem("uk")).toContain("Answer in Ukrainian");
+    expect(pitchSystem("uk")).toContain('{"items":[{"n":1,"role":"...","why":"..."}]}');
   });
 });
 
-import { safeWhy } from "./match.js";
+import { contradicts, safeWhy } from "./match.js";
 
 describe("safeWhy — рядок від моделі перед показом людині", () => {
   it("пускає звичайне пояснення", () => {
@@ -383,7 +384,37 @@ describe("safeWhy — рядок від моделі перед показом �
     "Senior инженер, однако компания в healthcare, что не совпадает с предпочтением Web3.",
     "C'est un rôle senior en ingénierie, mais le secteur santé n'est pas ta spécialité Web3.",
     "Ton profil correspond, cependant la localisation ne correspond pas à tes attentes.",
-  ])("відкидає відмову замість поради: «%s»", (s) => expect(safeWhy(s)).toBeNull());
+  ])("прибирає відмову замість поради: «%s»", (s) => {
+    // Рядок або зникає цілком, або лишається самою підставою: застереження
+    // не має дійти до картки в жодному вигляді.
+    const out = safeWhy(s);
+    if (out === null) return;
+    expect(contradicts(out)).toBe(false);
+    expect(out).not.toMatch(/though|but |however|але|хоча|mais|cependant|однако|, но /i);
+  });
+
+  /**
+   * Заперечення перед іменником, а не перед дієсловом. Перший рядок —
+   * дослівно з добірки 03.09: бот сам надіслав вакансію і сам же підписав,
+   * що збігів у ній немає.
+   */
+  it.each([
+    "Немає очевидних збігів з профілем комуніті менеджера в Web3.",
+    "Немає прямих збігів із твоїм досвідом.",
+    "Нет очевидных совпадений с профилем.",
+    "No obvious match with your Web3 community profile.",
+    "No clear overlap with your stack.",
+    "Aucune correspondance évidente avec votre profil.",
+    "Pas de correspondance directe avec vos attentes.",
+  ])("відкидає «збігів немає»: «%s»", (s) => expect(safeWhy(s)).toBeNull());
+
+  /** І не чіпає рядки, де ті самі слова стоять у схвальному значенні. */
+  it.each([
+    "Твій стек збігається з тим, що вони шукають.",
+    "Це повний збіг: Solana, Rust і повністю віддалено.",
+    "Votre profil correspond exactement à ce poste.",
+    "A rare match: remote-first and your exact stack.",
+  ])("пускає збіг, названий збігом: «%s»", (s) => expect(safeWhy(s)).not.toBeNull());
 
   /**
    * Зворотний бік: перевірка не має зʼїдати звичайні схвальні рядки. Кожен
@@ -926,5 +957,154 @@ describe("роль тими самими словами, що й рекруте�
   it("синоніми не роблять роль ширшою за професію", () => {
     expect(matchesCustomRole("Account Manager", "programmer")).toBe(false);
     expect(matchesCustomRole("Community Manager", "designer")).toBe(false);
+  });
+});
+
+// ── Текст картки моделлю ──────────────────────────────────────
+import { pitchWithClaude } from "./match.js";
+import { afterEach, vi } from "vitest";
+
+const reply = (obj: unknown) => new Response(JSON.stringify({
+  content: [{ type: "text", text: JSON.stringify(obj) }],
+  usage: { input_tokens: 10, output_tokens: 20 },
+}), { status: 200 });
+
+describe("pitchWithClaude", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const top = () => pickTop([job()], p, 1);
+
+  it("без ключа — шаблонний «чому ти» і жодного рядка про роль", async () => {
+    const out = await pitchWithClaude(top(), p, null);
+    expect(out[0]!.role).toBeNull();
+    expect(out[0]!.why.length).toBeGreaterThan(5);
+  });
+
+  it("бере обидва рядки з відповіді", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(reply({
+      items: [{ n: 1, role: "Будувати партнерства з протоколами Solana.", why: "Це твоя сфера, і повністю віддалено." }],
+    })));
+    const out = await pitchWithClaude(top(), p, "key", undefined, undefined, "uk");
+    expect(out[0]!.role).toBe("Будувати партнерства з протоколами Solana.");
+    expect(out[0]!.why).toBe("Це твоя сфера, і повністю віддалено.");
+  });
+
+  /**
+   * Витяг з оголошення — сировина рядка про роль, тож він мусить дійти до
+   * моделі. Раніше текст діставався ПІСЛЯ виклику й у промпт не потрапляв
+   * узагалі: модель писала про вакансію, знаючи саму лише назву посади.
+   */
+  it("кладе витяг з оголошення в промпт", async () => {
+    const f = vi.fn().mockResolvedValue(reply({ items: [{ n: 1, role: "r", why: "w" }] }));
+    vi.stubGlobal("fetch", f);
+    await pitchWithClaude(top(), p, "key", undefined, undefined, "uk",
+      new Map([["j1", "You will own partner integrations across Solana."]]));
+    const body = JSON.parse(f.mock.calls[0]![1].body as string) as { messages: Array<{ content: string }> };
+    expect(body.messages[0]!.content).toContain("own partner integrations");
+  });
+
+  /**
+   * Відхилений «чому ти» не тягне за собою рядок про роль: той описує саму
+   * вакансію і шаблонному поясненню не суперечить.
+   */
+  it("відмову замість поради міняє на шаблон, рядок про роль лишає", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(reply({
+      items: [{ n: 1, role: "Вести партнерства.", why: "Немає очевидних збігів з профілем." }],
+    })));
+    const out = await pitchWithClaude(top(), p, "key", undefined, undefined, "uk");
+    expect(out[0]!.role).toBe("Вести партнерства.");
+    expect(out[0]!.why).not.toContain("Немає");
+    expect(out[0]!.why).toContain("Партнерства");
+  });
+
+  /**
+   * Модель повертає стільки об'єктів, скільки вважає за потрібне. На живому
+   * прогоні 03.09 на пʼять вакансій прийшло два, і то про першу й третю.
+   * За порядком у масиві текст про третю ліг би під другою карткою: людина
+   * читала б про одну роботу, а посилання відкривало б іншу.
+   */
+  it("неповна відповідь не зсуває картки: номер важить, а не місце", async () => {
+    const three = pickTop([job({ id: "j1", companyKey: "c1" }), job({ id: "j2", companyKey: "c2" }),
+                           job({ id: "j3", companyKey: "c3" })], p, 3);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(reply({
+      items: [{ n: 3, role: "Третя роль.", why: "Третя причина." }],
+    })));
+    const out = await pitchWithClaude(three, p, "key", undefined, undefined, "uk");
+    expect(out[2]!.role).toBe("Третя роль.");
+    expect(out[2]!.why).toBe("Третя причина.");
+    expect(out[0]!.role).toBeNull();
+    expect(out[1]!.role).toBeNull();
+  });
+
+  /** Номера немає — лишається порядок: гірше за номер, але краще за порожнечу. */
+  it("без номера падає назад на порядок", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(reply({
+      items: [{ role: "Роль.", why: "Причина." }],
+    })));
+    const out = await pitchWithClaude(top(), p, "key", undefined, undefined, "uk");
+    expect(out[0]!.role).toBe("Роль.");
+  });
+
+  it("збій, не-JSON і зайвий елемент — шаблон, а не порожня картка", async () => {
+    for (const f of [
+      vi.fn().mockRejectedValue(new Error("boom")),
+      vi.fn().mockResolvedValue(new Response("oops", { status: 500 })),
+      vi.fn().mockResolvedValue(new Response(JSON.stringify({ content: [{ type: "text", text: "not json" }] }), { status: 200 })),
+      vi.fn().mockResolvedValue(reply({ items: [] })),
+    ]) {
+      vi.stubGlobal("fetch", f);
+      const out = await pitchWithClaude(top(), p, "key", undefined, undefined, "uk");
+      expect(out).toHaveLength(1);
+      expect(out[0]!.why.length).toBeGreaterThan(5);
+      expect(out[0]!.role).toBeNull();
+    }
+  });
+
+  it("рахує токени навіть тоді, коли відповідь непридатна", async () => {
+    const seen: Array<{ ok: boolean }> = [];
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("nope", { status: 500 })));
+    await pitchWithClaude(top(), p, "key", undefined, (u) => { seen.push(u); }, "uk");
+    expect(seen[0]!.ok).toBe(false);
+  });
+});
+
+// ── Довге тире ────────────────────────────────────────────────
+import { noEmDash, safeRole } from "./match.js";
+
+describe("довге тире від моделі", () => {
+  it("міняється на кому й не лишає подвійних", () => {
+    expect(noEmDash("Це твоя сфера — і повністю віддалено.")).toBe("Це твоя сфера, і повністю віддалено.");
+    expect(noEmDash("A rare case—remote and your stack.")).toBe("A rare case, remote and your stack.");
+    expect(noEmDash("Сфера, — і віддалено")).toBe("Сфера, і віддалено");
+  });
+  it("коротке тире в діапазоні лишається", () => {
+    expect(noEmDash("вилка 120 000–150 000 USD")).toBe("вилка 120 000–150 000 USD");
+  });
+  it("рядок від моделі виходить уже без тире", () => {
+    expect(safeWhy("Твій стек — саме те, що просять.")).toBe("Твій стек, саме те, що просять.");
+    expect(safeRole("Вести партнерства — і рости в них.")).toBe("Вести партнерства, і рости в них.");
+  });
+});
+
+// ── Застереження, обрізане до підстави ────────────────────────
+import { trimCaveat } from "./match.js";
+
+describe("trimCaveat", () => {
+  it("лишає підставу, викидає застереження", () => {
+    expect(safeWhy("Web3 і крипта збігаються з твоєю індустрією, а Go і Rust потрібні тут, але роль інженера, а не комуніті менеджера."))
+      .toBe("Web3 і крипта збігаються з твоєю індустрією, а Go і Rust потрібні тут.");
+    expect(safeWhy("Your Web3 experience and remote-first setup line up here, though the level is different."))
+      .toBe("Your Web3 experience and remote-first setup line up here.");
+  });
+  it("уламок замість пояснення не показуємо", () => {
+    // До сполучника лишається 24 символи: це вже не пояснення.
+    expect(safeWhy("Remote робота, але це не комуніті менеджмент.")).toBeNull();
+    expect(trimCaveat("Гарна роль, але ні.")).toBeNull();
+  });
+  it("рядок без застереження не чіпає", () => {
+    expect(trimCaveat("Це твоя сфера, і повністю віддалено.")).toBeNull();
+    expect(safeWhy("Це твоя сфера, і повністю віддалено.")).toBe("Це твоя сфера, і повністю віддалено.");
+  });
+  it("голова, яка сама відмовляє, теж не проходить", () => {
+    expect(safeWhy("Немає очевидних збігів із профілем комуніті менеджера, хоча компанія у Web3.")).toBeNull();
   });
 });

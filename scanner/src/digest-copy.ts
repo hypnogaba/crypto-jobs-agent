@@ -44,8 +44,12 @@ const P = {
     fr: "Bonsoir. Regardez ce que j'ai trouvé pour vous.",
     ru: "Добрый вечер. Смотри, что я нашёл именно для тебя.",
   },
+  /**
+   * Підпис під рядком про роль. «Чому ти» був підписом до єдиного рядка
+   * картки; тепер їх два, і цей веде саме до другого — того, що про людину.
+   */
   why: {
-    en: "Why you", uk: "Чому ти", fr: "Pourquoi vous", ru: "Почему ты",
+    en: "Why it's for you", uk: "Чому тобі", fr: "Pourquoi c'est pour vous", ru: "Почему тебе",
   },
   noSalary: {
     en: "no range given", uk: "вилку не вказано",

@@ -438,16 +438,23 @@ export async function listMatches(sort: string | undefined = "day") {
   // з адреси, а тут «use server» — кожен експорт є відкритим ендпоінтом.
   const order = orderFor(sort);
 
+  // Рядок про роль береться з job_i18n мовою людини, а НЕ з j.summary.
+  //
+  // j.summary — це витяг із чужого оголошення, тобто майже завжди англійська.
+  // У кабінеті українця під українським заголовком стояв англійський абзац,
+  // рівно як і в добірці до 03.09. Мовою людини це саме речення пише модель
+  // разом із «чому тобі», і лежить воно в спільному кеші.
   return all<{ id: string; company: string; title: string; location: string | null; url: string;
-        why_fits: string; match_facts: string; summary: string | null;
+        why_fits: string; match_facts: string; role_line: string | null;
         salary_min: number | null; salary_currency: string | null;
         applied_at: string | null; hidden_at: string | null;
         created_at: string; digest_id: string; score: number | null }>(
     `SELECT s.id,j.company,j.title,j.location,j.url,s.why_fits,s.match_facts,
-            j.summary,j.salary_min,j.salary_currency,
+            i.summary AS role_line,j.salary_min,j.salary_currency,
             s.applied_at,s.hidden_at,s.created_at,s.digest_id,s.score
      FROM sent s JOIN jobs_cache j ON j.id = s.job_id
-     WHERE s.user_id=? ORDER BY ${order} LIMIT ${MATCH_LIMIT}`, user.id);
+     LEFT JOIN job_i18n i ON i.job_id = s.job_id AND i.locale = ?
+     WHERE s.user_id=? ORDER BY ${order} LIMIT ${MATCH_LIMIT}`, user.locale, user.id);
 }
 
 /**

@@ -12,6 +12,7 @@ import { factLabels, parseFacts } from "@/lib/facts";
 import { dayLabel, formatWhen, nextDelivery } from "@/lib/digest-time";
 import { zoneName } from "@/lib/tz";
 import { toLatin } from "@/lib/geo";
+import { tidyCompany, tidyLocation } from "@/lib/jobline";
 import type { Locale } from "@/lib/vocab";
 import { MATCH_SORTS, isMatchSort, type MatchSort } from "@/lib/match-sort";
 
@@ -29,9 +30,12 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 // Те саме, що на головній: локація з дошки лишається в базі як є, а на
-// англійському й французькому екрані показується латиницею.
-const place = (m: Match, locale: Locale): string | null =>
-  m.location && (locale === "en" || locale === "fr") ? toLatin(m.location) : m.location;
+// англійському й французькому екрані показується латиницею. Спершу чистка:
+// частина дощок кладе в це поле цілий текст оголошення.
+const place = (m: Match, locale: Locale): string | null => {
+  const loc = tidyLocation(m.location);
+  return loc && (locale === "en" || locale === "fr") ? toLatin(loc) : loc;
+};
 
 const money = (m: Match, locale: Locale): string | null =>
   m.salary_min
@@ -71,7 +75,7 @@ function MatchCard({ m, i, locale }: { m: Match; i: number; locale: Locale }) {
                         <div className="flex items-start justify-between gap-4">
                           <div className="min-w-0">
                             <h3 className="font-medium leading-snug">
-                              {m.company} <span style={{ color: "var(--muted)" }}>·</span> {m.title}
+                              {tidyCompany(m.company)} <span style={{ color: "var(--muted)" }}>·</span> {m.title}
                             </h3>
                             <p className="mono mt-1 text-xs" style={{ color: "var(--muted)" }}>
                               {[place(m, locale), money(m, locale)].filter(Boolean).join(" · ") || "—"}
@@ -89,15 +93,19 @@ function MatchCard({ m, i, locale }: { m: Match; i: number; locale: Locale }) {
                           )}
                         </div>
 
-                        {/* Опис самої вакансії. Раніше тут стояв переказ
-                            профілю, однаковий на всі п'ять позицій. Старі
-                            добірки опису не мають — для них лишається
-                            попередній рядок, але вже без зламаного підпису. */}
-                        {m.summary ? (
-                          <p className="mt-3 text-sm" style={{ color: "var(--ink-2)" }}>{m.summary}</p>
-                        ) : m.why_fits ? (
-                          <p className="mt-3 text-sm" style={{ color: "var(--muted)" }}>{m.why_fits}</p>
-                        ) : null}
+                        {/* Спершу одне речення про саму роботу, далі про людину.
+                            Обидва пише модель мовою людини, тож у кабінеті
+                            більше немає англійського абзаца з чужого
+                            оголошення. Старі добірки рядка про роль не мають:
+                            для них лишається саме «чому тобі». */}
+                        {m.role_line && (
+                          <p className="mt-3 text-sm" style={{ color: "var(--ink-2)" }}>{m.role_line}</p>
+                        )}
+                        {m.why_fits && (
+                          <p className="mt-2 text-sm" style={{ color: "var(--muted)" }}>
+                            {t(locale, "dash.why")}: {m.why_fits}
+                          </p>
+                        )}
 
                         {facts.length > 0 && (
                           <p className="mt-2">
