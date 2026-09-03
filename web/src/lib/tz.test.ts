@@ -54,18 +54,14 @@ describe("зона за написаною годиною", () => {
 });
 
 describe("крок tz в анкеті", () => {
-  /**
-   * Перевіряємо на кроці, що стоїть ПЕРЕД годиною. Відколи три головні
-   * питання йдуть підряд, це «побажання», а не «місто»: між ними тепер два
-   * необов'язкові питання, і на них пропуск години ще не видно.
-   */
+  /** Перевіряємо на кроці, що стоїть ПЕРЕД годиною: це місто. */
   it("пропускається, коли місто вже назвало пояс", () => {
-    expect(nextStep("wishes", { ...emptyDraft(), location: "Київ" })).toBe("salary");
-    expect(nextStep("wishes", { ...emptyDraft(), location: "Marsландія" })).toBe("tz");
+    expect(nextStep("city", { ...emptyDraft(), location: "Київ" })).toBe("salary");
+    expect(nextStep("city", { ...emptyDraft(), location: "Marsландія" })).toBe("tz");
   });
 
   it("пропускається, коли зона вже обрана", () => {
-    expect(nextStep("wishes", { ...emptyDraft(), timezone: "Europe/Paris" })).toBe("salary");
+    expect(nextStep("city", { ...emptyDraft(), timezone: "Europe/Paris" })).toBe("salary");
   });
 
   it("чернетка дає зону з кнопки, міста або країни, але не UTC", () => {

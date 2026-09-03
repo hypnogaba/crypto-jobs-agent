@@ -71,13 +71,29 @@ describe("кнопки зарплати", () => {
     expect(texts.some((x) => x.includes("рік"))).toBe(false);
   });
 
+  /**
+   * Після зарплати анкета вже не закінчується: за нею стоїть останнє
+   * питання про досвід і резюме. Профіль лягає в базу після нього, тож
+   * пропускаємо його, щоб дійти до запису.
+   */
+  const finish = async () => {
+    // Чернетку переносимо з останнього запису стану: підробка бази сама її
+    // не оновлює, тож без цього друге натискання побачило б порожній профіль.
+    const saved = [...run.mock.calls].reverse()
+      .find((c) => String(c[0]).includes("INSERT INTO bot_state"));
+    state = { step: "extra", draft: String(saved![3]), message_id: 100 };
+    await handleOnboardingButton(env, 1, "ob:extra:__next", "cb", "uk");
+  };
+
   it("дотик по «€3k / міс» кладе в базу річну — 36 000", async () => {
     await handleOnboardingButton(env, 1, "ob:salary:3000", "cb", "uk");
+    await finish();
     expect(writtenSalary()).toBe(36_000);
   });
 
   it("«не важливо» лишається порожнім, а не нулем, помноженим на 12", async () => {
     await handleOnboardingButton(env, 1, "ob:salary:0", "cb", "uk");
+    await finish();
     expect(writtenSalary()).toBeNull();
   });
 });

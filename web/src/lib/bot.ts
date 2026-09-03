@@ -5,7 +5,7 @@ import {
   STEPS, EDITABLE,
   summary, toggle, fieldLabel, currentLine, type Draft, type Step,
   OPEN_STEPS, askKeyboard, confirmKeyboard, confirmText, notRecognisedLine, nextMode, understood,
-  type Mode,
+  splitExtra, type Mode,
 } from "./bot-onboarding";
 import { sampleJobs } from "./role-samples";
 import { normalizeFreeText } from "./normalize-text";
@@ -466,11 +466,29 @@ export async function handleOnboardingText(
   }
 
   // Побажання і стек: усе написане й є відповіддю, далі — наступне питання.
+  // Крок лишається для правки одного поля через /profile; в анкеті обидва
+  // питає `extra`.
   if (row.step === "wishes" || row.step === "cv") {
     const draft = readDraft(row.draft);
     const own = text.slice(0, row.step === "cv" ? 300 : 1000).trim() || null;
     if (row.step === "cv") draft.cvHighlights = own; else draft.wishes = own;
     await advance(env, chatId, row.step, draft, locale, row.message_id, true);
+    return true;
+  }
+
+  /**
+   * Останнє питання: одна відповідь, два поля бази.
+   *
+   * Розбір розкладає написане на витяг (`cv_highlights`) і решту (`wishes`);
+   * коли він мовчить, усе йде в `wishes` — див. splitExtra.
+   */
+  if (row.step === "extra") {
+    const draft = readDraft(row.draft);
+    const parsed = await parseProfile(text, env.ANTHROPIC_API_KEY ?? null);
+    const { cvHighlights, wishes } = splitExtra(text, parsed);
+    draft.cvHighlights = cvHighlights;
+    draft.wishes = wishes;
+    await advance(env, chatId, "extra", draft, locale, row.message_id, true);
     return true;
   }
 
@@ -1303,6 +1321,32 @@ export async function handleDocument(
 
     const text = await extractCvText(file);
     const parsed = await parseProfile(text, env.ANTHROPIC_API_KEY ?? null);
+
+    /**
+     * Резюме посеред анкети доповнює ЧЕРНЕТКУ, а не заміняє профіль.
+     *
+     * Нижче стоїть захист «резюме доповнює, а не стирає», але він звіряється
+     * з таблицею `profiles` — а під час анкети відповіді туди ще не потрапили,
+     * вони лежать у `bot_state`. Тому людина, яка відповіла на всі питання й
+     * надіслала CV, лишалась із профілем із самого лише резюме: роль, галузь,
+     * місто й вилка зникали мовчки.
+     *
+     * Досі це майже не траплялось, бо про можливість надіслати резюме анкета
+     * не казала жодним словом. Останнє питання тепер каже прямо, тож шлях
+     * став звичайним, а не випадковим.
+     *
+     * Порожнє з резюме не перетирає названого людиною: вона відповідала на
+     * питання свідомо, а резюме про частину з них просто мовчить.
+     */
+    const state = await one<StateRow>(
+      "SELECT step,draft,message_id,mode FROM bot_state WHERE chat_id=?", String(chatId));
+    if (state && STEPS.includes(state.step as Step)) {
+      const draft = readDraft(state.draft);
+      mergeIntoDraft(draft, parsed, text);
+      if (parsed.cvHighlights) draft.cvHighlights = parsed.cvHighlights;
+      await finishOnboarding(env, chatId, draft, locale, state.message_id, true);
+      return true;
+    }
     // Розбір більше не вигадує режим роботи: коли людина про це не написала,
     // він порожній. Стовпець remote_mode — NOT NULL, і порожній рядок означав
     // би «жодного варіанта», чого людина не обирала. Найвужче з безпечних —

@@ -19,7 +19,7 @@ import { timezoneFromCity, timeOptions, zoneName } from "./tz";
 import { monthlyFrom } from "./salary-period";
 import { timezoneFor } from "./geo";
 
-export type Step = "spheres" | "wishes" | "cv" | "industries" | "where" | "city" | "tz" | "salary";
+export type Step = "spheres" | "wishes" | "cv" | "extra" | "industries" | "where" | "city" | "tz" | "salary";
 
 /**
  * Порядок питань: спершу три головні, потім два необов'язкові.
@@ -34,8 +34,17 @@ export type Step = "spheres" | "wishes" | "cv" | "industries" | "where" | "city"
  * підряд, а не через два неномеровані питання між ними.
  *
  * «Година» після міста: якщо місто вже назвало пояс, питання не ставиться.
+ *
+ * Два необов'язкові питання — про досвід і про побажання — злиті в одне
+ * останнє. Вони питали різними словами те саме («що з досвіду згадати» і «що
+ * ще важливо»), стояли поруч і однаково легко пропускались. Одне питання
+ * наприкінці ще й може запропонувати резюме файлом: бот уміє його читати з
+ * першого дня, але жодне питання про це не казало, тож фіча була невидима.
+ *
+ * `cv` і `wishes` лишаються в EDITABLE: у /profile це два різні поля бази, і
+ * правити їх нарізно зручніше, ніж одним текстом.
  */
-export const STEPS: Step[] = ["spheres", "industries", "where", "city", "cv", "wishes", "tz", "salary"];
+export const STEPS: Step[] = ["spheres", "industries", "where", "city", "tz", "salary", "extra"];
 
 /** Поля, які людина редагує по одному через /profile. Мова й година живуть у users, не в profiles. */
 export const EDITABLE: Step[] = ["spheres", "industries", "where", "salary", "wishes", "cv", "tz"];
@@ -196,6 +205,33 @@ export function nextStep(step: Step, draft?: Draft): Step | null {
   return after;
 }
 
+/** Скільки написаного лишаємо: та сама межа, що була в питанні про побажання. */
+const EXTRA_MAX = 1_000;
+
+/**
+ * Останню відповідь розкладаємо по двох полях бази.
+ *
+ * Для людини це одна думка «що ще про мене варто знати», у базі — два поля з
+ * різною роботою: `cv_highlights` іде в промпт до моделі й на бали не
+ * впливає, а `wishes` оцінюється (до +6) і вміє ловити заперечення на кшталт
+ * «без on-call».
+ *
+ * Коли модель нічого не розклала, усе написане йде в `wishes`, і лише туди.
+ * Саме туди, бо воно оцінюється й шукається, тобто робить строго більше за
+ * `cv_highlights`. Класти в обидва не можна: те саме слово рахувалось би
+ * двічі — раз у балі, раз у поясненні.
+ */
+export function splitExtra(
+  text: string, parsed: { cvHighlights?: string | null; leftover?: string | null },
+): { cvHighlights: string | null; wishes: string | null } {
+  const clip = (v: string | null | undefined): string | null =>
+    v?.trim().slice(0, EXTRA_MAX) || null;
+  const cv = clip(parsed.cvHighlights);
+  const left = clip(parsed.leftover);
+  if (cv || left) return { cvHighlights: cv, wishes: left };
+  return { cvHighlights: null, wishes: clip(text) };
+}
+
 /** Перемикач для питань із кількома відповідями. */
 export function toggle(list: string[], id: string): string[] {
   return list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
@@ -261,10 +297,26 @@ const ASK: Record<Step, Phrase> = {
     ru: "Какой город?\nНапиши как удобно — Берлин, Киев, Париж. Это открывает местные доски вакансий.",
   },
   salary: {
-    en: "Last one · Salary floor, per month, before tax?\nA soft preference, not a hard filter — most postings show no range at all.",
-    uk: "Останнє · Зарплата від, на місяць, до податків?\nМ'який пріоритет, не жорсткий фільтр — більшість вакансій вилку взагалі не вказує.",
-    fr: "Dernière · Salaire minimum, par mois, avant impôts ?\nUne préférence, pas un filtre — la plupart des offres n'affichent aucune fourchette.",
-    ru: "Последнее · Зарплата от, в месяц, до налогов?\nМягкий приоритет, не жёсткий фильтр — большинство вакансий вилку не указывает.",
+    en: "Salary floor, per month, before tax?\nA soft preference, not a hard filter — most postings show no range at all.",
+    uk: "Зарплата від, на місяць, до податків?\nМ'який пріоритет, не жорсткий фільтр — більшість вакансій вилку взагалі не вказує.",
+    fr: "Salaire minimum, par mois, avant impôts ?\nUne préférence, pas un filtre — la plupart des offres n'affichent aucune fourchette.",
+    ru: "Зарплата от, в месяц, до налогов?\nМягкий приоритет, не жёсткий фильтр — большинство вакансий вилку не указывает.",
+  },
+  /**
+   * Останнє питання, і єдине місце, де ми кажемо про резюме.
+   *
+   * Бот читає надіслані файли з першого дня (`handleDocument`), але жодне
+   * питання анкети про це не згадувало — готова фіча, якої ніхто не бачив.
+   *
+   * Питає одразу про досвід і про важливе: це два поля бази
+   * (`cv_highlights` і `wishes`), але для людини це одна думка «що ще про
+   * мене варто знати». Розбір розкладе написане по полях сам.
+   */
+  extra: {
+    en: "Last one · Anything to add about yourself?\nStack, years, languages — or what matters to you in the next job. You can simply send your CV as a file.",
+    uk: "Останнє · Хочеш додати щось про себе?\nСтек, роки, мови — або що для тебе важливо в наступній роботі. Можна просто надіслати резюме файлом.",
+    fr: "Dernière · Quelque chose à ajouter sur vous ?\nStack, années, langues — ou ce qui compte pour vous dans le prochain poste. Vous pouvez simplement envoyer votre CV en fichier.",
+    ru: "Последнее · Хочешь добавить что-то о себе?\nСтек, годы, языки — или что для тебя важно в следующей работе. Можно просто прислать резюме файлом.",
   },
 };
 
@@ -530,7 +582,7 @@ export function keyboard(step: Step, draft: Draft, locale: Locale, opts: Keyboar
   // всіх, а мовчазний вибір «найближчого» псує підбір гірше за порожнє поле.
   // Побажання — вільний текст: жодного списку тут бути не може, а єдина
   // кнопка дозволяє не відповідати.
-  if (step === "wishes" || step === "cv") {
+  if (step === "wishes" || step === "cv" || step === "extra") {
     return [[{ text: say(WORD.skip, locale), callback_data: `${pre}:${step}:__next` }]];
   }
 

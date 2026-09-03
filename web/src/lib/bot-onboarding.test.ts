@@ -11,12 +11,12 @@ describe("порядок питань", () => {
    * щойно написала про себе, і питання «що ще важливо?» перепитувало б те
    * саме, а лічильник «1 з 3 … 2 з 3» рвався б надвоє.
    */
-  it("три головні підряд, потім необов'язкові, і зупиняється", () => {
+  it("три головні підряд, потім умови, і одне останнє питання", () => {
     expect(STEPS[0]).toBe("spheres");
     expect(nextStep("spheres")).toBe("industries");
     expect(nextStep("industries")).toBe("where");
-    expect(nextStep("cv")).toBe("wishes");
-    expect(nextStep("salary")).toBeNull();
+    expect(nextStep("salary")).toBe("extra");
+    expect(nextStep("extra")).toBeNull();
   });
 
   // Місто питається лише в того, кому воно щось означає. Саме звідси
@@ -27,23 +27,20 @@ describe("порядок питань", () => {
   });
 
   it("не питає міста в того, хто хоче лише віддалено", () => {
-    // Місто пропускається, тож далі — необов'язкові питання, а не «котра година».
-    expect(nextStep("where", { ...emptyDraft(), remoteMode: "remote_only" })).toBe("cv");
-    expect(nextStep("cv", { ...emptyDraft(), remoteMode: "remote_only" })).toBe("wishes");
-    // Пояс невідомий — питання про годину лишається на своєму місці.
-    expect(nextStep("wishes", { ...emptyDraft(), remoteMode: "remote_only" })).toBe("tz");
-    expect(nextStep("wishes", { ...emptyDraft(), remoteMode: "remote_only", timezone: "Europe/Kyiv" })).toBe("salary");
+    // Місто пропускається; пояс невідомий, тож далі «котра година».
+    expect(nextStep("where", { ...emptyDraft(), remoteMode: "remote_only" })).toBe("tz");
+    expect(nextStep("where", { ...emptyDraft(), remoteMode: "remote_only", timezone: "Europe/Kyiv" })).toBe("salary");
   });
 
   // Хто вже написав місце своїми словами на попередньому кроці, не має
   // відповідати на те саме вдруге.
   it("не питає міста двічі", () => {
-    expect(nextStep("where", { ...emptyDraft(), remoteMode: "relocate", location: "Берлін" })).toBe("cv");
+    expect(nextStep("where", { ...emptyDraft(), remoteMode: "relocate", location: "Берлін" })).toBe("salary");
   });
 
   it("без чернетки поводиться як раніше", () => {
     expect(nextStep("where")).toBe("city");
-    expect(nextStep("city")).toBe("cv");
+    expect(nextStep("city")).toBe("tz");
     expect(nextStep("tz")).toBe("salary");
   });
 });
@@ -133,10 +130,20 @@ describe("вільний текст поза командами", () => {
 });
 
 describe("побажання в анкеті", () => {
-  it("стоять після трьох головних і мають кнопку «Пропустити»", () => {
-    expect(nextStep("cv")).toBe("wishes");
-    const rows = keyboard("wishes", emptyDraft(), "uk");
-    expect(rows).toEqual([[{ text: "Пропустити", callback_data: "ob:wishes:__next" }]]);
+  /**
+   * Окремого питання про побажання в анкеті більше немає: воно злите з
+   * питанням про досвід в одне останнє. Саме поле лишається — і в базі, і в
+   * /profile, — а анкета наповнює його розкладкою останньої відповіді.
+   */
+  it("окремого питання немає, лишилось одне останнє з «Пропустити»", () => {
+    expect(STEPS).not.toContain("wishes");
+    expect(STEPS.at(-1)).toBe("extra");
+    expect(keyboard("extra", emptyDraft(), "uk"))
+      .toEqual([[{ text: "Пропустити", callback_data: "ob:extra:__next" }]]);
+  });
+
+  it("правити побажання нарізно й далі можна", () => {
+    expect(EDITABLE).toContain("wishes");
   });
 
   it("потрапляють у підсумок", () => {
@@ -283,9 +290,11 @@ import { currentOf as nowOf } from "./bot-onboarding.js";
  */
 describe("стек, роки, мови — те саме поле в боті й на сайті", () => {
   it("питається в анкеті", () => {
-    expect(STEPS).toContain("cv");
-    // Досвід іде першим із двох необов'язкових, одразу за трьома головними.
-    expect(nextStep("city")).toBe("cv");
+    // Окремого питання про досвід в анкеті немає: воно в останньому питанні,
+    // яке ще й пропонує надіслати резюме файлом. Поле лишається редагованим.
+    expect(STEPS).not.toContain("cv");
+    expect(EDITABLE).toContain("cv");
+    expect(questionText("extra", "uk")).toMatch(/резюме файлом/);
   });
 
   it("має кнопку «Пропустити»: це не обов'язкове поле", () => {
@@ -498,5 +507,47 @@ describe("що вважається зрозумілим", () => {
   it("місце рахується режимом або містом", () => {
     expect(understood({ ...nothing, remoteMode: "remote_only" }, "where")).toBe(true);
     expect(understood({ ...nothing, location: "Берлін" }, "where")).toBe(true);
+  });
+});
+
+import { splitExtra } from "./bot-onboarding";
+
+/**
+ * Останнє питання питає одразу про досвід і про важливе, бо для людини це
+ * одна думка «що ще про мене варто знати». У базі це два різні поля:
+ * cv_highlights іде в промпт до моделі й на бали не впливає, а wishes
+ * оцінюється (до +6) і вміє ловити заперечення на кшталт «без on-call».
+ */
+describe("розкладка останньої відповіді по полях", () => {
+  it("модель розклала — беремо її розкладку", () => {
+    expect(splitExtra("Rust 5 років, без on-call",
+      { cvHighlights: "Rust, 5 років", leftover: "без on-call" }))
+      .toEqual({ cvHighlights: "Rust, 5 років", wishes: "без on-call" });
+  });
+
+  /**
+   * Без моделі написане не пропадає. Іде в wishes, а не в cv_highlights:
+   * wishes оцінюється й шукається, тобто робить строго більше. Класти в
+   * обидва не можна — те саме слово рахувалось би двічі.
+   */
+  it("без розкладки все написане йде в побажання, і лише туди", () => {
+    expect(splitExtra("Rust 5 років, без on-call", { cvHighlights: null, leftover: null }))
+      .toEqual({ cvHighlights: null, wishes: "Rust 5 років, без on-call" });
+  });
+
+  it("модель дала лише витяг — решти немає, і це нормально", () => {
+    expect(splitExtra("Rust 5 років", { cvHighlights: "Rust, 5 років", leftover: null }))
+      .toEqual({ cvHighlights: "Rust, 5 років", wishes: null });
+  });
+
+  it("порожня відповідь не створює порожніх полів", () => {
+    expect(splitExtra("   ", { cvHighlights: null, leftover: null }))
+      .toEqual({ cvHighlights: null, wishes: null });
+  });
+
+  it("довгий текст обрізається, а не лягає в базу цілком", () => {
+    const long = "я".repeat(3000);
+    const out = splitExtra(long, { cvHighlights: null, leftover: null });
+    expect(out.wishes!.length).toBeLessThanOrEqual(1000);
   });
 });
