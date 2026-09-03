@@ -2,9 +2,20 @@ import { describe, expect, it } from "vitest";
 import { companyKey, dedupeKey, isFresh, officeOnly, prepare, titleKey } from "./normalize.js";
 import type { RawJob } from "./types.js";
 
+/**
+ * Дата публікації рахується від сьогодні, а не стоїть числом.
+ *
+ * Була зашита «2026-08-20», і три тести про `prepare` жили рівно до 3 вересня:
+ * вікно свіжості 14 днів закрилось, `prepare` чесно викинув усі рядки, і
+ * впало те, що не має стосунку ні до свіжості, ні до дат — схлопування
+ * геоклонів і проставляння тегів.
+ */
+const daysAgo = (n: number): string =>
+  new Date(Date.now() - n * 86_400_000).toISOString();
+
 const raw = (o: Partial<RawJob> = {}): RawJob => ({
   url: "https://jobs.example.com/1", company: "Example Inc.", title: "Partnerships Manager",
-  location: "Remote", remote: true, postedAt: "2026-08-20T00:00:00.000Z",
+  location: "Remote", remote: true, postedAt: daysAgo(7),
   source: "ashby:example", ...o });
 
 describe("companyKey", () => {
