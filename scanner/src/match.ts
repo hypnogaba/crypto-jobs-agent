@@ -1006,6 +1006,12 @@ export const matchPercent = (score: number): number =>
 export const byScoreThenFresh = (a: ScoredJob, b: ScoredJob): number =>
   b.score - a.score || (Date.parse(b.postedAt ?? "") || 0) - (Date.parse(a.postedAt ?? "") || 0);
 
+/**
+ * Ціна одного збігу за сферою. Нею міряються обидва правила нижче: наскільки
+ * слабшу вакансію ще можна взяти заради місцевості чи зв'язності добірки.
+ */
+const SPHERE_WEIGHT = 6;
+
 export function pickTop(jobs: CandidateJob[], p: Profile, limit = 5, now = new Date()): ScoredJob[] {
   // Порожній профіль — не «нічого не знайшлось», а «нема чого шукати».
   if (!hasSearchSignal(p)) return [];
@@ -1027,6 +1033,25 @@ export function pickTop(jobs: CandidateJob[], p: Profile, limit = 5, now = new D
     picked.push(job);
     return true;
   };
+
+  if (scored.length === 0) return [];
+
+  /**
+   * Стеля слабкості: жодне коло не бере вакансію, що поступається найкращій
+   * більше ніж на вагу однієї сфери.
+   *
+   * Резерв країни й коло сфери існують не даремно: без них зникають місцеві
+   * вакансії й добірка розсипається на пʼять незвʼязаних тем. Але обидва
+   * брали місце БУДЬ-ЯКОЮ вакансією, аби та підходила за ознакою. У живих
+   * прогонах це коштувало 8–10 балів на місце: «IT Monitoring engineer» за 8
+   * замість «Community Manager» за 17, «GRC Manager» за 7 замість «Backend
+   * Engineer - Solana» за 17.
+   *
+   * Шість — це рівно ціна збігу за сферою. Тобто коло має право на свій
+   * пріоритет доти, доки різниця вкладається в одну ознаку; далі вирішує бал.
+   */
+  const gate = scored[0]!.score - SPHERE_WEIGHT;
+  const strong = (job: ScoredJob): boolean => job.score >= gate;
 
   /**
    * Коло нульове: вакансії з дошки своєї країни.
@@ -1053,7 +1078,7 @@ export function pickTop(jobs: CandidateJob[], p: Profile, limit = 5, now = new D
   if (localSlots > 0) {
     for (const job of scored) {
       if (picked.length >= localSlots) break;
-      if (!inCountries(job, mine)) continue;
+      if (picked.includes(job) || !inCountries(job, mine) || !strong(job)) continue;
       take(job);
     }
   }
@@ -1082,7 +1107,7 @@ export function pickTop(jobs: CandidateJob[], p: Profile, limit = 5, now = new D
     const lead = withCandidates[day % withCandidates.length]!;
     for (const job of scored) {
       if (picked.length >= limit) break;
-      if (picked.includes(job) || !job.tags.includes(lead)) continue;
+      if (picked.includes(job) || !job.tags.includes(lead) || !strong(job)) continue;
       take(job);
     }
   }
@@ -1092,6 +1117,29 @@ export function pickTop(jobs: CandidateJob[], p: Profile, limit = 5, now = new D
     if (picked.length >= limit) break;
     if (picked.includes(job)) continue;
     take(job);
+  }
+
+  /**
+   * Остання перевірка: найкраща вакансія не має права лишитись за бортом.
+   *
+   * Виміряно 03.09 на всіх 16 живих профілях: у 11 з них вакансія з найвищим
+   * балом у добірку НЕ потрапляла. Людина з роллю «community manager»
+   * отримувала пʼять інженерних вакансій по 7–11 балів, поки у вікні лежала
+   * «User Community Manager» на 18: резерв країни й коло сфери розбирали
+   * місця раніше, ніж доходило до бала. Роль важить 12 проти 6 у сфери, але
+   * тій вазі не було де спрацювати.
+   *
+   * Міняємо лише при розриві від шести, тобто від ціни цілої ознаки. Рівні
+   * бали лишають слово черзі сфер: там вибір між однаково доречними, і
+   * зв'язність добірки важливіша.
+   */
+  const bestUnpicked = scored.find((j) => !picked.includes(j) && !seenCompanies.has(j.companyKey));
+  if (bestUnpicked && picked.length > 0) {
+    const weakest = picked.reduce((a, b) => (b.score < a.score ? b : a));
+    if (bestUnpicked.score - weakest.score >= SPHERE_WEIGHT) {
+      picked.splice(picked.indexOf(weakest), 1);
+      picked.push(bestUnpicked);
+    }
   }
 
   // Порядок у повідомленні — за силою збігу, а не за тим, як добирали.

@@ -10,8 +10,30 @@ export type Release = {
 
 export const RELEASES: Release[] = [
   {
+    "date": "2026-09-03",
+    "changes": [
+      {
+        "hash": "8a8246c",
+        "subject": "Картка добірки розповідає про людину, а не переказує вакансію"
+      },
+      {
+        "hash": "3394bec",
+        "subject": "Три тести про prepare жили рівно до 3 вересня"
+      }
+    ],
+    "chores": 0
+  },
+  {
     "date": "2026-09-02",
     "changes": [
+      {
+        "hash": "6f931f8",
+        "subject": "Стеля на 140 користувачах була порахована для чужого тарифу"
+      },
+      {
+        "hash": "3448360",
+        "subject": "releases.ts після деплою"
+      },
       {
         "hash": "a9c3f33",
         "subject": "Числа для сайту можна перерахувати руками"
@@ -1023,4 +1045,4 @@ export const RELEASES: Release[] = [
   }
 ];
 
-export const GENERATED_AT = "2026-09-02 11:40";
+export const GENERATED_AT = "2026-09-03 09:25";
