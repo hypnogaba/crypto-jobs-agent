@@ -36,16 +36,75 @@ export function meaningfulWords(role: string | null | undefined): string[] {
 }
 
 /**
+ * Слово має ПОЧИНАТИ слово в назві, а не ховатись усередині нього.
+ *
+ * Знайдено прогоном на живих ролях: «direct» збігалося з «Analyst I,
+ * Directed Content». Та сама пастка, яку вже ловив сканер, де
+ * «communication» жило всередині «Telecommunications». SQL цього не вміє
+ * (`LIKE` меж слова не знає), тому LIKE лише звужує вибірку, а межу
+ * перевіряємо тут.
+ *
+ * Межа — усе, що не літера й не цифра: дефіс у «Full-Stack» і дужка в
+ * «(Python)» починають слово так само, як пробіл.
+ */
+export function startsWord(title: string, word: string): boolean {
+  const t = title.toLowerCase();
+  const w = word.toLowerCase();
+  let i = t.indexOf(w);
+  while (i !== -1) {
+    const before = i === 0 ? "" : t[i - 1]!;
+    if (!/[\p{L}\p{N}]/u.test(before)) return true;
+    i = t.indexOf(w, i + 1);
+  }
+  return false;
+}
+
+/**
+ * Потрібні ВСІ слова ролі, а не будь-яке.
+ *
+ * Найгірша хиба, яку знайшов прогін: слова з'єднувались через АБО, і «solana
+ * auditor» діставав «Night Auditor (H/F) — Hôtel les Barmes de l'Ours», а
+ * «solana developer» — «Senior Mobile APP (IOS/AOS) Developer». Приклад без
+ * стосунку до людини гірший за відсутність прикладів: він каже їй, що ми не
+ * зрозуміли жодного слова.
+ */
+export const matchesAll = (title: string, words: string[]): boolean =>
+  words.every((w) => startsWord(title, w));
+
+/**
+ * Назви в кеші зберігають HTML-сутності: «Python &amp;amp; JS».
+ *
+ * У добірку вони йдуть через власне екранування, а тут текст показується
+ * людині напряму, тож розкодовуємо. Список короткий навмисно: це прибирання
+ * відомого сміття, а не розбір HTML.
+ */
+export const unescapeTitle = (title: string): string =>
+  title.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+       .replace(/&quot;/g, '"').replace(/&#0?39;|&apos;/g, "'");
+
+/**
  * Одна вакансія на компанію.
  *
  * Без цього великий роботодавець забирає всі три рядки, і людина бачить не
  * «які бувають посади», а «які посади є в Polygon». Це та сама пастка, що
  * вже ловила вікно кандидатів у сканері, лише в меншому масштабі.
  */
+/**
+ * Найдовша назва, яку ще можна показати.
+ *
+ * У кеші є рядки, де в `title` лежить цілий абзац опису компанії (живий
+ * приклад: Norm Ai, понад 700 символів). Обрізати такий рядок нема сенсу —
+ * вийде беззмістовний уривок, — тож він просто не годиться в приклад. Це
+ * захист показу, а не спроба полагодити кеш: у добірку такі рядки й далі
+ * потрапляють, і це окреме питання.
+ */
+const TITLE_MAX = 90;
+
 export function pickSamples(rows: JobSample[], limit: number): JobSample[] {
   const seen = new Set<string>();
   const out: JobSample[] = [];
   for (const r of rows) {
+    if (r.title.length > TITLE_MAX) continue;
     const key = r.company.trim().toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
@@ -73,15 +132,32 @@ export function pickSamples(rows: JobSample[], limit: number): JobSample[] {
 export async function sampleJobs(role: string | null | undefined, limit = 3): Promise<JobSample[]> {
   const words = meaningfulWords(role).slice(0, 2);
   if (words.length === 0) return [];
-  const where = words.map(() => "LOWER(title) LIKE ?").join(" OR ");
-  try {
+
+  const fetch = async (need: string[]): Promise<JobSample[]> => {
+    const where = need.map(() => "LOWER(title) LIKE ?").join(" AND ");
     const rows = await all<JobSample>(
       `SELECT title, company FROM jobs_cache
         WHERE fetched_at >= strftime('%Y-%m-%dT%H:%M:%SZ','now','-3 day')
           AND (${where})
         ORDER BY posted_at DESC
         LIMIT ?`,
-      ...words.map((w) => `%${w}%`), limit * 5);
+      ...need.map((w) => `%${w}%`), limit * 20);
+    // LIKE звузив, межу слова перевіряємо тут: SQL її не вміє.
+    return rows.filter((r) => matchesAll(r.title, need))
+      .map((r) => ({ title: unescapeTitle(r.title), company: r.company }));
+  };
+
+  try {
+    let rows = await fetch(words);
+    /**
+     * Запасний захід — ПЕРШЕ слово, а не будь-яке.
+     *
+     * Перше слово ролі майже завжди те, що її вирізняє: «solana», «web3»,
+     * «community», «regulatory». Друге частіше загальне («developer»,
+     * «auditor»), і саме воно давало готельного нічного аудитора людині, що
+     * шукала аудит смартконтрактів.
+     */
+    if (rows.length === 0 && words.length > 1) rows = await fetch([words[0]!]);
     return pickSamples(rows, limit);
   } catch {
     // Приклади — прикраса підтвердження, а не його зміст. Збій бази тут не
