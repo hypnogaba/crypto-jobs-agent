@@ -41,7 +41,7 @@ const FEED_SQL = `
              ROW_NUMBER() OVER (PARTITION BY dedupe_key
                                 ORDER BY posted_at DESC, fetched_at DESC) dup
       FROM jobs_cache
-      WHERE fetched_at >= datetime('now', '-3 day')
+      WHERE fetched_at >= strftime('%Y-%m-%dT%H:%M:%SZ','now','-3 day')
         AND (tags LIKE '%"web3"%' OR tags LIKE '%"engineering"%' OR tags LIKE '%"data-ai"%'
              OR tags LIKE '%"product"%' OR tags LIKE '%"design"%' OR tags LIKE '%"devrel"%'
              OR tags LIKE '%"security"%' OR tags LIKE '%"qa"%' OR tags LIKE '%"ai"%'
@@ -76,7 +76,7 @@ export async function refreshSiteStats(d1: D1Client): Promise<void> {
   const tags = await d1.query<{ tag: string; n: number }>(
     `SELECT t.value AS tag, count(*) AS n
        FROM jobs_cache j, json_each(j.tags) t
-      WHERE j.fetched_at >= datetime('now','-3 day')
+      WHERE j.fetched_at >= strftime('%Y-%m-%dT%H:%M:%SZ','now','-3 day')
       GROUP BY t.value`);
 
   const rows: Array<[string, string]> = [

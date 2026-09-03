@@ -22,7 +22,7 @@ async function main(): Promise<void> {
 
   const rows = await d1.query<{ location: string; n: number }>(
     `SELECT location, count(*) n FROM jobs_cache
-      WHERE fetched_at >= datetime('now', '-3 day') AND location IS NOT NULL AND location <> ''
+      WHERE fetched_at >= strftime('%Y-%m-%dT%H:%M:%SZ','now','-3 day') AND location IS NOT NULL AND location <> ''
       GROUP BY location ORDER BY n DESC`);
 
   let jobsKnown = 0, jobsTotal = 0, rowsKnown = 0;

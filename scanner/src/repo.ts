@@ -114,7 +114,7 @@ export class Repo {
                    WHEN source LIKE 'board:%'      THEN 'board'
                    ELSE 'ats' END,
               COUNT(*),
-              SUM(CASE WHEN fetched_at >= datetime('now','-3 day') THEN 1 ELSE 0 END),
+              SUM(CASE WHEN fetched_at >= strftime('%Y-%m-%dT%H:%M:%SZ','now','-3 day') THEN 1 ELSE 0 END),
               COUNT(DISTINCT company_key)
          FROM jobs_cache GROUP BY source`);
   }

@@ -64,7 +64,7 @@ async function main(): Promise<void> {
   if (refetch > 0) {
     const fresh = await d1.query<Row>(
       `SELECT id,url,summary,fetched_at FROM jobs_cache
-       WHERE salary_min IS NULL AND salary_max IS NULL AND fetched_at >= datetime('now','-3 day')
+       WHERE salary_min IS NULL AND salary_max IS NULL AND fetched_at >= strftime('%Y-%m-%dT%H:%M:%SZ','now','-3 day')
        ORDER BY fetched_at DESC LIMIT ?`, [refetch * 5]);
     const lazy = fresh.filter((r) => hasLazyDescription(r.url)).slice(0, refetch);
     let got = 0, hit = 0;

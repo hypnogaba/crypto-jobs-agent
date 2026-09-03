@@ -100,7 +100,7 @@ async function main(): Promise<void> {
 
   const rows = await d1.query<Row>(
     `SELECT id,title,company,company_key,source,remote,tags FROM jobs_cache
-      WHERE fetched_at >= datetime('now', ?)`, [`-${days} day`]);
+      WHERE fetched_at >= strftime('%Y-%m-%dT%H:%M:%SZ','now',?)`, [`-${days} day`]);
   console.log(`У вікні ${days} дн.: ${rows.length} вакансій.`);
 
   // Нішеві джерела: дошки й колекції Getro, які оголосили свій тег. Два

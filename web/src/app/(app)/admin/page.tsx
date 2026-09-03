@@ -389,7 +389,7 @@ export default async function Admin({ searchParams }: {
   // ── Зростання ───────────────────────────────────────────────────────────
   const scanDays = await all<{ d: string; jobs: number; companies: number }>(
     `SELECT date(started_at) d, MAX(jobs_found) jobs, MAX(distinct_companies) companies
-       FROM scan_runs WHERE status='ok' AND started_at >= datetime('now', ?)
+       FROM scan_runs WHERE status='ok' AND started_at >= strftime('%Y-%m-%dT%H:%M:%SZ','now',?)
       GROUP BY d ORDER BY d`, `-${DAYS} day`);
   // Дотики в боті: єдина наша власна міра того, чи людина взагалі користується
   // продуктом. Відвідування САЙТУ сюди не входять — вони живуть у Cloudflare

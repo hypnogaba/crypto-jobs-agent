@@ -182,7 +182,7 @@ async function collect(d1: D1Client): Promise<Snapshot> {
 
   const counts = (await q<{ total: number; stale: number }>(
     `SELECT COUNT(*) AS total,
-            SUM(CASE WHEN fetched_at < datetime('now','-3 day') THEN 1 ELSE 0 END) AS stale
+            SUM(CASE WHEN fetched_at < strftime('%Y-%m-%dT%H:%M:%SZ','now','-3 day') THEN 1 ELSE 0 END) AS stale
        FROM jobs_cache`))[0] ?? { total: 0, stale: 0 };
 
   const countriesWithoutBoard = await q<{ country: string; people: number }>(

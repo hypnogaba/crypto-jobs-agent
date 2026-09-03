@@ -78,7 +78,7 @@ async function main(): Promise<void> {
   // Старі рядки і надіслані читаємо окремо: з'єднання по 29 тисячах рядків
   // D1 виконує довго, а два простих запити — миттєво.
   const stale = (await d1.query<{ id: string }>(
-    "SELECT id FROM jobs_cache WHERE fetched_at < datetime('now', ?)", [`-${days} day`])).map((r) => r.id);
+    "SELECT id FROM jobs_cache WHERE fetched_at < strftime('%Y-%m-%dT%H:%M:%SZ','now',?)", [`-${days} day`])).map((r) => r.id);
   const sentIds = new Set((await d1.query<{ job_id: string }>(
     "SELECT DISTINCT job_id FROM sent")).map((r) => r.job_id));
 
