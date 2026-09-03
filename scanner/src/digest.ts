@@ -121,6 +121,45 @@ export function isDue(
 }
 
 /**
+ * Лист про збої прогону, або нічого, якщо збоїв не було.
+ *
+ * `lost` — люди, які чекали добірку саме зараз і не отримали її. `idle` —
+ * ті, на кому обробка спіткнулась, хоча прогін і так збирався їх пропустити:
+ * їхня година не настала, або вже минула з доставленою добіркою.
+ *
+ * Розділення не косметичне. 03.09 Cloudflare дві з половиною хвилини віддавав
+ * 429 при порожній базі, і лист сказав «добірка впала в 16 з 17 людей».
+ * Насправді всі сімнадцять мають годину доставки 9:00, усі шістнадцять уже
+ * отримали своє того ранку, а збій стався о 17:05 — тобто не постраждав НІХТО.
+ * Лист, який називає аварією день без втрат, привчає не вірити наступному.
+ */
+export function failureReport(lost: string[], idle: string[], total: number): string | null {
+  if (lost.length === 0 && idle.length === 0) return null;
+  const head = lost.length > 0
+    ? `NextRole: добірка не дійшла до ${affected(lost.length, total)} людей, у кого зараз їхня година.`
+    : `NextRole: прогін спіткнувся на ${idle.length} профіл(ях), але жоден із них `
+      + `не чекав добірки цієї години. Втрат немає.`;
+  // Показуємо ті збої, що коштували добірки; решта — числом.
+  const shown = (lost.length > 0 ? lost : idle).slice(0, 8);
+  const rest = lost.length + idle.length - shown.length;
+  return `${head}\n\n${shown.join("\n")}` + (rest > 0 ? `\n…та ще ${rest}` : "");
+}
+
+/**
+ * Чи ця людина справді чогось позбулась, коли обробка на ній впала.
+ *
+ * Точну відповідь дав би запит `recent` (він відрізняє «година минула, але
+ * добірка вже була» від «година минула, а добірки не було»), але саме він і
+ * падає в такому разі. Тож беремо те, що видно без бази: відкритий запит
+ * «ще п'ять» або її власна година прямо зараз.
+ */
+export function lostDelivery(
+  u: { id: string; timezone: string; delivery_hour: number }, now: Date, requested: Set<string>
+): boolean {
+  return requested.has(u.id) || hourIn(u.timezone, now) === u.delivery_hour;
+}
+
+/**
  * Рядки sent зі статусом sent, доставлені локального сьогодні.
  *
  * Це і лічильник денної стелі, і основа правила «одна планова на день».
@@ -1286,7 +1325,9 @@ async function main(): Promise<void> {
     `SELECT ${PROFILE_COLUMNS} WHERE ${where.join(" AND ")}`, params);
 
   const ctx: RunContext = { d1, cfg, now, botToken, force, requested, delivered: 0, modelFails: 0 };
-  const broke: string[] = [];
+  // Збої, розділені за ціною: див. failureReport.
+  const lost: string[] = [];
+  const idle: string[] = [];
   /**
    * Скільки людей обслуговуємо водночас.
    *
@@ -1310,7 +1351,7 @@ async function main(): Promise<void> {
     } catch (e) {
       const why = describeError(e);
       console.log(`  ${u.id.slice(0, 8)}: збій, пропускаю — ${why}`);
-      broke.push(`${u.id.slice(0, 8)}: ${why}`);
+      (lostDelivery(u, now, requested) ? lost : idle).push(`${u.id.slice(0, 8)}: ${why}`);
     }
   });
 
@@ -1320,12 +1361,8 @@ async function main(): Promise<void> {
   // цього досить — власник і так дивиться. На ста живих людях мовчазний збій
   // означає сто людей без добірки й нікого, хто про це знає: скаржиться
   // одиниця, решта просто йде.
-  if (broke.length > 0) {
-    await notifyOwner(
-      `NextRole: добірка впала в ${affected(broke.length, users.length)} людей.\n\n`
-      + `${broke.slice(0, 8).join("\n")}`
-      + (broke.length > 8 ? `\n…та ще ${broke.length - 8}` : ""));
-  }
+  const report = failureReport(lost, idle, users.length);
+  if (report) await notifyOwner(report);
 
   // Тихе псування, найгірший рід збою: усе «працює», але рядок «чому ти
   // підходиш» у всіх раптом шаблонний, бо скінчився ключ або гроші.
@@ -1337,4 +1374,19 @@ async function main(): Promise<void> {
   }
 }
 
-if (process.argv[1]?.endsWith("digest.js")) await main();
+/**
+ * Верхні запити прогону (черга «ще», retireUnreachable, список профілів) досі
+ * не мали захисту, тож будь-яка помилка D1 роняла процес із кодом 1. Для
+ * `nextrole-requests`, який ходить кожні дві хвилини, це означало юніт у
+ * стані failed і стек у журналі замість одного рядка. 03.09 так сталося
+ * двічі за три хвилини.
+ *
+ * Виходимо нулем свідомо: наступний тік таймера — і є повторна спроба.
+ */
+if (process.argv[1]?.endsWith("digest.js")) {
+  try {
+    await main();
+  } catch (e) {
+    console.log(`Добірка: прогін не почався — ${describeError(e)}`);
+  }
+}

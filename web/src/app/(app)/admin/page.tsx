@@ -373,9 +373,24 @@ export default async function Admin({ searchParams }: {
     // знаходить живі колекції по всьому діапазону й записує їх зупиненими, бо
     // читати всі щодня коштувало б півтори години замість п'яти хвилин. Їхнє
     // місце — число, а не стіна рядків.
+    //
+    // Число вакансій береться з `source_stats`, а не рахується наживо.
+    // Тут стояв корельований підзапит `j.source = 'getro:' || g.collection_id`:
+    // склейка рядків не лягає на жоден індекс, тож кожна колекція означала
+    // повний прохід `jobs_cache`. Виміряно 03.09: **899 323 прочитані рядки
+    // на ОДНЕ відкриття панелі** при ефективності запиту 0,00003. Шість
+    // відкриттів за день дали 5,4 млн читань і були найбільшим споживачем
+    // читань на всьому акаунті, більшим за саму розсилку.
+    //
+    // Це рівно та сама вада, заради якої з'явилась `source_stats` (див.
+    // 0027_source_stats.sql), просто блок Getro додали пізніше й повз неї.
+    // Числа застарівають на один прогін скану, і для питання «чи жива
+    // колекція» цього досить.
     `SELECT g.collection_id, g.label, g.url, g.enabled,
-            (SELECT COUNT(*) FROM jobs_cache j WHERE j.source = 'getro:' || g.collection_id) jobs
-       FROM getro_collections g WHERE g.enabled = 1
+            COALESCE(st.jobs, 0) jobs
+       FROM getro_collections g
+       LEFT JOIN source_stats st ON st.source = 'getro:' || g.collection_id
+      WHERE g.enabled = 1
       ORDER BY jobs DESC, g.collection_id`);
 
   const getroOff = (await one<{ n: number }>(

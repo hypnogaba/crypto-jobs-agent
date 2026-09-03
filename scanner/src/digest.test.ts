@@ -818,3 +818,59 @@ describe("tidyCompany", () => {
     }
   });
 });
+
+import { failureReport, lostDelivery } from "./digest.js";
+
+/**
+ * Відтворення 03.09: 429 від Cloudflare звалив обробку шістнадцяти профілів
+ * о 17:05, коли всі шістнадцять мали годину 9:00 і вже отримали своє вранці.
+ */
+describe("failureReport — лист має називати втрати, а не спіткнення", () => {
+  const ids = (n: number) => Array.from({ length: n }, (_, i) => `id${i}: D1 HTTP 429`);
+
+  it("без збоїв листа немає", () => {
+    expect(failureReport([], [], 17)).toBeNull();
+  });
+
+  it("шістнадцять спіткнень поза їхньою годиною — не аварія", () => {
+    const text = failureReport([], ids(16), 17)!;
+    expect(text).toContain("Втрат немає");
+    expect(text).not.toContain("16 з 17");
+  });
+
+  it("втрачені добірки називаються числом і рахуються від усіх", () => {
+    const text = failureReport(ids(3), ids(9), 17)!;
+    expect(text).toContain("3 з 17");
+    expect(text).toContain("не дійшла");
+  });
+
+  it("у листі стоять саме втрачені, а спіткнення додаються числом", () => {
+    const text = failureReport(["alpha: збій"], ids(9), 17)!;
+    expect(text).toContain("alpha: збій");
+    expect(text).toContain("та ще 9");
+  });
+
+  it("довгий список ріжеться до восьми, решта числом", () => {
+    const text = failureReport(ids(20), [], 25)!;
+    expect(text.split("\n").filter((l) => l.startsWith("id"))).toHaveLength(8);
+    expect(text).toContain("та ще 12");
+  });
+});
+
+describe("lostDelivery — хто справді чекав", () => {
+  // 15:05 UTC — рівно та мить, коли впала розсилка 03.09.
+  const now = new Date("2026-09-03T15:05:00Z");
+  const u = (timezone: string, delivery_hour: number) => ({ id: "u1", timezone, delivery_hour });
+
+  it("Прага о 17:05 з годиною 9:00 — нічого не втрачено", () => {
+    expect(lostDelivery(u("Europe/Prague", 9), now, new Set())).toBe(false);
+  });
+
+  it("Нью-Йорк о 11:05 з годиною 11:00 — добірка втрачена", () => {
+    expect(lostDelivery(u("America/New_York", 11), now, new Set())).toBe(true);
+  });
+
+  it("відкритий запит «ще» важить і поза годиною", () => {
+    expect(lostDelivery(u("Europe/Prague", 9), now, new Set(["u1"]))).toBe(true);
+  });
+});
