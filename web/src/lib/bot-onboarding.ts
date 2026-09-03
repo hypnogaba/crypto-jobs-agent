@@ -49,6 +49,60 @@ export const EDITABLE: Step[] = ["spheres", "industries", "where", "salary", "wi
 export const OPEN_STEPS: Step[] = ["spheres", "industries", "where"];
 
 /**
+ * Режим кроку анкети.
+ *
+ * `ask` — відкрите питання без клавіатури, крім виходів. `confirm` — що ми
+ * зрозуміли з написаного, з прикладами вакансій. `pick` — сьогоднішня
+ * клавіатура, тобто поведінка до цієї зміни.
+ */
+export type Mode = "ask" | "confirm" | "pick";
+
+/**
+ * Чи ми справді зрозуміли відповідь на ПОСТАВЛЕНЕ питання.
+ *
+ * Спокуса тут — спитати «чи змінилось хоч щось у чернетці». Так робити не
+ * можна: розбір, який нічого не впізнав, усе одно складає сирий текст у
+ * побажання, щоб слова людини не пропали. Тобто «змінилось» правдиве й для
+ * слова «тест» — а саме на «тесті» вільний текст і провалився в серпні:
+ * бот мовчки зберігав порожній профіль.
+ *
+ * Тому зрозуміле означає «лягло в поле того питання, яке ми поставили».
+ * Посада, названа у відповідь на питання про місце, місця не називає.
+ */
+export function understood(
+  p: {
+    spheres: string[]; industries: string[];
+    customRole?: string | null; customIndustry?: string | null;
+    remoteMode: string | null; location?: string | null;
+  },
+  step: Step,
+): boolean {
+  const has = (v: string | null | undefined) => Boolean(v && v.trim());
+  switch (step) {
+    case "spheres":    return p.spheres.length > 0 || has(p.customRole);
+    case "industries": return p.industries.length > 0 || has(p.customIndustry);
+    case "where":      return has(p.remoteMode) || has(p.location);
+    default:           return false;
+  }
+}
+
+/**
+ * Куди веде подія в режимі.
+ *
+ * `pick` — стан спокою: у нього веде кожен випадок, у якому розмова не
+ * вдалася, і з нього нічого не веде назад. Це навмисно. Вільний текст у
+ * серпні провалився тим, що на «тест» бот мовчки зберігав порожній профіль;
+ * тепер порожній розбір завжди має видимий вихід, а не тишу.
+ */
+export function nextMode(
+  current: Mode, ev: { parsed?: boolean; rejected?: boolean; listed?: boolean }
+): Mode {
+  if (ev.listed || ev.rejected) return "pick";
+  if (current === "pick") return "pick";
+  return ev.parsed ? "confirm" : "pick";
+}
+
+/**
  * Слова, якими анкета питала про МИНУЛЕ.
  *
  * Продукт шукає роботу, а питання звучало «яка твоя роль», тобто ким людина

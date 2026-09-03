@@ -4,7 +4,11 @@ import {
   readyText, draftTimezone, profileMenu, profileUpdateFor, backButton,
   STEPS, EDITABLE,
   summary, toggle, fieldLabel, currentLine, type Draft, type Step,
+  OPEN_STEPS, askKeyboard, confirmKeyboard, confirmText, notRecognisedLine, nextMode, understood,
+  type Mode,
 } from "./bot-onboarding";
+import { sampleJobs } from "./role-samples";
+import { normalizeFreeText } from "./normalize-text";
 import { isLocale, LOCALES, toLocale } from "./i18n";
 import { CvError, extractCvText } from "./cv";
 import { parseProfile, type ParsedProfile } from "./parse";
@@ -114,16 +118,7 @@ async function ackButton(env: Env, callbackId: string): Promise<void> {
   await callTelegram(env.TELEGRAM_BOT_TOKEN, "answerCallbackQuery", { callback_query_id: callbackId });
 }
 
-/**
- * Режим кроку анкети.
- *
- * `ask` — відкрите питання без клавіатури, крім виходів. `confirm` — що ми
- * зрозуміли з написаного, з прикладами вакансій. `pick` — сьогоднішня
- * клавіатура, тобто поведінка до цієї зміни. У `pick` можна потрапити
- * кнопкою, відповіддю «Не те» або автоматично, коли розбір нічого не дав,
- * тож гірший випадок нового потоку дорівнює старому.
- */
-export type Mode = "ask" | "confirm" | "pick";
+export type { Mode };
 
 interface StateRow { step: string; draft: string; message_id: number | null; mode?: string | null }
 
@@ -248,6 +243,26 @@ export async function handleOnboardingButton(
   // правки, наприклад). Мовчимо: інакше «наступного питання немає»
   // прочиталось би як «анкету завершено» — і переписало б профіль.
   if (!STEPS.includes(step)) return true;
+
+  /**
+   * Три кнопки розмовного кроку.
+   *
+   * `__list` — людина воліє обрати зі списку. `__yes` — підтвердила
+   * зрозуміле. `__no` — не те, і тоді теж список, але з уже проставленими
+   * галочками: написане нею не пропадає ніколи, навіть коли ми зрозуміли
+   * його неправильно.
+   */
+  if (value === "__list" || value === "__no") {
+    await saveState(chatId, step, draft, null, nextMode(modeOf(row), { listed: true }));
+    const id = await anchor(env, chatId, row.message_id,
+      questionText(step, locale), keyboard(step, draft, locale));
+    if (id !== row.message_id) await saveState(chatId, step, draft, id, "pick");
+    return true;
+  }
+  if (value === "__yes") {
+    await advance(env, chatId, step, draft, locale, row.message_id);
+    return true;
+  }
 
   // «Немає в списку» — єдина кнопка, що веде до вільного тексту. Крок
   // запам'ятовуємо, щоб знати, куди покласти написане й куди повернутись.
@@ -478,6 +493,24 @@ export async function handleOnboardingText(
     return handleEditText(env, chatId, row, text, locale);
   }
 
+  /**
+   * Відкрите питання: написане і Є відповіддю, а не доповненням до кнопок.
+   *
+   * Стоїть ПЕРЕД старим розбором нижче навмисно. Той приймав текст лише як
+   * підказку до клавіатури й вимагав восьми символів; тут відповідь головна,
+   * тож межа лише проти випадкового натискання.
+   */
+  if (OPEN_STEPS.includes(row.step as Step) && modeOf(row) !== "pick") {
+    const step = row.step as Step;
+    const draft = readDraft(row.draft);
+    if (text.trim().length < 3) {
+      await send(env, chatId, questionText(step, locale));
+      return true;
+    }
+    await handleOpenAnswer(env, chatId, step, draft, text, modeOf(row), row.message_id, locale);
+    return true;
+  }
+
   // Вільний текст просто посеред питань: людина написала, ким хоче бути.
   // Розбираємо тим самим парсером, що й сайт, і ставимо галочки — далі вона
   // лише підтверджує. Це і є «підтягнути з того, що можна написати текстом».
@@ -590,13 +623,79 @@ async function advance(
 ): Promise<void> {
   const goto = nextStep(from, draft);
   if (!goto) { await finishOnboarding(env, chatId, draft, locale, messageId, afterText); return; }
+
+  /**
+   * Наступний крок ЗАВЖДИ починається в `ask`, якщо це відкрите питання.
+   *
+   * Без цього людина, яка раз провалилась у `pick` (модель мовчала, або вона
+   * сама відкрила список), лишалась би з кнопками до кінця анкети — тобто
+   * одна невдача вимикала б розмову цілком.
+   */
+  const open = OPEN_STEPS.includes(goto);
+  const mode: Mode = open ? "ask" : "pick";
+  const rows = open ? askKeyboard(goto, locale) : keyboard(goto, draft, locale);
+
   // Після написаного людиною якір переїжджає вниз: її власне повідомлення
   // щойно виштовхнуло старе за екран, і правка там нікому не видима.
-  if (afterText) { await reanchor(env, chatId, messageId, goto, draft, locale); return; }
-  await saveState(chatId, goto, draft, null);
-  if (messageId) {
-    await editKeyboard(env, chatId, messageId, questionText(goto, locale), keyboard(goto, draft, locale));
+  if (afterText) {
+    await dropKeyboard(env, chatId, messageId);
+    const id = await sendKeyboard(env, chatId, questionText(goto, locale), rows);
+    await saveState(chatId, goto, draft, id, mode);
+    return;
   }
+  await saveState(chatId, goto, draft, null, mode);
+  if (messageId) {
+    await editKeyboard(env, chatId, messageId, questionText(goto, locale), rows);
+  }
+}
+
+/**
+ * Відкрита відповідь: розбираємо й показуємо, що зрозуміли.
+ *
+ * Розбір той самий, що на сайті (`parseProfile`), і той самий, що вже стояв
+ * у боті для тексту посеред питань. Змінилось не те, ЯК читаємо, а те, що
+ * читання стало головним шляхом, а кнопки — запасним.
+ */
+async function handleOpenAnswer(
+  env: Env, chatId: number, step: Step, draft: Draft, text: string,
+  mode: Mode, messageId: number | null, locale: Locale
+): Promise<void> {
+  const parsed = await parseProfile(text, env.ANTHROPIC_API_KEY ?? null);
+  mergeIntoDraft(draft, parsed, text);
+  // Саме `understood`, а не результат mergeIntoDraft: та каже «змінилось» і
+  // тоді, коли просто склала нерозібраний текст у побажання. Див. її коментар.
+  const to = nextMode(mode, { parsed: understood(draft, step) });
+
+  await dropKeyboard(env, chatId, messageId);
+
+  if (to === "pick") {
+    // Мовчазної відмови бути не може: саме нею закінчився вільний текст у
+    // серпні. Кажемо прямо й одразу даємо список.
+    const id = await sendKeyboard(env, chatId,
+      `${notRecognisedLine(locale)}\n\n${questionText(step, locale)}`,
+      keyboard(step, draft, locale));
+    await saveState(chatId, step, draft, id, "pick");
+    return;
+  }
+
+  /**
+   * Приклади шукаються АНГЛІЙСЬКОЮ роллю.
+   *
+   * Назви вакансій у кеші англійські, тож «комуніті менеджер» не збігся б із
+   * жодною, і той, хто пише кирилицею, не побачив би прикладів ніколи.
+   * Переклад робить той самий `normalizeFreeText`, що наповнює
+   * `custom_role_en`, тож слово тут і слово в підборі — одне й те саме.
+   */
+  let samples: Array<{ title: string; company: string }> = [];
+  if (step === "spheres") {
+    const roleEn = await normalizeFreeText(draft.customRole, env.ANTHROPIC_API_KEY ?? null,
+      (u) => logUsage({ operation: "normalize_text", ...u }));
+    samples = await sampleJobs(roleEn ?? draft.customRole);
+  }
+
+  const id = await sendKeyboard(env, chatId,
+    confirmText(step, draft, samples, locale), confirmKeyboard(step, locale));
+  await saveState(chatId, step, draft, id, "confirm");
 }
 
 async function finishOnboarding(

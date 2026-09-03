@@ -401,3 +401,91 @@ describe("рядок про невпізнане", () => {
     }
   });
 });
+
+import { nextMode } from "./bot-onboarding";
+
+/**
+ * Три режими одного кроку. `pick` — це поведінка до цієї зміни, тож у нього
+ * веде кожен випадок, у якому розмова не вдалася. Гірший випадок нового
+ * потоку дорівнює старому, і це головна властивість усієї перебудови.
+ */
+describe("режими кроку анкети", () => {
+  it("написане й розібране веде до підтвердження", () => {
+    expect(nextMode("ask", { parsed: true })).toBe("confirm");
+  });
+
+  /**
+   * Найважливіший перехід. Вільний текст у 2026-08 провалився саме тим, що
+   * на «тест» бот мовчки зберігав порожній профіль. Порожній розбір мусить
+   * вести до кнопок, а не до порожнього підтвердження.
+   */
+  it("порожній розбір веде до кнопок, а не до порожнього підтвердження", () => {
+    expect(nextMode("ask", { parsed: false })).toBe("pick");
+  });
+
+  it("«Показати список» веде до кнопок з будь-якого режиму", () => {
+    expect(nextMode("ask", { listed: true })).toBe("pick");
+    expect(nextMode("confirm", { listed: true })).toBe("pick");
+  });
+
+  it("«Не те» веде до кнопок", () => {
+    expect(nextMode("confirm", { rejected: true })).toBe("pick");
+  });
+
+  /** Людина дописує уточнення замість того, щоб тиснути «Не те». */
+  it("текст у підтвердженні — це виправлення, знову підтвердження", () => {
+    expect(nextMode("confirm", { parsed: true })).toBe("confirm");
+  });
+
+  /** Із кнопок назад у розмову не повертаємось: людина вже обрала спосіб. */
+  it("з кнопок нічого не виводить назад у розмову", () => {
+    expect(nextMode("pick", { parsed: true })).toBe("pick");
+  });
+});
+
+import { understood } from "./bot-onboarding";
+
+/**
+ * Найважливіша перевірка всієї перебудови.
+ *
+ * `mergeIntoDraft` каже «щось змінилось» і тоді, коли просто склала
+ * НЕРОЗІБРАНИЙ текст у побажання. Якби режим спирався на неї, слово «тест»
+ * дало б підтвердження замість списку — рівно той провал 2026-08, від якого
+ * ми й тікаємо. Зрозуміле мусить означати «розібрано в поле того питання,
+ * яке ми поставили», а не «текст кудись покладено».
+ */
+describe("що вважається зрозумілим", () => {
+  const nothing = {
+    spheres: [], industries: [], customRole: null, customIndustry: null,
+    remoteMode: "", location: null,
+  };
+
+  it("«тест» не зрозуміло ні на одному кроці", () => {
+    for (const step of ["spheres", "industries", "where"] as const) {
+      expect(understood(nothing, step), step).toBe(false);
+    }
+  });
+
+  it("написана посада — зрозуміло", () => {
+    expect(understood({ ...nothing, customRole: "комуніті менеджер" }, "spheres")).toBe(true);
+  });
+
+  it("виведена сфера без слів людини — теж зрозуміло", () => {
+    expect(understood({ ...nothing, spheres: ["devrel"] }, "spheres")).toBe(true);
+  });
+
+  /** Відповідь не на те питання не рахується: місця ми так і не почули. */
+  it("посада не робить зрозумілим питання про місце", () => {
+    expect(understood({ ...nothing, customRole: "developer" }, "where")).toBe(false);
+  });
+
+  it("галузь рахується і словом людини, і галочкою", () => {
+    expect(understood({ ...nothing, industries: ["web3"] }, "industries")).toBe(true);
+    expect(understood({ ...nothing, customIndustry: "кліматтех" }, "industries")).toBe(true);
+  });
+
+  it("місце рахується режимом або містом", () => {
+    expect(understood({ ...nothing, remoteMode: "remote_only" }, "where")).toBe(true);
+    expect(understood({ ...nothing, location: "Берлін" }, "where")).toBe(true);
+  });
+});
