@@ -244,11 +244,32 @@ for (const group of ROLE_SYNONYMS) for (const w of group) SYNONYM_OF.set(w, grou
 /** Саме слово плюс усі, що означають те саме. */
 const variantsOf = (word: string): string[] => SYNONYM_OF.get(word) ?? [word];
 
+/**
+ * Слово ролі має починати слово в назві, а не ховатись усередині нього.
+ *
+ * Тут стояв простий `includes`, і «communication» збігалося з
+ * «Telecommunications»: людина з роллю «Head of Communication» отримала
+ * «Solutions Architect - Global Telecommunications» з повним збігом за роллю
+ * (+12). Так само «art» жило б у «Start» чи «Smart».
+ *
+ * Кінець слова лишається вільним навмисно: «communication» має збігатися з
+ * «Communications», «market» з «Marketing». Обрізає лише початок, бо саме
+ * там ховається чуже слово.
+ */
+const WORD_START = new Map<string, RegExp>();
+const startsWord = (title: string, variant: string): boolean => {
+  let re = WORD_START.get(variant);
+  if (!re) {
+    re = new RegExp(`(?<!\\p{L})${variant.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "iu");
+    WORD_START.set(variant, re);
+  }
+  return re.test(title);
+};
+
 export function matchesCustomRole(title: string, role: string | null | undefined): boolean {
   const words = roleWords(role).filter((w) => levelTier(w) === null);
   if (words.length === 0) return false;
-  const t = title.toLowerCase();
-  return words.every((w) => variantsOf(w).some((v) => t.includes(v)));
+  return words.every((w) => variantsOf(w).some((v) => startsWord(title, v)));
 }
 
 /**
@@ -279,8 +300,7 @@ export function meaningfulRoleWords(role: string | null | undefined): string[] {
 export function partiallyMatchesRole(title: string, role: string | null | undefined): boolean {
   const meaningful = meaningfulRoleWords(role);
   if (meaningful.length === 0) return false;
-  const t = title.toLowerCase();
-  return meaningful.some((w) => variantsOf(w).some((v) => t.includes(v)));
+  return meaningful.some((w) => variantsOf(w).some((v) => startsWord(title, v)));
 }
 
 /**
@@ -962,7 +982,21 @@ export function inCountries(job: CandidateJob, mine: string[]): boolean {
 
 export function reachable(job: CandidateJob, p: Profile): boolean {
   if (job.remote) return true;
-  if (remoteOnly(p.remoteMode)) return true;   // там свій штраф, -6 за onsite
+  /**
+   * «Лише віддалено» це умова, а не побажання.
+   *
+   * Тут стояло `return true` зі штрафом −6 в оцінці, і на живому прогоні
+   * 03.09 людина з remote_only отримала пʼять офісних вакансій із пʼяти:
+   * штраф важить менше, ніж збіг за роллю, тож офіс у Сан-Франциско
+   * обганяв віддалену роботу зі слабшою назвою.
+   *
+   * Вакансія без жодної локації лишається: там прапорець «віддалено» просто
+   * не проставлений, а не сказано «приходь у офіс». У свіжому кеші таких
+   * 2 559 проти 30 явно позначених неправильно, тобто це справді «невідомо»,
+   * а не «офіс». Решта відсікається: віддалених вакансій у кеші 8 369, і
+   * підбирати є з чого.
+   */
+  if (remoteOnly(p.remoteMode)) return !job.location?.trim();
   if (willRelocate(p.remoteMode)) return true;
   if (!job.location?.trim()) return false;     // офіс невідомо де — нікуди ходити
   return placeFit(placeOf(job.location), countriesOf(p)) !== "miss";

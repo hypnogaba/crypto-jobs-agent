@@ -1108,3 +1108,23 @@ describe("trimCaveat", () => {
     expect(safeWhy("Немає очевидних збігів із профілем комуніті менеджера, хоча компанія у Web3.")).toBeNull();
   });
 });
+
+// ── Слово ролі всередині чужого слова ─────────────────────────
+import { partiallyMatchesRole } from "./match.js";
+
+describe("слово ролі має починати слово", () => {
+  it("не бере «communication» з «Telecommunications»", () => {
+    expect(matchesCustomRole("Solutions Architect - Global Telecommunications", "Head of Communication")).toBe(false);
+    expect(partiallyMatchesRole("Solutions Architect - Global Telecommunications", "Head of Communication")).toBe(false);
+  });
+  it("але бере множину й похідні", () => {
+    expect(matchesCustomRole("Director, Corporate Communication & Branding", "Head of Communication")).toBe(true);
+    expect(matchesCustomRole("Executive Communications Manager", "Head of Communication")).toBe(true);
+    expect(partiallyMatchesRole("Senior Marketing Manager", "market researcher")).toBe(true);
+  });
+  it("звичайні збіги не ламаються", () => {
+    expect(matchesCustomRole("User Community Manager", "community manager")).toBe(true);
+    expect(matchesCustomRole("Backend Engineer - Solana", "Solana auditor")).toBe(false);
+    expect(partiallyMatchesRole("Backend Engineer - Solana", "Solana auditor")).toBe(true);
+  });
+});
