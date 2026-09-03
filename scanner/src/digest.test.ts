@@ -917,13 +917,17 @@ describe("картка не повторює той самий рядок п'я�
    * саму роботу. Витяг з оголошення різний у кожної вакансії й уже лежить у
    * базі — досі його просто не брали, коли модель не відповіла.
    */
+  /**
+   * Мова тут «en» навмисно: витяг живе мовою оголошення, і в картку іншою
+   * мовою він не потрапляє (див. «картка говорить мовою людини»).
+   */
   it("без рядка від моделі бере витяг із оголошення", () => {
     const text = formatDigest([
-      job(1, { roleLine: null, summary: "Проєктування ігрових механік і економіки рівнів." }),
-      job(2, { roleLine: null, summary: "Дизайн бренду для фінтех-продукту." }),
-    ], "uk");
-    expect(text).toContain("Проєктування ігрових механік");
-    expect(text).toContain("Дизайн бренду");
+      job(1, { roleLine: null, summary: "Designing game mechanics and level economy." }),
+      job(2, { roleLine: null, summary: "Brand design for a fintech product." }),
+    ], "en");
+    expect(text).toContain("Designing game mechanics");
+    expect(text).toContain("Brand design");
   });
 
   it("рядок від моделі важливіший за витяг", () => {
@@ -1023,8 +1027,61 @@ describe("наслідки дедуплікації, знайдені на жи�
 
   /** Витяг інколи починається зірочкою чи маркером списку з оголошення. */
   it("прибирає маркер на початку витягу", () => {
-    const text = formatDigest([j(1, { summary: "*Open to hiring remote across the US." })], "uk");
+    const text = formatDigest([j(1, { summary: "*Open to hiring remote across the US." })], "en");
     expect(text).toContain("Open to hiring");
     expect(text).not.toContain("*Open");
+  });
+});
+
+/**
+ * Скарга 03.09, друга: «все по українськи повинно було бути».
+ *
+ * Запасний рядок брався з `jobs_cache.summary`, а він мовою оголошення,
+ * тобто англійською. В українській добірці з'явився англійський абзац — рівно
+ * та вада, яку в цьому продукті вже виправляли раніше, коли опис і переклад
+ * були двома різними викликами.
+ *
+ * Правило просте: рядок про роботу або мовою людини, або його немає.
+ */
+describe("картка говорить мовою людини", () => {
+  const j = (over: Partial<DigestJob> = {}): DigestJob => ({
+    id: "j1", company: "C", companyKey: "c", title: "T",
+    location: "Berlin", remote: true, url: "u", tags: [], postedAt: null,
+    salaryMin: null, salaryMax: null, salaryCurrency: null, summary: null,
+    source: "s", country: null, sentId: "s1", why: "причина",
+    ...over,
+  } as DigestJob);
+
+  const english = "As Bolter's founding designer, you will rethink how people work with AI agents.";
+
+  it("англійський витяг не потрапляє в українську картку", () => {
+    const text = formatDigest([j({ roleLine: null, summary: english })], "uk");
+    expect(text).not.toContain("founding designer");
+  });
+
+  it("і у французьку теж", () => {
+    expect(formatDigest([j({ roleLine: null, summary: english })], "fr"))
+      .not.toContain("founding designer");
+  });
+
+  it("в англійській картці витяг лишається: це її мова", () => {
+    expect(formatDigest([j({ roleLine: null, summary: english })], "en"))
+      .toContain("founding designer");
+  });
+
+  /**
+   * Рядок від моделі вже написаний мовою людини, тож він іде в будь-яку
+   * картку. Саме він і є звичайним шляхом; витяг — лише запасний.
+   */
+  it("рядок від моделі йде в українську картку без питань", () => {
+    expect(formatDigest([j({ roleLine: "Проєктування ігрових механік." })], "uk"))
+      .toContain("Проєктування ігрових механік");
+  });
+
+  /** Без витягу картка лишається з умовами роботи, і вони теж її мовою. */
+  it("замість чужого тексту лишаються умови роботи", () => {
+    const text = formatDigest([j({ roleLine: null, summary: english })], "uk");
+    expect(text).toContain("Berlin");
+    expect(text).toContain("віддалено");
   });
 });
