@@ -142,7 +142,7 @@ describe("правка по пунктах", () => {
     for (const step of EDITABLE) expect(data).toContain(`ed:${step}`);
     expect(data).toContain("ed:lang");
     expect(profileMenu("uk").flat().map((b) => b.text))
-      .toEqual(["Роль", "Галузь", "Місце", "Зарплата", "Побажання", "Стек", "Мова", "Година"]);
+      .toEqual(["Посада", "Галузь", "Місце", "Зарплата", "Побажання", "Стек", "Мова", "Година"]);
   });
 
   it("клавіатура з префіксом ed: не плутається з онбордингом", () => {
@@ -293,5 +293,111 @@ describe("стек, роки, мови — те саме поле в боті й
     expect(nowOf("cv", { ...emptyDraft(), cvHighlights: "Go, 6 років, EN/UA" }, "uk"))
       .toContain("Go, 6 років, EN/UA");
     expect(nowOf("cv", emptyDraft(), "uk")).toBeNull();
+  });
+});
+
+import { ASK_FRAME_BANNED, OPEN_STEPS } from "./bot-onboarding";
+
+/**
+ * Продукт шукає роботу, а анкета питала «яка твоя роль», тобто про минуле.
+ * Той, хто змінює напрям, чесно відповідав про роботу, від якої йде, і
+ * отримував добірку туди ж. Рамку легко зламати назад однією правкою тексту,
+ * тому вона під тестом, а не лише в коментарі.
+ */
+describe("питання стоять у рамці пошуку, а не минулого", () => {
+  const locales = ["en", "uk", "fr", "ru"] as const;
+
+  for (const locale of locales) {
+    it(`${locale}: жодне відкрите питання не питає, ким людина є`, () => {
+      for (const step of OPEN_STEPS) {
+        const text = questionText(step, locale).toLowerCase();
+        for (const banned of ASK_FRAME_BANNED) {
+          expect(text, `${step}/${locale}: «${banned}»`).not.toContain(banned);
+        }
+      }
+    });
+
+    it(`${locale}: кожне відкрите питання дає приклад відповіді`, () => {
+      for (const step of OPEN_STEPS) {
+        // Приклад — це те, що робить відкрите питання відповідальним. Без
+        // нього людина не знає, скільки писати, і це вже раз провалилось.
+        expect(questionText(step, locale).split("\n").length,
+          `${step}/${locale}`).toBeGreaterThan(1);
+      }
+    });
+  }
+});
+
+import { askKeyboard, confirmKeyboard, confirmText, notRecognisedLine } from "./bot-onboarding";
+
+describe("клавіатура відкритого питання", () => {
+  it("посада має один вихід: до списку", () => {
+    expect(askKeyboard("spheres", "uk").flat().map((b) => b.callback_data))
+      .toEqual(["ob:spheres:__list"]);
+  });
+
+  /** Галузь необов'язкова, тож пропустити її треба з першого екрана. */
+  it("галузь має ще й «Пропустити»", () => {
+    expect(askKeyboard("industries", "uk").flat().map((b) => b.callback_data))
+      .toEqual(["ob:industries:__next", "ob:industries:__list"]);
+  });
+
+  it("кнопки підписані мовою людини", () => {
+    expect(askKeyboard("spheres", "fr").flat()[0]!.text).toMatch(/liste/i);
+  });
+});
+
+describe("клавіатура підтвердження", () => {
+  it("далі й виправити, обидві прив'язані до свого кроку", () => {
+    expect(confirmKeyboard("spheres", "uk").flat().map((b) => b.callback_data))
+      .toEqual(["ob:spheres:__yes", "ob:spheres:__no"]);
+  });
+});
+
+describe("текст підтвердження", () => {
+  const draft = { ...emptyDraft(), customRole: "комуніті менеджер", spheres: ["devrel"] };
+
+  it("цитує слова людини", () => {
+    expect(confirmText("spheres", draft, [], "uk")).toContain("комуніті менеджер");
+  });
+
+  /**
+   * Виведений напрям мусить бути підписаний як виведений. Скарга «галочки не
+   * мої» вже була, і ParsedProfile.suggested існує рівно заради цієї межі.
+   */
+  it("показує виведений напрям", () => {
+    expect(confirmText("spheres", draft, [], "uk")).toContain("DevRel");
+  });
+
+  it("вставляє приклади вакансій із компаніями", () => {
+    const t = confirmText("spheres", draft,
+      [{ title: "Community Manager", company: "Polygon" }], "uk");
+    expect(t).toContain("Community Manager");
+    expect(t).toContain("Polygon");
+  });
+
+  /** Порожні приклади — теж відповідь, і корисна. Мовчати тут гірше. */
+  it("без прикладів каже про це прямо", () => {
+    expect(confirmText("spheres", draft, [], "uk")).toMatch(/нічого немає/i);
+  });
+
+  it("для галузі прикладів вакансій не показуємо", () => {
+    const ind = { ...emptyDraft(), industries: ["web3"] };
+    expect(confirmText("industries", ind, [], "uk")).not.toMatch(/нічого немає/i);
+  });
+
+  it("для місця показує і режим, і місто", () => {
+    const w = { ...emptyDraft(), remoteMode: "remote_or_city", location: "Берлін" };
+    const t = confirmText("where", w, [], "uk");
+    expect(t).toContain("Берлін");
+    expect(t).toMatch(/офіс/i);
+  });
+});
+
+describe("рядок про невпізнане", () => {
+  it("є в усіх чотирьох мовах і не мовчить", () => {
+    for (const l of ["en", "uk", "fr", "ru"] as const) {
+      expect(notRecognisedLine(l).length).toBeGreaterThan(10);
+    }
   });
 });

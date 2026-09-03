@@ -31,6 +31,36 @@ export const STEPS: Step[] = ["spheres", "wishes", "cv", "industries", "where", 
 /** Поля, які людина редагує по одному через /profile. Мова й година живуть у users, не в profiles. */
 export const EDITABLE: Step[] = ["spheres", "industries", "where", "salary", "wishes", "cv", "tz"];
 
+/**
+ * Питання, які ставляться словами, а не кнопками.
+ *
+ * Скарга від живої людини: у боті не зрозуміло, ЯКА ПОСАДА може бути за
+ * питанням. Дані це підтверджують: 18 із 25 профілів написали роль текстом, і
+ * там, де є і текст, і галочки, галочки часто не ті. «Комуніті менеджер»
+ * натиснув «Інженерія», «intern solana developer» — «Продукт», а двоє, хто не
+ * написав нічого, натиснули по чотири незв'язані сфери.
+ *
+ * Код це вже знав: у `match.ts` названа роль коштує 12 балів, а сфера 6. Ми
+ * лише перестаємо питати грубішим способом першим.
+ *
+ * Зарплата сюди не входить навмисно: це число, а не категорія, і нерозуміння
+ * там не виникає.
+ */
+export const OPEN_STEPS: Step[] = ["spheres", "industries", "where"];
+
+/**
+ * Слова, якими анкета питала про МИНУЛЕ.
+ *
+ * Продукт шукає роботу, а питання звучало «яка твоя роль», тобто ким людина
+ * є. Той, хто змінює напрям, чесно відповідав про роботу, від якої йде.
+ * Список експортовано заради тесту: рамку легко зламати назад однією правкою
+ * тексту, і жоден коментар цього не спинить.
+ */
+export const ASK_FRAME_BANNED = [
+  "твоя роль", "your role", "votre poste", "какая твоя роль",
+  "ким ти працюєш", "what do you do", "que faites-vous", "кем ты работаешь",
+];
+
 export interface Draft {
   spheres: string[];
   /** Своя назва ролі, коли жодна сфера не підійшла. */
@@ -116,22 +146,22 @@ type Phrase = { en: string; uk: string; fr: string; ru: string };
 
 const ASK: Record<Step, Phrase> = {
   spheres: {
-    en: "1 of 3 · What is your role?\nPick everything that fits.",
-    uk: "1 з 3 · Яка твоя роль?\nОбери все, що підходить.",
-    fr: "1 sur 3 · Quel est votre poste ?\nChoisissez tout ce qui convient.",
-    ru: "1 из 3 · Какая твоя роль?\nВыбери всё, что подходит.",
+    en: "1 of 3 · What job are you looking for?\nWrite it as a job title. For example: community manager, Solana developer, product designer.",
+    uk: "1 з 3 · Яку роботу шукаєш?\nНапиши назвою посади. Наприклад: комуніті менеджер, Solana developer, продуктовий дизайнер.",
+    fr: "1 sur 3 · Quel emploi cherchez-vous ?\nÉcrivez-le comme un intitulé de poste. Par exemple : community manager, développeur Solana, designer produit.",
+    ru: "1 из 3 · Какую работу ищешь?\nНапиши названием должности. Например: комьюнити менеджер, Solana developer, продуктовый дизайнер.",
   },
   industries: {
-    en: "2 of 3 · Any industry you care about?\nOptional — skip if it does not matter.",
-    uk: "2 з 3 · Якась галузь цікавить?\nНеобов'язково — пропусти, якщо байдуже.",
-    fr: "2 sur 3 · Un secteur en particulier ?\nFacultatif — passez si peu importe.",
-    ru: "2 из 3 · Какая-то отрасль интересует?\nНеобязательно — пропусти, если всё равно.",
+    en: "2 of 3 · Which industry do you want to work in?\nOptional. For example: web3, fintech, games. Or skip.",
+    uk: "2 з 3 · У якій галузі хочеш працювати?\nНеобов'язково. Наприклад: web3, фінтех, ігри. Або пропусти.",
+    fr: "2 sur 3 · Dans quel secteur voulez-vous travailler ?\nFacultatif. Par exemple : web3, fintech, jeux. Ou passez.",
+    ru: "2 из 3 · В какой отрасли хочешь работать?\nНеобязательно. Например: web3, финтех, игры. Или пропусти.",
   },
   where: {
-    en: "3 of 3 · Where do you want to work?",
-    uk: "3 з 3 · Де хочеш працювати?",
-    fr: "3 sur 3 · Où voulez-vous travailler ?",
-    ru: "3 из 3 · Где хочешь работать?",
+    en: "3 of 3 · Where are you looking?\nFor example: remote only · office in Berlin or remote · open to relocating within the EU.",
+    uk: "3 з 3 · Де шукаєш роботу?\nНаприклад: тільки віддалено · офіс у Берліні або віддалено · готовий переїхати в ЄС.",
+    fr: "3 sur 3 · Où cherchez-vous ?\nPar exemple : à distance uniquement · bureau à Berlin ou à distance · prêt à déménager dans l'UE.",
+    ru: "3 из 3 · Где ищешь работу?\nНапример: только удалённо · офис в Берлине или удалённо · готов переехать в ЕС.",
   },
   /**
    * Стек, роки, мови — питання, якого в боті не було зовсім.
@@ -144,16 +174,16 @@ const ASK: Record<Step, Phrase> = {
    * не впливає — лише на слова, і саме тому пропуск був непомітним.
    */
   cv: {
-    en: "Stack, years, languages?\nTwo lines are enough — this sharpens the five you get. Or skip.",
-    uk: "Стек, роки, мови?\nДвох рядків досить — це уточнює ті п'ять, що приходять. Або пропусти.",
-    fr: "Stack, années, langues ?\nDeux lignes suffisent — cela affine les cinq reçues. Ou passez.",
-    ru: "Стек, годы, языки?\nДвух строк достаточно — это уточняет те пять, что приходят. Или пропусти.",
+    en: "What from your experience is worth mentioning?\nTwo lines are enough — it sharpens why a job fits you. Or skip.",
+    uk: "Що з досвіду варто згадати?\nДвох рядків досить — це уточнює, чому вакансія тобі підходить. Або пропусти.",
+    fr: "Qu'est-ce qui, dans votre expérience, mérite d'être mentionné ?\nDeux lignes suffisent — cela affine pourquoi une offre vous convient. Ou passez.",
+    ru: "Что из опыта стоит упомянуть?\nДвух строк достаточно — это уточняет, почему вакансия тебе подходит. Или пропусти.",
   },
   wishes: {
-    en: "Anything important that is not in the buttons?\nWrite it, or skip.",
-    uk: "Є щось важливе, чого нема в кнопках?\nНапиши або пропусти.",
-    fr: "Quelque chose d'important qui n'est pas dans les boutons ?\nÉcrivez-le, ou passez.",
-    ru: "Есть что-то важное, чего нет в кнопках?\nНапиши или пропусти.",
+    en: "What else matters in your next job?\nWrite it, or skip.",
+    uk: "Що ще важливо в наступній роботі?\nНапиши або пропусти.",
+    fr: "Qu'est-ce qui compte d'autre dans votre prochain poste ?\nÉcrivez-le, ou passez.",
+    ru: "Что ещё важно в следующей работе?\nНапиши или пропусти.",
   },
   tz: {
     en: "What time is it for you right now?\nThis sets when the digest arrives.",
@@ -221,6 +251,39 @@ const WORD = {
     fr: "Écrivez ce qui compte — en un message. Votre niveau aussi, si besoin : senior ou plus, premier emploi, responsable.",
     ru: "Напиши, что важно, — одним сообщением. Уровень тоже, если он важен: senior и выше, первая работа, руководитель направления.",
   },
+  showList: {
+    en: "Show the list", uk: "Показати список",
+    fr: "Voir la liste", ru: "Показать список",
+  },
+  yesNext: {
+    en: "Yes, next", uk: "Так, далі", fr: "Oui, suivant", ru: "Да, дальше",
+  },
+  notRight: {
+    en: "Not right", uk: "Не те", fr: "Pas ça", ru: "Не то",
+  },
+  /** Підпис до того, що ми ВИВЕЛИ, а не почули. Скарга «галочки не мої» була саме про це. */
+  derived: {
+    en: "Area", uk: "Напрям", fr: "Domaine", ru: "Направление",
+  },
+  samplesIntro: {
+    en: "Jobs like this are open now:",
+    uk: "Ось такі вакансії зараз є:",
+    fr: "Des offres comme celles-ci sont ouvertes :",
+    ru: "Вот такие вакансии сейчас есть:",
+  },
+  noSamples: {
+    en: "Nothing is open under those words right now. Try another title, or pick from the list.",
+    uk: "За цими словами зараз нічого немає. Спробуй іншу назву або обери зі списку.",
+    fr: "Rien d'ouvert sous ces mots pour l'instant. Essayez un autre intitulé, ou choisissez dans la liste.",
+    ru: "По этим словам сейчас ничего нет. Попробуй другое название или выбери из списка.",
+  },
+  /** Мовчазної відмови бути не може: саме нею закінчився вільний текст у 2026-08. */
+  notRecognised: {
+    en: "I did not catch that. Pick from the list below.",
+    uk: "Не впізнав написане. Обери зі списку нижче.",
+    fr: "Je n'ai pas compris. Choisissez dans la liste ci-dessous.",
+    ru: "Не разобрал написанное. Выбери из списка ниже.",
+  },
   mine: {
     en: "Not in the list",
     uk: "Немає в списку",
@@ -264,7 +327,7 @@ const WORD = {
   // Продажі, QA — тобто ЧИМ людина займається. Поруч, у тому самому питанні,
   // «Немає в списку» веде в поле, яке ми вже звемо «Своя роль», — список і
   // його ж «мій варіант» називались різними словами. Те саме з галуззю.
-  fSpheres:    { en: "Role",     uk: "Роль",    fr: "Poste",   ru: "Роль" },
+  fSpheres:    { en: "Position", uk: "Посада",  fr: "Poste",   ru: "Должность" },
   fIndustries: { en: "Industry", uk: "Галузь",  fr: "Secteur", ru: "Отрасль" },
   fWhere:      { en: "Place",      uk: "Місце",      fr: "Lieu",      ru: "Место" },
   fSalary:     { en: "Salary",     uk: "Зарплата",   fr: "Salaire",   ru: "Зарплата" },
@@ -292,6 +355,77 @@ export interface KeyboardOptions {
   prefix?: "ob" | "ed";
   /** Момент, від якого рахуються кнопки «котра година». Ззовні — заради тестів. */
   now?: Date;
+}
+
+/**
+ * Клавіатура відкритого питання.
+ *
+ * Одна кнопка, і та — вихід. Кожна зайва кнопка тут повертає нас туди, звідки
+ * ми йдемо: людина читає варіанти замість того, щоб назвати свою роботу.
+ * «Пропустити» стоїть лише під галуззю, бо лише вона необов'язкова.
+ */
+export function askKeyboard(step: Step, locale: Locale): Button[][] {
+  const row: Button[] = [];
+  if (step === "industries") {
+    row.push({ text: say(WORD.skip, locale), callback_data: `ob:${step}:__next` });
+  }
+  row.push({ text: say(WORD.showList, locale), callback_data: `ob:${step}:__list` });
+  return [row];
+}
+
+/** Дві кнопки під тим, що ми зрозуміли. «Не те» веде до сьогоднішнього списку. */
+export function confirmKeyboard(step: Step, locale: Locale): Button[][] {
+  return [[
+    { text: say(WORD.yesNext, locale), callback_data: `ob:${step}:__yes` },
+    { text: say(WORD.notRight, locale), callback_data: `ob:${step}:__no` },
+  ]];
+}
+
+export const notRecognisedLine = (locale: Locale): string => say(WORD.notRecognised, locale);
+
+/**
+ * Що ми зрозуміли з написаного — і три справжні вакансії за цими словами.
+ *
+ * Приклади відповідають на саму скаргу («не зрозуміло, яка посада може
+ * бути») буквально: людина бачить назви й компанії, а не категорію. Числа
+ * тут немає навмисно — воно було б обіцянкою обсягу, а точну логіку збігу
+ * має сканер, не ми (див. role-samples.ts).
+ *
+ * Написане людиною цитується її словами, виведене підписується як виведене:
+ * скарга «галочки не мої» вже була.
+ */
+export function confirmText(
+  step: Step, draft: Draft, samples: Array<{ title: string; company: string }>, locale: Locale
+): string {
+  const lines: string[] = [say(WORD.searchingFor, locale)];
+  const row = (k: Phrase, v: string) => lines.push(`  ${say(k, locale)}: ${v}`);
+
+  if (step === "spheres") {
+    const spheres = draft.spheres
+      .map((id) => SPHERES.find((x) => x.id === id))
+      .filter(Boolean).map((x) => label(x!, locale)).join(", ");
+    if (draft.customRole) {
+      row(WORD.fSpheres, draft.customRole);
+      if (spheres) row(WORD.derived, spheres);
+    } else if (spheres) {
+      row(WORD.fSpheres, spheres);
+    }
+    lines.push("");
+    if (samples.length > 0) {
+      lines.push(say(WORD.samplesIntro, locale));
+      for (const j of samples) lines.push(`  · ${j.title} — ${j.company}`);
+    } else {
+      lines.push(say(WORD.noSamples, locale));
+    }
+    return lines.join("\n");
+  }
+
+  // Галузь і місце прикладів не отримують: назва вакансії їх не називає, а
+  // показувати «ось такі бувають» під словом «фінтех» означало б показувати
+  // випадкове.
+  const value = currentOf(step, draft, locale);
+  row(step === "industries" ? WORD.fIndustries : WORD.fWhere, value ?? "—");
+  return lines.join("\n");
 }
 
 /**

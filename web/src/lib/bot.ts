@@ -114,23 +114,40 @@ async function ackButton(env: Env, callbackId: string): Promise<void> {
   await callTelegram(env.TELEGRAM_BOT_TOKEN, "answerCallbackQuery", { callback_query_id: callbackId });
 }
 
-interface StateRow { step: string; draft: string; message_id: number | null }
+/**
+ * Режим кроку анкети.
+ *
+ * `ask` — відкрите питання без клавіатури, крім виходів. `confirm` — що ми
+ * зрозуміли з написаного, з прикладами вакансій. `pick` — сьогоднішня
+ * клавіатура, тобто поведінка до цієї зміни. У `pick` можна потрапити
+ * кнопкою, відповіддю «Не те» або автоматично, коли розбір нічого не дав,
+ * тож гірший випадок нового потоку дорівнює старому.
+ */
+export type Mode = "ask" | "confirm" | "pick";
+
+interface StateRow { step: string; draft: string; message_id: number | null; mode?: string | null }
 
 const readDraft = (raw: string): Draft => {
   try { return { ...emptyDraft(), ...(JSON.parse(raw) as Partial<Draft>) }; }
   catch { return emptyDraft(); }
 };
 
-async function saveState(chatId: number, step: Step, draft: Draft, messageId: number | null): Promise<void> {
+async function saveState(
+  chatId: number, step: Step, draft: Draft, messageId: number | null, mode: Mode = "ask"
+): Promise<void> {
   await run(
-    `INSERT INTO bot_state (chat_id,step,draft,message_id,updated_at)
-     VALUES (?,?,?,?,datetime('now'))
+    `INSERT INTO bot_state (chat_id,step,draft,message_id,mode,updated_at)
+     VALUES (?,?,?,?,?,datetime('now'))
      ON CONFLICT(chat_id) DO UPDATE SET
-       step=excluded.step, draft=excluded.draft,
+       step=excluded.step, draft=excluded.draft, mode=excluded.mode,
        message_id=COALESCE(excluded.message_id, bot_state.message_id),
        updated_at=datetime('now')`,
-    String(chatId), step, JSON.stringify(draft), messageId);
+    String(chatId), step, JSON.stringify(draft), messageId, mode);
 }
+
+/** Режим із бази. Старий рядок без колонки читається як `pick`: він і був кнопковим. */
+const modeOf = (row: { mode?: string | null }): Mode =>
+  row.mode === "ask" || row.mode === "confirm" ? row.mode : "pick";
 
 /**
  * /start. Тому, хто вже має профіль, анкету не перезапускаємо мовчки —
@@ -179,7 +196,7 @@ export async function handleStartButton(
   if (data === "st:restart") { await startBotOnboarding(env, chatId, locale, true); return true; }
   if (data === "st:edit") {
     const user = await one<{ id: string }>("SELECT id FROM users WHERE telegram_chat_id=?", String(chatId));
-    const row = await one<StateRow>("SELECT step,draft,message_id FROM bot_state WHERE chat_id=?", String(chatId));
+    const row = await one<StateRow>("SELECT step,draft,message_id,mode FROM bot_state WHERE chat_id=?", String(chatId));
     if (user) await showProfileMenu(env, chatId, user.id, locale, row?.message_id ?? null);
   }
   return true;
@@ -219,7 +236,7 @@ export async function handleOnboardingButton(
   const [, field, value] = data.split(":");
   if (field === "noop" || !field || value === undefined) return true;
 
-  const row = await one<StateRow>("SELECT step,draft,message_id FROM bot_state WHERE chat_id=?", String(chatId));
+  const row = await one<StateRow>("SELECT step,draft,message_id,mode FROM bot_state WHERE chat_id=?", String(chatId));
   if (!row) return true;                       // стан загубився — мовчимо, /start почне заново
 
   const draft = readDraft(row.draft);
@@ -419,7 +436,7 @@ export async function handleUndoButton(
 export async function handleOnboardingText(
   env: Env, chatId: number, text: string, locale: Locale
 ): Promise<boolean> {
-  const row = await one<StateRow>("SELECT step,draft,message_id FROM bot_state WHERE chat_id=?", String(chatId));
+  const row = await one<StateRow>("SELECT step,draft,message_id,mode FROM bot_state WHERE chat_id=?", String(chatId));
   if (!row) return false;
 
   if (row.step === "why") {
@@ -757,7 +774,7 @@ export async function handleEditButton(
   if (!field || field === "noop") return true;
 
   // Якір читаємо завжди: у ньому живе і меню, і питання, і підтвердження.
-  const row = await one<StateRow>("SELECT step,draft,message_id FROM bot_state WHERE chat_id=?", String(chatId));
+  const row = await one<StateRow>("SELECT step,draft,message_id,mode FROM bot_state WHERE chat_id=?", String(chatId));
   const at = row?.message_id ?? null;
 
   // «Назад»: нічого не записуємо, просто повертаємо меню в те саме повідомлення.
@@ -1018,7 +1035,7 @@ export async function handleLangButton(
   if (!user || !isLocale(next)) return true;
 
   // Мову міняли з меню правки — туди ж і повертаємось, уже новою мовою.
-  const row = await one<StateRow>("SELECT step,draft,message_id FROM bot_state WHERE chat_id=?", String(chatId));
+  const row = await one<StateRow>("SELECT step,draft,message_id,mode FROM bot_state WHERE chat_id=?", String(chatId));
   if (row?.step === "edit:lang") {
     await saveLocale(user.id, next);
     await showProfileMenu(env, chatId, user.id, next, row.message_id, say("langSet", next));
