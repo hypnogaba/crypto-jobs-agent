@@ -13,6 +13,14 @@ export const RELEASES: Release[] = [
     "date": "2026-09-03",
     "changes": [
       {
+        "hash": "fec24f4",
+        "subject": "«Лише віддалено» було побажанням, а не умовою"
+      },
+      {
+        "hash": "6728189",
+        "subject": "Найкраща вакансія не потрапляла в добірку у 11 профілів із 16"
+      },
+      {
         "hash": "8a8246c",
         "subject": "Картка добірки розповідає про людину, а не переказує вакансію"
       },
@@ -1045,4 +1053,4 @@ export const RELEASES: Release[] = [
   }
 ];
 
-export const GENERATED_AT = "2026-09-03 09:25";
+export const GENERATED_AT = "2026-09-03 10:53";
