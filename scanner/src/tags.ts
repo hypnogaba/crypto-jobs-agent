@@ -7,12 +7,34 @@ import type { RawJob } from "./types.js";
  */
 
 const SPHERE_RULES: Array<[string, RegExp]> = [
-  ["engineering",  /\b(engineers?|developers?|programmers?|swe|backend|frontend|full[- ]?stack|mobile|ios|android|platform|infrastructure|devops|sre|architects?)\b/i],
+  // «platform», «infrastructure» і «mobile» самі по собі звідси прибрані.
+  //
+  // Вони ловили посаду за словом із назви продукту, а не за фахом: «Staff
+  // Product Manager, SaaS platform», «The Ride Platform - Senior Manager,
+  // Paid Media», «Head of Marketing (B2C Product / Mobile App)» і навіть
+  // «Client Account Executive, T-Mobile» приходили людині, що обрала
+  // «Інженерію». У свіжому кеші таких 318. Справжня платформна інженерія
+  // слова «engineer» не втрачає («Platform Engineer», «Infrastructure
+  // Engineer»), тож збіг лишається, а привід для чужих зникає.
+  //
+  // «engineering» додано теж: без нього «Engineering Manager - Platform» і
+  // «Senior Engineering Manager, Infrastructure» трималися в сфері рівно за
+  // те слово, яке звідси прибрано, і разом із чужими посадами втратили б і
+  // свою. Слово «engineer» їх не ловить: після нього стоїть «ing».
+  ["engineering",  /\b(engineer(?:s|ing)?|developers?|programmers?|swe|backend|frontend|full[- ]?stack|ios|android|devops|sre|sysadmin|architects?)\b/i],
   ["data-ai",      /\b(data scientists?|data engineers?|machine learning|ml engineers?|ai engineers?|analytics engineers?|research scientists?|mlops|nlp)\b/i],
   // Дизайн — окрема сфера: «product» лишається як був, але дизайнер тепер
   // отримує і власний тег, під який людина може підписатися.
   ["design",       /\b(designers?|ux|ui|product design|graphic|figma|brand design|motion)\b/i],
-  ["product",      /\b(product managers?|product owners?|product leads?|product design|ux|ui designers?|designers?)\b/i],
+  // Дизайнери звідси прибрані: у них є власна сфера.
+  //
+  // Правило лишалось із часів, коли «design» кнопкою не існував, і тепер
+  // кожен дизайнер вважався продуктовцем. У свіжому кеші 313 рядків із
+  // тегом «product» не мають слова «product» у назві взагалі, і це суцільно
+  // «Senior Industrial Designer», «Civil Engineer - Experienced Designer»,
+  // «Junior Creative Visual Designer». Людина, що обрала «Продукт»,
+  // отримувала промислових дизайнерів.
+  ["product",      /\b(product managers?|product owners?|product leads?|product design(?:ers?)?)\b/i],
   ["devrel",       /\b(developers? relations|devrel|developers? advocates?|community managers?|community leads?|evangelists?)\b/i],
   ["partnerships", /\b(partnerships?|business development|bd managers?|alliances|ecosystems?)\b/i],
   ["operations",   /\b(operations|program managers?|project managers?|chief of staff|people ops|hr managers?|recruiters?)\b/i],

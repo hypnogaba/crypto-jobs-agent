@@ -110,3 +110,50 @@ describe("withCompanyTags — ніша каталогу доходить до в
     expect(withCompanyTags(["web3"], ["web3"])).toEqual(["web3"]);
   });
 });
+
+// ── Чужі посади в інженерії та продукті ───────────────────────
+describe("сфера не чіпляється за слово з назви продукту", () => {
+  const tagsOf = (title: string) => deriveTags(j({ title }));
+
+  /**
+   * Кожен рядок нижче справді лежить у кеші й справді приходив людині,
+   * яка обрала «Інженерію» або «Продукт».
+   */
+  it.each([
+    "Staff Product Manager, SaaS platform",
+    "The Ride Platform - Senior Manager, Paid Media",
+    "Head of Marketing (B2C Product / Mobile App)",
+    "Client Account Executive, T-Mobile",
+    "Technical Program Manager, Platform Services",
+  ])("«%s» це не інженерія", (t) => expect(tagsOf(t)).not.toContain("engineering"));
+
+  it.each([
+    "Senior Backend Engineer",
+    "Platform Engineer",
+    "Infrastructure Engineer",
+    "Senior DevOps / SRE",
+    "iOS Developer",
+    // Слово «engineer» їх не ловить: після нього стоїть «ing».
+    "Engineering Manager - Platform (FinHub)",
+    "Senior Engineering Manager, Infrastructure",
+    "VP of Engineering",
+  ])("«%s» лишається інженерією", (t) => expect(tagsOf(t)).toContain("engineering"));
+
+  it.each([
+    "Senior Industrial Designer",
+    "Civil Engineer - Experienced Designer",
+    "Junior Creative Visual Designer",
+    "UX Designer, Octopus",
+  ])("«%s» це не продукт", (t) => expect(tagsOf(t)).not.toContain("product"));
+
+  it.each([
+    "Senior Product Manager",
+    "Product Owner",
+    "Product Designer",
+  ])("«%s» лишається продуктом", (t) => expect(tagsOf(t)).toContain("product"));
+
+  it("дизайнер лишається дизайном", () => {
+    expect(tagsOf("Senior Industrial Designer")).toContain("design");
+    expect(tagsOf("UX Designer, Octopus")).toContain("design");
+  });
+});
