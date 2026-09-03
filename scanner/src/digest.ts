@@ -160,6 +160,30 @@ export function lostDelivery(
 }
 
 /**
+ * Лист про те, що модель мовчала, або нічого.
+ *
+ * Статус тут не прикраса. 03.09 виклик за картками впав, усі п'ять карток
+ * дістали шаблонний рядок, і власник отримав «модель не відповіла 1 раз(и)»
+ * без жодної підказки, що робити: 401 означає ключ, 429 — ліміт, 529 —
+ * перевантаження на їхньому боці, і дії в цих трьох випадках різні.
+ */
+export function modelFailReport(statuses: Array<number | undefined>): string | null {
+  if (statuses.length === 0) return null;
+  const named = statuses.filter((s): s is number => typeof s === "number");
+  const seen = [...new Set(named)].sort((a, b) => a - b);
+  const what = seen.length > 0 ? ` Статуси: ${seen.join(", ")}.` : "";
+  const hint = seen.includes(401) || seen.includes(403)
+    ? "Схоже на ключ Anthropic."
+    : seen.includes(429)
+      ? "Схоже на ліміт запитів."
+      : seen.some((s) => s >= 500)
+        ? "Збій на боці моделі; повтор уже був і теж не вдався."
+        : "Найчастіша причина — ключ Anthropic або ліміт витрат.";
+  return `NextRole: модель не відповіла ${statuses.length} раз(и) за прогін.${what}\n\n`
+    + `Добірки пішли, але замість пояснень у картках стоїть витяг з оголошення.\n${hint}`;
+}
+
+/**
  * Рядки sent зі статусом sent, доставлені локального сьогодні.
  *
  * Це і лічильник денної стелі, і основа правила «одна планова на день».
@@ -339,6 +363,16 @@ const SUMMARY_MAX = 500;
  */
 export const ROLE_LINE_MAX = 160;
 
+/**
+ * Витяг перед показом: прибрати маркер, яким він почався в оголошенні.
+ *
+ * Живий приклад із добірки ffd2deb6: «*Open to hiring remote across the US».
+ * Зірочка чи дефіс на початку — це слід списку з оголошення, а в картці вона
+ * читається як друкарська помилка.
+ */
+export const tidySummary = (s: string | null | undefined): string | null =>
+  s ? s.replace(/^[\s*•\-–—]+/, "").trim() || null : null;
+
 export function clampSummary(s: string | null | undefined, max = SUMMARY_MAX): string | null {
   if (!s) return null;
   if (s.length <= max) return s;
@@ -462,6 +496,18 @@ export function formatDigest(
 ): string {
   const withSummaries = opts.summaries ?? true;
   const lines = [escapeHtml(say(locale, greetingFor(opts.hour))), ""];
+  /**
+   * Той самий «Чому тобі» не друкується двічі в одній добірці.
+   *
+   * Скарга 03.09: «прийшло 5 вакансій і опис усюди однаковий». Так і було, і
+   * не через помилку: коли модель не відповідає, рядок збирається локально з
+   * фактів ЗБІГУ З ПРОФІЛЕМ, а вони в усіх п'яти однакові за побудовою —
+   * усі п'ять збіглися з тією самою людиною тим самим способом.
+   *
+   * Повторений рядок не несе інформації, він лише займає екран і виглядає як
+   * зламаний продукт. Сказане один раз лишається правдою для решти.
+   */
+  const saidWhy = new Set<string>();
   jobs.forEach((j, i) => {
     if (i > 0) { lines.push("─────────────"); lines.push(""); }
 
@@ -504,10 +550,35 @@ export function formatDigest(
     // Тепер обидва рядки пише модель мовою людини: перший каже, що це за
     // робота, другий — навіщо вона саме їй. Опису бракує (стара добірка,
     // модель без ключа) — лишається сам «чому тобі», і картка все ще ціла.
-    const role = withSummaries ? clampSummary(j.roleLine, ROLE_LINE_MAX) : null;
+    /**
+     * Рядок про роботу: слова моделі, а без них — витяг із самого оголошення.
+     *
+     * Витяг лежить у `jobs_cache.summary` і різний у кожної вакансії. У
+     * добірці ffd2deb6 він був у трьох вакансіях із п'яти й не показався
+     * жодного разу: рядок брався ТІЛЬКИ з моделі, а вона того разу впала.
+     * Тобто картка мовчала про роботу, маючи про неї готове речення.
+     *
+     * Він мовою оголошення, а не людини, і це свідома поступка: англійське
+     * речення про цю саму роботу корисніше за порожнє місце під назвою.
+     */
+    const role = withSummaries
+      ? clampSummary(tidySummary(j.roleLine ?? j.summary), ROLE_LINE_MAX) : null;
     if (role) { lines.push(escapeHtml(role)); lines.push(""); }
-    lines.push(`${escapeHtml(say(locale, "why"))}: ${escapeHtml(j.why)}`);
-    lines.push("");
+    const why = j.why?.trim();
+    /**
+     * Повтор прибираємо, бо він не несе інформації. Але картка, у якої
+     * немає НІ витягу, НІ рядка умов, лишилась би самою назвою з посиланням —
+     * і тоді повторена причина краща за порожнечу.
+     *
+     * Рядок умов (локація, віддаленість, вилка) і є тим «що там за умови»,
+     * заради чого все це робилось: він різний у кожної вакансії, на відміну
+     * від причини збігу з профілем.
+     */
+    if (why && (!saidWhy.has(why) || (!role && facts.length === 0))) {
+      saidWhy.add(why);
+      lines.push(`${escapeHtml(say(locale, "why"))}: ${escapeHtml(why)}`);
+      lines.push("");
+    }
     // Посилання веде через сайт: один клік і відкриває роботодавця, і лишає
     // слід «подався» у кабінеті. Тому в href — id рядка sent, а не URL.
     lines.push(`<a href="${APPLY_BASE}${encodeURIComponent(j.sentId)}">${escapeHtml(say(locale, "apply"))}</a>`);
@@ -686,7 +757,14 @@ export interface RunContext {
   requested: Set<string>;
   delivered: number;
   /** Скільки викликів моделі впало за прогін. Ключ скінчився — це видно тут. */
-  modelFails: number;
+  /**
+   * Статуси, з якими модель не відповіла за прогін.
+   *
+   * Було просто число. 03.09 власник отримав «модель не відповіла 1 раз(и)»
+   * і не міг дізнатись причину: ліміт, протермінований ключ і скінчені гроші
+   * виглядали однаково, а статус довелось діставати з живої бази вручну.
+   */
+  modelFails: Array<number | undefined>;
 }
 
 /** Закрити всі відкриті запити «ще» цієї людини. */
@@ -1217,7 +1295,7 @@ export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
   // нижче й ішов у картку окремим абзацом, повз модель. Тепер він — сировина
   // для обох рядків: саме з нього береться те одне речення про суть роботи.
   const pitch = await pitchWithClaude(top, profile, cfg.anthropicApiKey, undefined,
-    (u) => { if (!u.ok) ctx.modelFails++; return logUsage(d1, "match_reason", u); }, locale, summaries);
+    (u) => { if (!u.ok) ctx.modelFails.push(u.status); return logUsage(d1, "match_reason", u); }, locale, summaries);
 
   // id рядка sent народжується тут, до форматування: він стоїть у посиланні
   // «Податися», тож має бути відомий раніше, ніж текст піде в Telegram.
@@ -1324,7 +1402,7 @@ async function main(): Promise<void> {
   const users = await d1.query<UserRow>(
     `SELECT ${PROFILE_COLUMNS} WHERE ${where.join(" AND ")}`, params);
 
-  const ctx: RunContext = { d1, cfg, now, botToken, force, requested, delivered: 0, modelFails: 0 };
+  const ctx: RunContext = { d1, cfg, now, botToken, force, requested, delivered: 0, modelFails: [] };
   // Збої, розділені за ціною: див. failureReport.
   const lost: string[] = [];
   const idle: string[] = [];
@@ -1366,12 +1444,8 @@ async function main(): Promise<void> {
 
   // Тихе псування, найгірший рід збою: усе «працює», але рядок «чому ти
   // підходиш» у всіх раптом шаблонний, бо скінчився ключ або гроші.
-  if (ctx.modelFails > 0) {
-    await notifyOwner(
-      `NextRole: модель не відповіла ${ctx.modelFails} раз(и) за прогін.\n\n`
-      + `Добірки пішли, але пояснення в них шаблонні, а описи вакансій — мовою оригіналу.\n`
-      + `Найчастіша причина — ключ Anthropic або ліміт витрат.`);
-  }
+  const modelReport = modelFailReport(ctx.modelFails);
+  if (modelReport) await notifyOwner(modelReport);
 }
 
 /**

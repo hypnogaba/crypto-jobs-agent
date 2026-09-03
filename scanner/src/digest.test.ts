@@ -196,8 +196,11 @@ describe("стеля 4096", () => {
 
   it("довше за 3900 — спершу зникають рядки про роль, потім хвіст", () => {
     // Рядки про роль плюс довгі назви — п'ять карток не влазять у 3900.
+    //
+    // «Чому ти» тут РІЗНІ навмисно: однакові тепер друкуються один раз, і
+    // тиску на розмір від них не було б. Різні — це і є найгірший випадок.
     const jobs = Array.from({ length: 5 }, (_, i) =>
-      ({ ...job(i, "lorem ipsum ".repeat(200), "w".repeat(700)), title: "Senior Engineer ".repeat(25) }));
+      ({ ...job(i, "lorem ipsum ".repeat(200), `${i} ${"w".repeat(700)}`), title: "Senior Engineer ".repeat(25) }));
     const text = fitDigest(jobs, "en");
     expect(text.length).toBeLessThanOrEqual(DIGEST_MAX);
     expect(text).not.toContain("lorem ipsum");
@@ -872,5 +875,156 @@ describe("lostDelivery — хто справді чекав", () => {
 
   it("відкритий запит «ще» важить і поза годиною", () => {
     expect(lostDelivery(u("Europe/Prague", 9), now, new Set(["u1"]))).toBe(true);
+  });
+});
+
+/**
+ * Скарга 03.09: «прийшло 5 вакансій і опис усюди однаковий».
+ *
+ * Відтворено з живої добірки ffd2deb6: виклик моделі провалився (api_usage
+ * ok=0, нуль токенів), тож рядка про роботу не було ЗОВСІМ, а «Чому тобі»
+ * зібрався локально з фактів збігу. Факти в усіх п'яти однакові за
+ * побудовою — вони описують збіг з тим самим профілем, — тож і рядок вийшов
+ * однаковий п'ять разів. При цьому витяг з оголошення лежав у базі в трьох
+ * вакансіях із п'яти й не показався.
+ */
+describe("картка не повторює той самий рядок п'ять разів", () => {
+  const job = (n: number, over: Partial<DigestJob> = {}): DigestJob => ({
+    id: `j${n}`, company: `Company ${n}`, companyKey: `c${n}`, title: `Designer ${n}`,
+    location: null, remote: true, url: `https://e/${n}`, tags: [], postedAt: null,
+    salaryMin: null, salaryMax: null, salaryCurrency: null, summary: null,
+    source: "s", country: null, sentId: `s${n}`,
+    why: "це «Дизайн», одна з твоїх сфер, повністю віддалено.",
+    ...over,
+  } as DigestJob);
+
+  it("однаковий «Чому тобі» друкується один раз, а не п'ять", () => {
+    const text = formatDigest([job(1), job(2), job(3), job(4), job(5)], "uk");
+    expect(text.split("Чому тобі:").length - 1).toBe(1);
+  });
+
+  it("різні «Чому тобі» лишаються всі", () => {
+    const text = formatDigest([
+      job(1, { why: "перша причина" }),
+      job(2, { why: "друга причина" }),
+    ], "uk");
+    expect(text).toContain("перша причина");
+    expect(text).toContain("друга причина");
+  });
+
+  /**
+   * Найважливіше: якщо особистого сказати нічого, картка мусить сказати про
+   * саму роботу. Витяг з оголошення різний у кожної вакансії й уже лежить у
+   * базі — досі його просто не брали, коли модель не відповіла.
+   */
+  it("без рядка від моделі бере витяг із оголошення", () => {
+    const text = formatDigest([
+      job(1, { roleLine: null, summary: "Проєктування ігрових механік і економіки рівнів." }),
+      job(2, { roleLine: null, summary: "Дизайн бренду для фінтех-продукту." }),
+    ], "uk");
+    expect(text).toContain("Проєктування ігрових механік");
+    expect(text).toContain("Дизайн бренду");
+  });
+
+  it("рядок від моделі важливіший за витяг", () => {
+    const text = formatDigest([
+      job(1, { roleLine: "Слова моделі", summary: "Витяг з оголошення" }),
+    ], "uk");
+    expect(text).toContain("Слова моделі");
+    expect(text).not.toContain("Витяг з оголошення");
+  });
+
+  /** Немає ні того, ні того — картка все одно ціла, просто коротша. */
+  it("без обох картка лишається цілою", () => {
+    const text = formatDigest([job(1, { roleLine: null, summary: null })], "uk");
+    expect(text).toContain("Designer 1");
+    expect(text).toContain("Податися");
+  });
+});
+
+import { modelFailReport } from "./digest.js";
+
+/**
+ * 03.09 власник отримав «модель не відповіла 1 раз(и)» і не міг дізнатись
+ * причину: статус ніде не зберігався. Ліміт, протермінований ключ і скінчені
+ * гроші виглядали однаково, і статус довелось діставати з живої бази вручну.
+ */
+describe("сповіщення про мовчання моделі", () => {
+  it("без збоїв листа немає", () => {
+    expect(modelFailReport([])).toBeNull();
+  });
+
+  it("називає статус, а не саме лише число", () => {
+    const text = modelFailReport([429, 429])!;
+    expect(text).toContain("429");
+    expect(text).toContain("2");
+  });
+
+  it("кілька різних статусів перелічені всі", () => {
+    const text = modelFailReport([401, 529])!;
+    expect(text).toContain("401");
+    expect(text).toContain("529");
+  });
+
+  it("статус без номера не ламає лист", () => {
+    expect(modelFailReport([undefined])!).toContain("1");
+  });
+});
+
+/**
+ * Знайдено прогоном на справжній добірці ffd2deb6, а не тестами.
+ */
+describe("наслідки дедуплікації, знайдені на живій добірці", () => {
+  const j = (n: number, over: Partial<DigestJob> = {}): DigestJob => ({
+    id: `j${n}`, company: `C${n}`, companyKey: `c${n}`, title: `T${n}`,
+    location: null, remote: true, url: "u", tags: [], postedAt: null,
+    salaryMin: null, salaryMax: null, salaryCurrency: null, summary: null,
+    source: "s", country: null, sentId: `s${n}`, why: "спільна причина",
+    ...over,
+  } as DigestJob);
+
+  /**
+   * Найгірший наслідок дедуплікації: картка без опису й без «чому» стає
+   * назвою та посиланням. Тоді повтор корисніший за порожнечу.
+   */
+  /**
+   * Картка без витягу все одно має рядок умов (локація, віддаленість, вилка),
+   * і саме він відповідає на «що там за умови в цій вакансії». Тож повтор
+   * причини їй не потрібен.
+   */
+  it("картка з умовами обходиться без повторної причини", () => {
+    const text = formatDigest([
+      j(1, { summary: "Опис першої роботи.", location: "Берлін" }),
+      j(2, { summary: null, location: "Париж" }),
+    ], "uk");
+    expect(text.split("Чому тобі:").length - 1).toBe(1);
+    expect(text).toContain("Париж");
+  });
+
+  /**
+   * Але картка без витягу Й без умов лишилась би самою назвою з посиланням.
+   * Тоді повторена причина краща за порожнечу.
+   */
+  it("картка зовсім без тексту лишає причину, хай і повторну", () => {
+    const text = formatDigest([
+      j(1, { summary: "Опис першої." , location: "Берлін" }),
+      j(2, { summary: null, location: null, remote: false }),
+    ], "uk");
+    const second = text.split("2. ")[1]!;
+    expect(second).toContain("Чому тобі:");
+  });
+
+  it("коли опис є в усіх, спільне «чому» друкується один раз", () => {
+    const text = formatDigest([
+      j(1, { summary: "Перша." }), j(2, { summary: "Друга." }), j(3, { summary: "Третя." }),
+    ], "uk");
+    expect(text.split("Чому тобі:").length - 1).toBe(1);
+  });
+
+  /** Витяг інколи починається зірочкою чи маркером списку з оголошення. */
+  it("прибирає маркер на початку витягу", () => {
+    const text = formatDigest([j(1, { summary: "*Open to hiring remote across the US." })], "uk");
+    expect(text).toContain("Open to hiring");
+    expect(text).not.toContain("*Open");
   });
 });

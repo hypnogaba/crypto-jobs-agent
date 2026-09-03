@@ -1128,3 +1128,64 @@ describe("слово ролі має починати слово", () => {
     expect(partiallyMatchesRole("Backend Engineer - Solana", "Solana auditor")).toBe(true);
   });
 });
+
+import { pitchWithClaude as pitchRetry } from "./match.js";
+
+/**
+ * 03.09 виклик моделі впав, і всі п'ять карток дістали шаблон. Чому саме він
+ * упав — невідомо в принципі: код відкидав статус відповіді й тіло, лишаючи
+ * в api_usage самі нулі. Друга вада того ж роду, що й D1 429 того ж ранку:
+ * тимчасовий збій трактувався як остаточний.
+ */
+describe("виклик моделі за картками", () => {
+  const jobs = [{
+    id: "j1", company: "C", companyKey: "c", title: "Designer", location: null,
+    remote: true, url: "u", tags: ["design"], postedAt: null,
+    salaryMin: null, salaryMax: null, salaryCurrency: null, summary: null,
+    source: "s", country: null, score: 10, parts: [], facts: [],
+  }] as never;
+  const profile = { userId: "u", spheres: ["design"], industries: [], remoteMode: "remote_only",
+    location: null, salaryMin: null, salaryCurrency: null } as never;
+
+  const ok = () => new Response(JSON.stringify({
+    content: [{ type: "text", text: '{"items":[{"n":1,"role":"Про роботу","why":"Про тебе"}]}' }],
+    usage: { input_tokens: 10, output_tokens: 5 },
+  }), { status: 200 });
+
+  it("429 повторюється, і друга спроба рятує картки", async () => {
+    const f = vi.fn()
+      .mockResolvedValueOnce(new Response("rate limited", { status: 429 }))
+      .mockResolvedValueOnce(ok());
+    vi.stubGlobal("fetch", f);
+    const out = await pitchRetry(jobs, profile, "key", "m", undefined, "uk", new Map(), 0);
+    expect(f).toHaveBeenCalledTimes(2);
+    expect(out[0]!.why).toBe("Про тебе");
+  });
+
+  it("529 «перевантажено» теж повторюється", async () => {
+    const f = vi.fn()
+      .mockResolvedValueOnce(new Response("overloaded", { status: 529 }))
+      .mockResolvedValueOnce(ok());
+    vi.stubGlobal("fetch", f);
+    await pitchRetry(jobs, profile, "key", "m", undefined, "uk", new Map(), 0);
+    expect(f).toHaveBeenCalledTimes(2);
+  });
+
+  /** 400 — винні ми: повтор дасть те саме, лише вдвічі повільніше. */
+  it("400 не повторюється", async () => {
+    const f = vi.fn().mockResolvedValue(new Response("bad request", { status: 400 }));
+    vi.stubGlobal("fetch", f);
+    await pitchRetry(jobs, profile, "key", "m", undefined, "uk", new Map(), 0);
+    expect(f).toHaveBeenCalledTimes(1);
+  });
+
+  /** Без статусу причину збою неможливо назвати. Саме так і сталося 03.09. */
+  it("статус збою потрапляє у звіт про виклик", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("nope", { status: 401 })));
+    const seen: Array<{ ok: boolean; status?: number }> = [];
+    await pitchRetry(jobs, profile, "key", "m",
+      (u: { ok: boolean; status?: number }) => { seen.push(u); }, "uk", new Map(), 0);
+    expect(seen[0]!.ok).toBe(false);
+    expect(seen[0]!.status).toBe(401);
+  });
+});

@@ -1400,6 +1400,15 @@ export function safeWhy(line: string | undefined): string | null {
  *  виглядало б як факт. */
 export interface UsageReport {
   model: string; inputTokens: number; outputTokens: number; ok: boolean;
+  /**
+   * HTTP-статус, коли виклик не вдався.
+   *
+   * 03.09 виклик за картками впав, і всі п'ять дістали шаблон. Причину
+   * назвати було неможливо: код відкидав і статус, і тіло, а в api_usage
+   * лишались самі нулі. Ліміт, протермінований ключ і скінчені гроші
+   * виглядали однаково.
+   */
+  status?: number;
 }
 
 /**
@@ -1437,6 +1446,8 @@ export async function pitchWithClaude(
   locale: Locale = "en",
   /** Витяг з оголошення за id вакансії: сировина для рядка про роль. */
   texts: Map<string, string> = new Map(),
+  /** Пауза перед другою спробою. Нуль лише в тестах. */
+  retryDelayMs = 2_000,
 ): Promise<Pitch[]> {
   const local = jobs.map((j): Pitch => ({ role: null, why: explainLocally(j, p, locale) }));
   if (!apiKey || jobs.length === 0) return local;
@@ -1461,8 +1472,19 @@ export async function pitchWithClaude(
       (text ? `\n   з оголошення: ${text}` : "");
   }).join("\n");
 
+  /**
+   * Тимчасовий збій — не остаточний.
+   *
+   * 429 (ліміт) і 5xx, включно з 529 «overloaded», означають «спробуй ще»,
+   * і саме на них падала вся добірка в шаблон. 4xx решта — винні ми, і
+   * повтор дав би те саме вдвічі повільніше. Той самий урок, що з D1 429
+   * того ж ранку.
+   */
+  const RETRYABLE = (status: number): boolean => status === 429 || status >= 500;
+  const ATTEMPTS = 2;
+
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
+    const call = (): Promise<Response> => fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
       body: JSON.stringify({
@@ -1474,8 +1496,19 @@ export async function pitchWithClaude(
         messages: [{ role: "user", content: `МОВА ВІДПОВІДІ: ${languageName(locale)}\n\n<profile>\n${profileText}\n</profile>\n\n<jobs>\n${jobsText}\n</jobs>` }],
       }),
     });
+
+    let res = await call();
+    for (let attempt = 2; attempt <= ATTEMPTS && !res.ok && RETRYABLE(res.status); attempt++) {
+      console.log(`  картки: модель відповіла ${res.status}, спроба ${attempt}/${ATTEMPTS}`);
+      if (retryDelayMs > 0) await new Promise((r) => setTimeout(r, retryDelayMs));
+      res = await call();
+    }
     if (!res.ok) {
-      await onUsage?.({ model, inputTokens: 0, outputTokens: 0, ok: false });
+      // Тіло в журнал, статус — у звіт: без них причина збою невідома, і
+      // саме тому 03.09 довелось діставати її з живої бази.
+      const body = await res.text().catch(() => "");
+      console.log(`  картки: модель не відповіла (${res.status}) ${body.slice(0, 200)}`);
+      await onUsage?.({ model, inputTokens: 0, outputTokens: 0, ok: false, status: res.status });
       return local;
     }
     const data = (await res.json()) as {
