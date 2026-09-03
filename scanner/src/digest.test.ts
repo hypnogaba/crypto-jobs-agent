@@ -1215,3 +1215,69 @@ describe("прогін підготовки", () => {
     expect(batched.some((b) => /INSERT OR IGNORE INTO sent/.test(b.sql))).toBe(false);
   });
 });
+
+/**
+ * Вада, внесена самою підготовкою заздалегідь і знайдена аудитом того ж дня.
+ *
+ * Гілка «дотиснути непроставлене» не перевіряє години: вона шле, щойно
+ * побачить pending. Це було правильно, поки pending означав «підібрано й
+ * НЕ ДОСТАВЛЕНО через збій». Відколи добірка готується за дві години, pending
+ * означає ще й «готове, чекає своєї години» — і без перевірки прогін о 08:05
+ * надсилав би те, що людина має отримати о 09:00.
+ */
+describe("підготовлена добірка чекає своєї години", () => {
+  const candidates: Array<[RegExp, unknown[]]> = [
+    [/status='pending'/, [{ digest_id: "dg-prep", created_at: "2026-09-03 05:05:00" }]],
+    [/FROM sent s JOIN jobs_cache/, [{ sent_id: "s-1", company: "Acme", title: "Eng", location: null,
+      remote: 1, url: "https://x.test/1", why_fits: "why", salary_min: null, salary_max: null,
+      salary_currency: null, summary: null }]],
+  ];
+
+  it("о восьмій готове НЕ йде: її година дев'ята", async () => {
+    const f = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const { d1 } = fakeD1(candidates);
+    const ctx = ctxOf(d1, { now: new Date("2026-09-03T06:05:00Z") }); // 08:05 у Парижі
+    await deliverTo(user(), ctx);
+    expect(ctx.delivered).toBe(0);
+    expect(f).not.toHaveBeenCalled();
+  });
+
+  it("о дев'ятій готове йде", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const { d1, executed } = fakeD1(candidates);
+    const ctx = ctxOf(d1, { now: new Date("2026-09-03T07:05:00Z") }); // 09:05 у Парижі
+    await deliverTo(user(), ctx);
+    expect(ctx.delivered).toBe(1);
+    expect(executed.some((e) => /SET status='sent'/.test(e.sql))).toBe(true);
+  });
+
+  /**
+   * Первісне призначення гілки не чіпаємо: добірка, що зависла з учора,
+   * дотискається за першої ж нагоди, а не чекає ще добу.
+   */
+  it("вчорашнє зависле дотискається одразу, о будь-якій годині", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const old: Array<[RegExp, unknown[]]> = [
+      [/status='pending'/, [{ digest_id: "dg-old", created_at: "2026-09-02 09:00:00" }]],
+      candidates[1]!,
+    ];
+    const { d1 } = fakeD1(old);
+    const ctx = ctxOf(d1, { now: new Date("2026-09-03T06:05:00Z") }); // 08:05, до її години
+    await deliverTo(user(), ctx);
+    expect(ctx.delivered).toBe(1);
+  });
+
+  it("на запит «ще п'ять» готове йде негайно, година не важить", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const { d1 } = fakeD1(candidates);
+    const ctx = ctxOf(d1, {
+      now: new Date("2026-09-03T06:05:00Z"), requested: new Set(["user-1"]),
+    });
+    await deliverTo(user(), ctx);
+    expect(ctx.delivered).toBe(1);
+  });
+});

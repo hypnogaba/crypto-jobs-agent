@@ -105,6 +105,26 @@ export function hadDigestToday(timezone: string, now: Date, createdAts: string[]
 }
 
 /**
+ * Чи готова добірка мусить ще почекати своєї години.
+ *
+ * Гілка «дотиснути непроставлене» шле, щойно побачить `pending`, і це було
+ * правильно, поки `pending` означав одне: «підібрано й не доставлено через
+ * збій». Відколи добірка готується за дві години наперед, той самий статус
+ * означає ще й «готове, чекає своєї години» — і без цієї перевірки прогін
+ * о 08:05 надсилав би те, що людина має отримати о 09:00.
+ *
+ * Тримаємо лише СЬОГОДНІШНЮ підготовку до її години. Зависле з учора
+ * дотискається за першої ж нагоди, як і раніше: там чекати нема чого, день
+ * уже втрачено.
+ */
+export function preparedAndWaiting(
+  u: { timezone: string; delivery_hour: number }, createdAt: string, now: Date
+): boolean {
+  const sameDay = localDate(u.timezone, now) === localDate(u.timezone, parseDbTime(createdAt));
+  return sameDay && hourIn(u.timezone, now) < u.delivery_hour;
+}
+
+/**
  * За скільки годин до доставки готуємо добірку.
  *
  * Дві, а не одна. Одна дала б лише один повтор, а щогодинний прогін ходить
@@ -1192,6 +1212,13 @@ export async function deliverTo(u: UserRow, ctx: RunContext): Promise<void> {
     `SELECT digest_id, MIN(created_at) AS created_at FROM sent
      WHERE user_id=? AND status='pending' GROUP BY digest_id ORDER BY created_at LIMIT 1`, [u.id]);
   const stale = pending.length > 0 && pendingIsStale(pending[0]!.created_at, now);
+
+  // Готове, але година ще не настала: нічого не робимо до неї.
+  if (pending.length > 0 && !onRequest && !force
+      && preparedAndWaiting(u, pending[0]!.created_at, now)) {
+    console.log(`  ${u.id.slice(0, 8)}: добірка готова, чекає ${u.delivery_hour}:00`);
+    return;
+  }
 
   if (pending.length > 0 && canSend && !stale) {
     const digestId = pending[0]!.digest_id;
