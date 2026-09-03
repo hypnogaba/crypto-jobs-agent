@@ -4,11 +4,18 @@ import {
 } from "./bot-onboarding";
 
 describe("порядок питань", () => {
-  it("веде від сфер до зарплати й зупиняється", () => {
+  /**
+   * Три головні питання йдуть підряд, і лише потім два необов'язкові.
+   * Раніше «побажання» стояли між посадою й галуззю, бо людина щойно бачила
+   * кнопки й знала, чого в них немає. Кнопок там більше немає: тепер вона
+   * щойно написала про себе, і питання «що ще важливо?» перепитувало б те
+   * саме, а лічильник «1 з 3 … 2 з 3» рвався б надвоє.
+   */
+  it("три головні підряд, потім необов'язкові, і зупиняється", () => {
     expect(STEPS[0]).toBe("spheres");
-    expect(nextStep("spheres")).toBe("wishes");
-    expect(nextStep("wishes")).toBe("cv");
-    expect(nextStep("cv")).toBe("industries");
+    expect(nextStep("spheres")).toBe("industries");
+    expect(nextStep("industries")).toBe("where");
+    expect(nextStep("cv")).toBe("wishes");
     expect(nextStep("salary")).toBeNull();
   });
 
@@ -20,20 +27,23 @@ describe("порядок питань", () => {
   });
 
   it("не питає міста в того, хто хоче лише віддалено", () => {
-    // Без міста пояс невідомий, тож далі — «котра година», а не зарплата.
-    expect(nextStep("where", { ...emptyDraft(), remoteMode: "remote_only" })).toBe("tz");
-    expect(nextStep("where", { ...emptyDraft(), remoteMode: "remote_only", timezone: "Europe/Kyiv" })).toBe("salary");
+    // Місто пропускається, тож далі — необов'язкові питання, а не «котра година».
+    expect(nextStep("where", { ...emptyDraft(), remoteMode: "remote_only" })).toBe("cv");
+    expect(nextStep("cv", { ...emptyDraft(), remoteMode: "remote_only" })).toBe("wishes");
+    // Пояс невідомий — питання про годину лишається на своєму місці.
+    expect(nextStep("wishes", { ...emptyDraft(), remoteMode: "remote_only" })).toBe("tz");
+    expect(nextStep("wishes", { ...emptyDraft(), remoteMode: "remote_only", timezone: "Europe/Kyiv" })).toBe("salary");
   });
 
   // Хто вже написав місце своїми словами на попередньому кроці, не має
   // відповідати на те саме вдруге.
   it("не питає міста двічі", () => {
-    expect(nextStep("where", { ...emptyDraft(), remoteMode: "relocate", location: "Берлін" })).toBe("salary");
+    expect(nextStep("where", { ...emptyDraft(), remoteMode: "relocate", location: "Берлін" })).toBe("cv");
   });
 
   it("без чернетки поводиться як раніше", () => {
     expect(nextStep("where")).toBe("city");
-    expect(nextStep("city")).toBe("tz");
+    expect(nextStep("city")).toBe("cv");
     expect(nextStep("tz")).toBe("salary");
   });
 });
@@ -123,8 +133,8 @@ describe("вільний текст поза командами", () => {
 });
 
 describe("побажання в анкеті", () => {
-  it("стоять одразу після сфер і мають кнопку «Пропустити»", () => {
-    expect(nextStep("spheres")).toBe("wishes");
+  it("стоять після трьох головних і мають кнопку «Пропустити»", () => {
+    expect(nextStep("cv")).toBe("wishes");
     const rows = keyboard("wishes", emptyDraft(), "uk");
     expect(rows).toEqual([[{ text: "Пропустити", callback_data: "ob:wishes:__next" }]]);
   });
@@ -274,7 +284,8 @@ import { currentOf as nowOf } from "./bot-onboarding.js";
 describe("стек, роки, мови — те саме поле в боті й на сайті", () => {
   it("питається в анкеті", () => {
     expect(STEPS).toContain("cv");
-    expect(nextStep("wishes")).toBe("cv");
+    // Досвід іде першим із двох необов'язкових, одразу за трьома головними.
+    expect(nextStep("city")).toBe("cv");
   });
 
   it("має кнопку «Пропустити»: це не обов'язкове поле", () => {

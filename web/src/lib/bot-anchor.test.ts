@@ -145,7 +145,9 @@ describe("місто", () => {
     const p = sent("sendMessage");
     expect(p).toHaveLength(1);
     expect(p[0]!.text).toContain("Париж");
-    expect(savedState()).toEqual({ step: "salary", messageId: NEW_MSG });
+    // Після міста йде досвід: три головні питання тепер стоять підряд, а
+    // необов'язкові зсунуті за них.
+    expect(savedState()).toEqual({ step: "cv", messageId: NEW_MSG });
   });
 });
 

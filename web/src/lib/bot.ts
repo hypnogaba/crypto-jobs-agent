@@ -89,7 +89,7 @@ async function reanchor(
   await dropKeyboard(env, chatId, oldId);
   const id = await sendKeyboard(env, chatId,
     `${prefix}${questionText(step, locale)}`, keyboard(step, draft, locale));
-  await saveState(chatId, step, draft, id);
+  await saveState(chatId, step, draft, id, "pick");
 }
 
 /**
@@ -128,7 +128,7 @@ const readDraft = (raw: string): Draft => {
 };
 
 async function saveState(
-  chatId: number, step: Step, draft: Draft, messageId: number | null, mode: Mode = "ask"
+  chatId: number, step: Step, draft: Draft, messageId: number | null, mode: Mode
 ): Promise<void> {
   await run(
     `INSERT INTO bot_state (chat_id,step,draft,message_id,mode,updated_at)
@@ -164,7 +164,7 @@ export async function startBotOnboarding(
     ]);
     // Це повідомлення і стає якорем: «Редагувати по пунктах» перепише його
     // на меню, а не додасть ще одне.
-    await saveState(chatId, MENU, (await loadDraft(existing!.id)) ?? emptyDraft(), id);
+    await saveState(chatId, MENU, (await loadDraft(existing!.id)) ?? emptyDraft(), id, "pick");
     return;
   }
 
@@ -176,10 +176,12 @@ export async function startBotOnboarding(
   const draft = emptyDraft();
   // Відому зону не перепитуємо: вона вже стоїть у users.
   if (existing && existing.timezone !== "UTC") draft.timezone = existing.timezone;
+  // Перше питання теж відкрите. Без цього вся перебудова лишилась би
+  // невидимою: людина бачить рівно один перший екран, і саме він вирішує,
+  // чи вона взагалі зрозуміє, що можна відповісти словами.
   const id = await sendKeyboard(env, chatId,
-    `${say("orWrite", locale)}\n\n${questionText("spheres", locale)}`,
-    keyboard("spheres", draft, locale));
-  await saveState(chatId, "spheres", draft, id);
+    questionText("spheres", locale), askKeyboard("spheres", locale));
+  await saveState(chatId, "spheres", draft, id, "ask");
 }
 
 /** Кнопки під /start для того, хто вже має профіль. */
@@ -284,7 +286,7 @@ export async function handleOnboardingButton(
     if (step === "spheres") draft.spheres = toggle(draft.spheres, value);
     else if (step === "where") draft.remoteMode = toggleMode(draft.remoteMode, value);
     else draft.industries = toggle(draft.industries, value);
-    await saveState(chatId, step, draft, null);
+    await saveState(chatId, step, draft, null, "pick");
     if (row.message_id) {
       await editKeyboard(env, chatId, row.message_id, questionText(step, locale), keyboard(step, draft, locale));
     }
@@ -323,16 +325,9 @@ export async function handleOnboardingButton(
     draft.salaryCurrency = draft.salaryMin ? "EUR" : null;
   }
 
-  const after = nextStep(step, draft);
-  if (after) {
-    await saveState(chatId, after, draft, null);
-    if (row.message_id) {
-      await editKeyboard(env, chatId, row.message_id, questionText(after, locale), keyboard(after, draft, locale));
-    }
-    return true;
-  }
-
-  await finishOnboarding(env, chatId, draft, locale, row.message_id);
+  // Через advance, а не власним малюванням: інакше наступне ВІДКРИТЕ питання
+  // з'явилось би кнопками, і розмова вимикалась би після першої ж кнопки.
+  await advance(env, chatId, step, draft, locale, row.message_id);
   return true;
 }
 
@@ -529,7 +524,7 @@ export async function handleOnboardingText(
     if (parsed.leftover && !draft.wishes) draft.wishes = parsed.leftover;
 
     const step = row.step as Step;
-    await saveState(chatId, step, draft, null);
+    await saveState(chatId, step, draft, null, "pick");
     if (row.message_id) {
       await editKeyboard(env, chatId, row.message_id,
         `${questionText(step, locale)}\n\n${say("prefilled", locale)}`,
@@ -809,7 +804,7 @@ async function showProfileMenu(
   const draft = (await loadDraft(userId)) ?? emptyDraft();
   const id = await anchor(env, chatId, messageId,
     `${summary(draft, locale)}\n\n${note ?? say("profileHow", locale)}`, profileMenu(locale));
-  await saveState(chatId, MENU, draft, id);
+  await saveState(chatId, MENU, draft, id, "pick");
 }
 
 /**
@@ -822,7 +817,7 @@ async function showEdit(
   messageId: number | null, text: string, rows: Keyed[][],
 ): Promise<void> {
   const id = await anchor(env, chatId, messageId, text, [...rows, [backButton(locale)]]);
-  await saveState(chatId, state as Step, draft, id);
+  await saveState(chatId, state as Step, draft, id, "pick");
 }
 
 /** Стан «правлю поле» — чернетка з бази, крок edit:<поле>. */
