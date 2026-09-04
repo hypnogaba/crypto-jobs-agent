@@ -1,5 +1,5 @@
-import { all } from "@/lib/db";
-import { siteStats } from "@/lib/site-stats";
+import { all, one } from "@/lib/db";
+import { siteStats, TAG_LIST_PREFIX } from "@/lib/site-stats";
 import { INDUSTRIES, SPHERES } from "@/lib/vocab";
 
 /**
@@ -119,17 +119,33 @@ export const PAGE_SIZE = 60;
  * (`%"qa"%`), інакше «qa» знайдеться всередині «security». Той самий прийом
  * з тієї ж причини стоїть в `onTopicSql` у сканері.
  */
-const like = (tag: string): string => `%"${tag}"%`;
-
+/**
+ * Список вакансій сторінки-добірки. Готує його скан, ми лише читаємо.
+ *
+ * Тут стояв `tags LIKE '%"design"%'` по свіжому вікну, і жоден індекс під це
+ * не лягає: JSON-масив у стовпці шукається тільки проходом. Виміряно на
+ * живій базі: **33 541 прочитаний рядок, щоб показати сорок**.
+ *
+ * Стеля з цього виходила така: безкоштовний D1 дає п'ять мільйонів читань на
+ * добу, тобто **149 переглядів вичерпували все** — разом із добірками, ботом
+ * і адмінкою. Один краулер по двадцяти чотирьох публічних сторінках клав би
+ * продукт, а ми самі женемо туди пошуковий трафік.
+ *
+ * Той самий шлях, що вже пройдено для чисел (`site_stats`): рахує скан, сайт
+ * читає один рядок. Запасного шляху з живим запитом навмисно немає — він був
+ * би другою копією того самого SQL у другому пакеті, а такі копії
+ * розходяться першою ж правкою.
+ */
 export async function jobsFor(tag: string, limit = PAGE_SIZE): Promise<ListedJob[]> {
-  return all<ListedJob>(
-    `SELECT id,title,company,location,remote,url,posted_at,
-            salary_min,salary_max,salary_currency,source
-       FROM jobs_cache
-      WHERE fetched_at >= datetime('now','-3 day')
-        AND tags LIKE ?
-      ORDER BY posted_at DESC, fetched_at DESC
-      LIMIT ?`, like(tag), limit);
+  const row = await one<{ value: string }>(
+    "SELECT value FROM site_stats WHERE key = ?", `${TAG_LIST_PREFIX}${tag}`);
+  if (!row) return [];
+  try {
+    const list = JSON.parse(row.value) as ListedJob[];
+    return Array.isArray(list) ? list.slice(0, limit) : [];
+  } catch {
+    return [];
+  }
 }
 
 /** Скільки таких вакансій усього. Те саме джерело, що й на сторінці-вузлі. */

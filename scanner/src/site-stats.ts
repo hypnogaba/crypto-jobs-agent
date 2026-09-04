@@ -23,6 +23,64 @@ export const STAT_KEYS = {
   tagCounts: "jobs.tagCounts",
 } as const;
 
+/** Префікс ключів зі списками вакансій: `jobs.list.<тег>`. */
+export const TAG_LIST_PREFIX = "jobs.list.";
+
+/** Скільки вакансій показує сторінка-добірка. Мусить збігатися з PAGE_SIZE на сайті. */
+export const TAG_LIST_SIZE = 60;
+
+/**
+ * Списки вакансій для сторінок-добірок, пораховані раз на скан.
+ *
+ * Кожна така сторінка робила `tags LIKE '%"design"%'` по свіжому вікну, і
+ * жоден індекс під це не лягає: JSON-масив у стовпці шукається тільки
+ * проходом. Виміряно на живій базі: **33 541 прочитаний рядок, щоб показати
+ * сорок**. Сторінок двадцять чотири, усі публічні й відкриті пошуковикам.
+ *
+ * Порахуймо стелю: безкоштовний D1 дає п'ять мільйонів читань на добу, тобто
+ * **149 переглядів вичерпують усе** — разом із добірками, ботом і адмінкою.
+ * Один краулер, що обходить двадцять чотири сторінки кілька разів на день,
+ * кладе продукт. У цьому продукті вже була така аварія на іншому відкритому
+ * маршруті, тож це не здогад.
+ *
+ * Той самий вихід, що й для чисел: рахує скан, сайт лише читає. Один прохід
+ * по свіжому вікну на добу замість проходу на кожен перегляд.
+ *
+ * Записів це додає двадцять чотири на прогін — саме тому список лежить JSON-ом
+ * в одному рядку на тег, а не окремою таблицею «вакансія-тег». Та коштувала б
+ * близько вісімдесяти тисяч записів на добу при стелі в сто тисяч.
+ */
+const TAG_LIST_SQL = `
+  SELECT tag, id, title, company, location, remote, url, posted_at,
+         salary_min, salary_max, salary_currency, source
+    FROM (
+      SELECT t.value AS tag, j.id, j.title, j.company, j.location, j.remote, j.url,
+             j.posted_at, j.salary_min, j.salary_max, j.salary_currency, j.source,
+             ROW_NUMBER() OVER (PARTITION BY t.value
+                                ORDER BY j.posted_at DESC, j.fetched_at DESC) rn
+        FROM jobs_cache j, json_each(j.tags) t
+       WHERE j.fetched_at >= strftime('%Y-%m-%dT%H:%M:%SZ','now','-3 day')
+    )
+   WHERE rn <= ${TAG_LIST_SIZE}`;
+
+interface TagListRow {
+  tag: string; id: string; title: string; company: string; location: string | null;
+  remote: number; url: string; posted_at: string | null;
+  salary_min: number | null; salary_max: number | null; salary_currency: string | null;
+  source: string;
+}
+
+/** Рядки одного запиту -> по списку на тег, у порядку, який дав SQL. */
+export function groupByTag(rows: TagListRow[]): Map<string, Array<Omit<TagListRow, "tag">>> {
+  const out = new Map<string, Array<Omit<TagListRow, "tag">>>();
+  for (const { tag, ...job } of rows) {
+    const list = out.get(tag) ?? [];
+    list.push(job);
+    out.set(tag, list);
+  }
+  return out;
+}
+
 /**
  * Вітрина на головній: десять свіжих вакансій, по дві на компанію, без
  * повторів за змістом і лише зі сфер, які сторінка й обіцяє.
@@ -79,7 +137,11 @@ export async function refreshSiteStats(d1: D1Client): Promise<void> {
       WHERE j.fetched_at >= strftime('%Y-%m-%dT%H:%M:%SZ','now','-3 day')
       GROUP BY t.value`);
 
+  const lists = groupByTag(await d1.query<TagListRow>(TAG_LIST_SQL));
+
   const rows: Array<[string, string]> = [
+    ...[...lists].map(([tag, jobs]): [string, string] =>
+      [`${TAG_LIST_PREFIX}${tag}`, JSON.stringify(jobs)]),
     [STAT_KEYS.jobs, String(counts?.jobs ?? 0)],
     [STAT_KEYS.companies, String(counts?.companies ?? 0)],
     [STAT_KEYS.sources, String(counts?.sources ?? 0)],

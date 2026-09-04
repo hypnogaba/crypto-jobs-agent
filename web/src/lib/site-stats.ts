@@ -22,10 +22,20 @@ export interface FeedRow {
 
 interface Row { key: string; value: string }
 
-/** Усі ключі одним запитом: їх п'ять, і читаються вони разом. */
+/** Префікс ключів зі списками вакансій. Пише їх скан, читає jobs-pages. */
+export const TAG_LIST_PREFIX = "jobs.list.";
+
+/**
+ * Ключі головної одним запитом: їх п'ять, і читаються вони разом.
+ *
+ * Списки вакансій сюди НЕ беремо: це двадцять чотири рядки по кілька
+ * десятків кілобайт JSON кожен, і головній вони не потрібні. Сторінка-добірка
+ * читає свій рядок за точним ключем.
+ */
 async function read(): Promise<Map<string, string>> {
   try {
-    const rows = await all<Row>("SELECT key, value FROM site_stats");
+    const rows = await all<Row>(
+      "SELECT key, value FROM site_stats WHERE key NOT LIKE ?", `${TAG_LIST_PREFIX}%`);
     return new Map(rows.map((r) => [r.key, r.value]));
   } catch {
     // Таблиці ще немає (свіжа база, локальний дев) — це не помилка сторінки.
