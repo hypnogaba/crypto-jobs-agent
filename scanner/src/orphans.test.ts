@@ -32,3 +32,26 @@ describe("orphanPlan", () => {
     expect(orphanPlan(rows, now).drop).toEqual([]);
   });
 });
+
+import { readFileSync } from "node:fs";
+
+/**
+ * Строк живе у ДВОХ пакетах: тут він виконується, у
+ * `web/src/lib/account-life.ts` — показується людині датою в попередженні.
+ * Спільного модуля між scanner і web немає, тож розійтися вони можуть мовчки,
+ * і наслідок був би найгіршого роду: людині показали б одну дату, а видалили
+ * б її іншого дня. Обидва файли про це попереджають коментарем, але коментар
+ * ніколи нікого не спинив.
+ */
+describe("строк до видалення однаковий у сканері й на сайті", () => {
+  it("web/src/lib/account-life.ts тримає те саме число", () => {
+    const web = readFileSync(new URL("../../web/src/lib/account-life.ts", import.meta.url), "utf8");
+    const n = Number(/export const GRACE_DAYS = (\d+)/.exec(web)?.[1]);
+    expect(n, "GRACE_DAYS не знайдено у web/src/lib/account-life.ts").toBeGreaterThan(0);
+    expect(n).toBe(GRACE_DAYS);
+  });
+
+  it("тиждень, як домовлено", () => {
+    expect(GRACE_DAYS).toBe(7);
+  });
+});
