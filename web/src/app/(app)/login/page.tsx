@@ -21,14 +21,30 @@ export async function generateMetadata(): Promise<Metadata> {
   return { title: t(locale, "auth.login") };
 }
 
-export default async function Login() {
+export default async function Login(
+  { searchParams }: { searchParams: Promise<{ error?: string }> },
+) {
   const locale = await detectLocale();
+  // Сюди веде /enter, коли разове посилання не спрацювало. Досі сторінка цей
+  // параметр не читала взагалі: людина тиснула посилання з чату й бачила
+  // звичайне «відкрий бота», без жодного натяку, що сталось.
+  //
+  // Малюємо на БУДЬ-ЯКЕ значення ?error=, а не на перелік відомих кодів:
+  // причина в цих дверях одна («посилання мертве»), а невідомий код мусить
+  // означати «щось пішло не так», а не тишу. Показуємо власний рядок, не сам
+  // параметр, тож підставити сюди чужий текст неможливо.
+  const failed = Boolean((await searchParams).error);
   const env = getCloudflareContext().env as unknown as Record<string, string | undefined>;
   const bot = env.TELEGRAM_BOT_USERNAME ?? "mynextrole_bot";
 
   return (
     <Shell locale={locale} center title={t(locale, "auth.login")} lede={t(locale, "auth.viaBotLede")}>
       <div className="card px-7 py-7">
+        {failed && (
+          <p role="alert" className="mb-4 text-sm" style={{ color: "var(--warn)" }}>
+            {t(locale, "auth.linkDead")}
+          </p>
+        )}
         <p className="text-sm" style={{ color: "var(--muted)" }}>{t(locale, "auth.viaBotStep")}</p>
         <a href={`https://t.me/${bot}?start=site`} className="btn mt-6">{t(locale, "auth.openBot")}</a>
         <p className="mono mt-5 text-xs" style={{ color: "var(--muted)" }}>@{bot} · /site</p>

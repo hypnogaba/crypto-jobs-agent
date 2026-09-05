@@ -4,10 +4,11 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import Shell from "@/app/shell";
-import { createConnectToken, detectLocale, finishPending } from "@/app/actions";
+import { connectTelegram, detectLocale, finishPending } from "@/app/actions";
 import { currentUser } from "@/lib/auth";
-import { one, run } from "@/lib/db";
+import { one } from "@/lib/db";
 import { PENDING_COOKIE, pendingById } from "@/lib/pending";
+import { buildTelegramDeepLink } from "@/lib/connect-token";
 import { t } from "@/lib/i18n";
 import { formatWhen, nextDelivery } from "@/lib/digest-time";
 
@@ -46,7 +47,7 @@ export default async function Telegram(
       <Shell locale={locale} eyebrow="03 / 03" title={t(locale, "telegram.title")}
              lede={t(locale, "telegram.lede")}>
         <div className="card px-7 py-8">
-          <a href={`https://t.me/${botName()}?start=${pending.token}`} className="btn">
+          <a href={buildTelegramDeepLink(botName(), pending.token)} className="btn">
             {t(locale, "telegram.button")}
           </a>
           <p className="mono mt-5 text-xs" style={{ color: "var(--muted)" }}>
@@ -88,37 +89,32 @@ export default async function Telegram(
    * Акаунт без Telegram — спадок того часу, коли сайт створював акаунт
    * одразу. Нових таких не з'являється; ці лишаються, доки не підключать
    * бота, і доставки їм немає.
+   *
+   * ТУТ НЕ КАРБУЄТЬСЯ НІЧОГО, і це головне в цій гілці.
+   *
+   * Досі токен народжувався просто під час рендеру. Поки в базі лежав сам
+   * токен, живий рядок перечитувався й посилання діяло всі 15 хвилин. Тепер у
+   * стовпці хеш, назад він не розгортається — тож кожен повторний показ
+   * сторінки гасив би той токен, який людина щойно віднесла в бота: вона тисне
+   * «Так» і бачить «посилання не працює». Досить було оновити вкладку або
+   * повернутись «назад».
+   *
+   * Кнопка стала серверною дією (connectTelegram): токен карбується в мить
+   * дотику й веде просто в чат. Заодно зникає запис у D1 на кожен перегляд
+   * сторінки, а обмежує нас саме запис (0044).
+   *
+   * Окремої кнопки «отримати нове посилання» більше немає навмисно: тепер
+   * кожен дотик і є новим посиланням.
    */
-  let row = await one<{ connect_token: string | null; connect_expires_at: string | null }>(
-    "SELECT connect_token,connect_expires_at FROM users WHERE id=?", user.id);
-  // Правило чистоти React стосується клієнтських компонентів, які можуть
-  // перемальовуватись. Це серверний компонент: він виконується один раз на
-  // запит, і поточний час тут — саме те, що потрібно.
-  /* eslint-disable react-hooks/purity */
-  const now = Date.now();
-  const expired = !row?.connect_expires_at || new Date(row.connect_expires_at).getTime() < now;
-  if (!row?.connect_token || expired) {
-    const token = crypto.randomUUID().replace(/-/g, "");
-    await run("UPDATE users SET connect_token=?, connect_expires_at=? WHERE id=?",
-      token, new Date(now + 15 * 60_000).toISOString(), user.id);
-    row = { connect_token: token, connect_expires_at: null };
-  }
-  /* eslint-enable react-hooks/purity */
-
   return (
     <Shell locale={locale} eyebrow="03 / 03" title={t(locale, "telegram.title")} lede={t(locale, "telegram.lede")}>
       <div className="card px-7 py-8">
-        <a href={`https://t.me/${botName()}?start=${row.connect_token}`} className="btn">
-          {t(locale, "telegram.button")}
-        </a>
+        <form action={connectTelegram}>
+          <button type="submit" className="btn">{t(locale, "telegram.button")}</button>
+        </form>
         <p className="mono mt-5 text-xs" style={{ color: "var(--muted)" }}>
           @{botName()} · {t(locale, "telegram.expiry")}
         </p>
-        <form action={createConnectToken} className="mt-5 border-t pt-5" style={{ borderColor: "var(--rule)" }}>
-          <button type="submit" className="text-sm link" style={{ color: "var(--muted)" }}>
-            {t(locale, "telegram.regen")}
-          </button>
-        </form>
       </div>
       {/* Кнопки «пропустити» тут немає навмисно.
           Доставка і є продукт: людина, яка пропустить цей крок, зробить усю

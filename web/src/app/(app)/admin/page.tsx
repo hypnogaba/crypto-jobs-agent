@@ -63,9 +63,10 @@ const peopleHref = (who: string, page: number): string => {
 };
 
 export default async function Admin({ searchParams }: {
-  searchParams: Promise<{ range?: string; bucket?: string; who?: string; page?: string }>;
+  searchParams: Promise<{ range?: string; bucket?: string; who?: string; page?: string;
+                          note?: string }>;
 }) {
-  const { range, bucket, who, page } = await searchParams;
+  const { range, bucket, who, page, note } = await searchParams;
   const filter = PEOPLE_FILTERS.find((f) => f.id === who) ?? PEOPLE_FILTERS[0];
   const pageNo = Math.max(1, Number.parseInt(page ?? "1", 10) || 1);
   const DAYS = RANGES.find((r) => r.id === range)?.days ?? DEFAULT_DAYS;
@@ -523,12 +524,14 @@ export default async function Admin({ searchParams }: {
   // екрана. А от нік є: за «06df703e» неможливо ні впізнати людину, ні
   // написати їй, і саме це власник хоче зробити, дивлячись на цей список.
   const people = await all<{ id: string; created_at: string | null; locale: string; status: string;
-    tg: number; country: string | null; spheres: string | null; custom_role: string | null; sent: number;
+    tg: number; paused: string | null;
+    country: string | null; spheres: string | null; custom_role: string | null; sent: number;
     more: number; nope: number; applied: number; last_seen: string | null;
     nick: string | null; person: string | null }>(`
     SELECT u.id, u.created_at, u.locale, u.status,
            u.telegram_username nick, u.telegram_name person,
            CASE WHEN u.telegram_chat_id IS NULL THEN 0 ELSE 1 END tg,
+           u.paused_reason paused,
            u.last_interaction_at last_seen,
            p.country, p.spheres, p.custom_role,
            (SELECT COUNT(*) FROM sent WHERE user_id=u.id AND status='sent') sent,
@@ -708,6 +711,20 @@ export default async function Admin({ searchParams }: {
                      )}
                    </div>
                  }>
+            {/* Наслідок дотику — тут, а не лише в лозі.
+                Рятівне посилання йде в Telegram, і саме Telegram може його не
+                взяти (чат не знайдено, 429, мережа). Раніше цей збій нікуди не
+                потрапляв: `sendText` не кидає винятків, а порожній catch навколо
+                неї не ловив нічого. Власник бачив «зроблено» й не дізнавався, що
+                людині нема чого пересилати. */}
+            {note === "linkSent" || note === "linkFailed" ? (
+              <p className="mono text-xs" style={{ marginBottom: "1rem",
+                   color: note === "linkSent" ? "var(--ok)" : "var(--bad)" }}>
+                {note === "linkSent"
+                  ? "Посилання прив'язки надіслано тобі в Telegram — перешли його людині."
+                  : "Telegram не взяв посилання: людині передати нічого. Натисни «посилання ще раз»."}
+              </p>
+            ) : null}
             <div className="grid gap-6 lg:grid-cols-[minmax(0,22rem)_1fr]">
               <Funnel steps={[
                 { label: "Зареєструвались", n: funnel?.registered ?? 0, note: "почали з сайту або з бота" },

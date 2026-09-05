@@ -15,6 +15,7 @@ import { INDUSTRIES, SPHERES, needsCity, parseModes, serializeModes, type Locale
 import { persistProfile } from "@/lib/profile-write";
 import { PENDING_COOKIE, createPending, dropPending, pendingById } from "@/lib/pending";
 import { pathFor } from "@/lib/seo";
+import { buildTelegramDeepLink, issueConnectToken } from "@/lib/connect-token";
 import { sendText } from "@/lib/telegram-send";
 
 const DRAFT_COOKIE = "nr_draft";
@@ -361,12 +362,40 @@ export async function logout(): Promise<void> {
 }
 
 // ── Telegram ─────────────────────────────────────────────────
-export async function createConnectToken(): Promise<void> {
+/**
+ * Карбування разового токена прив'язки — і одразу перехід у бота.
+ *
+ * Раніше токен народжувався під час РЕНДЕРУ сторінки 03/03, а ця дія лише
+ * видавала новий замість зіпсованого. Обидва місця тепер зайві й шкідливі: у
+ * стовпці лежить рівно один хеш, тож будь-який повторний показ сторінки гасив
+ * той токен, який людина щойно віднесла в бота, — вона тисне «Так» і чує
+ * «посилання не працює». Плюс запис у D1 на кожен перегляд, а обмежує нас саме
+ * запис (0044).
+ *
+ * Тепер карбування прив'язане не до перегляду, а до ДОТИКУ: один запис на одну
+ * спробу підключитись, і токен завжди найсвіжіший з можливих.
+ *
+ * Акаунту, який уже має Telegram, прив'язувати нічого. Форма з цією кнопкою
+ * малюється лише в гілці «без Telegram», але сама серверна дія відкрита
+ * будь-кому з сесією — тобто карбувала б живий токен прив'язки для акаунта,
+ * якому він не потрібен. Зайвий живий секрет — це просто зайва мішень.
+ */
+export async function connectTelegram(): Promise<void> {
   const user = await requireUser();
-  const token = crypto.randomUUID().replace(/-/g, "");
-  const expires = new Date(Date.now() + 15 * 60_000).toISOString();
-  await run("UPDATE users SET connect_token=?, connect_expires_at=? WHERE id=?", token, expires, user.id);
-  redirect("/telegram");
+  if (user.telegramChatId) redirect("/telegram");
+  const token = await issueConnectToken(user.id, "link");
+  const env = getCloudflareContext().env as unknown as Record<string, string | undefined>;
+  // redirect() приймає й зовнішні адреси (next/navigation), тож дотик по
+  // кнопці веде просто в чат, без проміжної сторінки.
+  //
+  // Від історії браузера це НЕ рятує: у серверній дії redirect за
+  // замовчуванням робить push, тобто t.me-адреса разом із токеном лягає
+  // окремим записом (node_modules/next/dist/docs/01-app/03-api-reference/
+  // 04-functions/redirect.md). Мириться з цим одноразовість і 15 хвилин:
+  // токен із історії відмикає рівно нічого після першого дотику. Ховати
+  // токен від АДРЕСНОГО РЯДКА ми й не беремось — беремось ховати його від
+  // ЧАТУ, бо саме звідти його й видно чужим очам на скриншоті.
+  redirect(buildTelegramDeepLink(env.TELEGRAM_BOT_USERNAME ?? "mynextrole_bot", token));
 }
 
 // ── налаштування ─────────────────────────────────────────────

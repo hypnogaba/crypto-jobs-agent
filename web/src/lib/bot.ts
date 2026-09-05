@@ -22,6 +22,7 @@ import { timezoneFor } from "./geo";
 import { isKnownZone, timezoneFromCity, zoneForHour, zoneName } from "./tz";
 import { formatWhen, nextDelivery } from "./digest-time";
 import { callTelegram, sendText } from "./telegram-send";
+import { issueConnectToken } from "./connect-token";
 
 /** Команди бота. Кабінет у чаті — мінімальний, повний лишається на сайті. */
 
@@ -35,7 +36,17 @@ async function send(env: Env, chatId: number, text: string): Promise<void> {
 // Кнопки, а не вільний текст: людині не було зрозуміло, що писати, а бот
 // мовчки приймав будь-що — на «тест» він зберігав порожній профіль.
 
-interface Keyed { text: string; callback_data: string }
+/**
+ * Кнопка: або дотик назад у бота (callback_data), або зовнішня адреса (url).
+ *
+ * Поле url з'явилось заради разового токена входу. Досі адреса лежала в тексті
+ * повідомлення, тож 32 символи токена читались просто з екрана і зі скриншота
+ * (власник надіслав такий знімок). У кнопці адреси не видно ні в чаті, ні на
+ * знімку, і Telegram однаково відкриє її одним дотиком.
+ */
+type Keyed =
+  | { text: string; callback_data: string }
+  | { text: string; url: string };
 
 async function sendKeyboard(
   env: Env, chatId: number, text: string, rows: Keyed[][]
@@ -1524,11 +1535,18 @@ export async function continueBotOnboarding(
 export async function sendSiteLink(
   env: Env, chatId: number, userId: string, locale: Locale, intro: "siteLink" | "cabinet" = "siteLink",
 ): Promise<void> {
-  const token = crypto.randomUUID().replace(/-/g, "");
-  await run("UPDATE users SET connect_token=?, connect_expires_at=? WHERE id=?",
-    token, new Date(Date.now() + 15 * 60_000).toISOString(), userId);
+  // Призначення 'enter': цей токен відмикає САЙТ і більше нічого. Двері
+  // прив'язки Telegram його не приймуть — саме тому, що він видно текстом у
+  // чаті, і саме звідси його читали зі скриншота.
+  const token = await issueConnectToken(userId, "enter");
   const base = env.SITE_URL ?? "https://nextrole.info";
-  await send(env, chatId, `${say(intro, locale)}\n${base}/enter?token=${token}`);
+  // Адреса живе в кнопці, а не в тексті: у тілі повідомлення токен читався зі
+  // скриншота, і одного знімка вистачало на 30 днів чужої сесії. Прев'ю
+  // вимикати не треба: у тексті вже немає чого розгортати.
+  await sendKeyboard(env, chatId, say(intro, locale), [[
+    { text: say(intro === "cabinet" ? "openCabinet" : "openSite", locale),
+      url: `${base}/enter?token=${token}` },
+  ]]);
 }
 
 export async function handleCommand(
@@ -1538,7 +1556,15 @@ export async function handleCommand(
     "SELECT id,status FROM users WHERE telegram_chat_id=?", String(chatId));
   const cmd = text.split(/\s+/)[0]!.replace(/@\w+$/, "");
 
-  if (!user && cmd !== "/start") {
+  // /feedback — другий виняток із воріт, і він тут не для зручності.
+  //
+  // Відмова прив'язки радить саме цю команду тому, хто втратив свій Telegram:
+  // відв'язати акаунт може лише власник руками, а достукатись до нього людині
+  // нема чим — вона пише з НОВОГО чату, де акаунта немає за визначенням. Порада
+  // «спершу /start» вела б її в те саме коло: /start заводить новий порожній
+  // акаунт, а не повертає старий. Команда це витримує: рядок відгуку кладеться
+  // з user_id = NULL і контактом `tg:<chat>`, тобто власнику є куди відповісти.
+  if (!user && cmd !== "/start" && cmd !== "/feedback") {
     await send(env, chatId, say("startFirst", locale));
     return;
   }
@@ -1628,11 +1654,14 @@ export async function handleCommand(
     // кабінету. Сесія живе 30 днів, тож насправді це раз на місяць.
     case "/admin": {
       if (String(chatId) !== env.ADMIN_CHAT_ID) { await send(env, chatId, say("unknown", locale)); break; }
-      const token = crypto.randomUUID().replace(/-/g, "");
-      await run("UPDATE users SET connect_token=?, connect_expires_at=? WHERE id=?",
-        token, new Date(Date.now() + 15 * 60_000).toISOString(), user!.id);
+      // Найдорожчий токен у системі: він веде просто в панель власника.
+      const token = await issueConnectToken(user!.id, "enter");
       const base = env.SITE_URL ?? "https://nextrole.info";
-      await send(env, chatId, `${say("adminLink", locale)}\n${base}/enter?token=${token}&to=/admin`);
+      // `to=/admin` не кодуємо: /enter читає searchParams.get("to") і звіряє
+      // зі списком рівністю, а скісну в значенні запиту Telegram приймає.
+      await sendKeyboard(env, chatId, say("adminLink", locale), [[
+        { text: say("openAdmin", locale), url: `${base}/enter?token=${token}&to=/admin` },
+      ]]);
       break;
     }
 
