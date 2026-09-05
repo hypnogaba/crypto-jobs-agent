@@ -9,6 +9,7 @@
     "scan": "node dist/scan.js",
     "watchdog": "node dist/watchdog.js",
     "discover": "node dist/discover.js",
+    "discover-speedrun": "node dist/discover-speedrun.js",
     "retag": "node dist/retag.js",
     "replay": "node dist/replay.js",
     "prune": "node dist/prune.js"
