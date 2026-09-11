@@ -96,13 +96,13 @@ describe("тексти", () => {
   it("підсумок читається словами, а не ідентифікаторами", () => {
     const draft = {
       spheres: ["engineering"], industries: ["fintech"],
-      remoteMode: "remote_only", salaryMin: 90_000, salaryCurrency: "EUR",
+      remoteMode: "remote", salaryMin: 90_000, salaryCurrency: "EUR",
     };
     const out = summary(draft, "uk");
     expect(out).toContain("Інженерія");
     expect(out).toContain("Фінтех");
-    expect(out).toContain("Тільки віддалено");
-    expect(out).not.toContain("remote_only");
+    expect(out).toContain("Віддалено");
+    expect(out).not.toContain("remote");
   });
 
   it("порожня зарплата не вигадує число", () => {
@@ -209,11 +209,11 @@ describe("де хочеш працювати", () => {
   });
 
   it("пише набір одним рядком і показує обидва варіанти в підсумку", () => {
-    const draft = { ...emptyDraft(), remoteMode: "relocate,remote_or_city", location: "Берлін" };
+    const draft = { ...emptyDraft(), remoteMode: "city,remote", location: "Берлін" };
     expect(profileUpdateFor("where", draft)).toEqual({
-      set: "remote_mode=?, location=?", params: ["remote_or_city,relocate", "Берлін"] });
+      set: "remote_mode=?, location=?", params: ["remote,city", "Берлін"] });
     const text = summary(draft, "uk");
-    expect(text).toContain("Віддалено або офіс у місті + Готовий/готова переїхати");
+    expect(text).toContain("Віддалено + В офісі в моєму місті");
     expect(text).toContain("Берлін");
   });
 });

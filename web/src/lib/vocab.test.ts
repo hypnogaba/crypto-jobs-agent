@@ -7,42 +7,41 @@ import { needsCity, parseModes, serializeModes, toggleMode } from "./vocab";
  * не має уживатись поруч із варіантом, у якому є місце.
  */
 describe("набір варіантів роботи", () => {
-  it("читає старе значення як список з одного", () => {
-    expect(parseModes("remote_or_city")).toEqual(["remote_or_city"]);
-    expect(parseModes("remote_only")).toEqual(["remote_only"]);
+  // Старі id живуть у рядках до міграції 0046 і в чернетках бота.
+  it("читає старі значення як нові", () => {
+    expect(parseModes("remote_only")).toEqual(["remote"]);
+    expect(parseModes("remote_or_city")).toEqual(["remote", "city"]);
+    expect(parseModes("relocate")).toEqual(["remote", "city"]);
+    expect(parseModes("remote_or_city,relocate")).toEqual(["remote", "city"]);
   });
 
   it("читає новий список і викидає сміття", () => {
-    expect(parseModes("remote_or_city,relocate")).toEqual(["remote_or_city", "relocate"]);
-    expect(parseModes("relocate, вигадка ,relocate")).toEqual(["relocate"]);
+    expect(parseModes("city, вигадка ,city")).toEqual(["city"]);
+    expect(parseModes("remote,city")).toEqual(["remote", "city"]);
     expect(parseModes(null)).toEqual([]);
   });
 
-  it("ширший варіант витісняє «тільки віддалено»", () => {
-    expect(parseModes("remote_only,relocate")).toEqual(["relocate"]);
-  });
-
   it("зберігає порядок словника, а не порядок натискань", () => {
-    expect(serializeModes(["relocate", "remote_or_city"])).toBe("remote_or_city,relocate");
+    expect(serializeModes(["city", "remote"])).toBe("remote,city");
+    expect(serializeModes(["relocate"])).toBe("remote,city");
     expect(serializeModes([])).toBe("");
   });
 
-  // Кнопка, яка не вмикається, читається як зламана. Тому виключність
-  // розв'язується саме тут, а не мовчазним відкиданням на читанні.
-  it("перемикає й тримає виключність «тільки віддалено»", () => {
-    expect(toggleMode(null, "relocate")).toBe("relocate");
-    expect(toggleMode("relocate", "remote_or_city")).toBe("remote_or_city,relocate");
-    expect(toggleMode("remote_or_city,relocate", "relocate")).toBe("remote_or_city");
-    expect(toggleMode("remote_or_city,relocate", "remote_only")).toBe("remote_only");
-    expect(toggleMode("remote_only", "relocate")).toBe("relocate");
-    expect(toggleMode("relocate", "relocate")).toBe("");
+  // Пункти сумісні: дотик по одному не знімає іншого.
+  it("перемикає по одному, нічого не витісняючи", () => {
+    expect(toggleMode(null, "city")).toBe("city");
+    expect(toggleMode("city", "remote")).toBe("remote,city");
+    expect(toggleMode("remote,city", "city")).toBe("remote");
+    expect(toggleMode("remote_only", "city")).toBe("remote,city");
+    expect(toggleMode("city", "city")).toBe("");
   });
 
-  it("місто потрібне лише там, де є місце", () => {
+  it("місто потрібне лише для офісу", () => {
+    expect(needsCity(parseModes("remote"))).toBe(false);
     expect(needsCity(parseModes("remote_only"))).toBe(false);
     expect(needsCity(parseModes(""))).toBe(false);
-    expect(needsCity(parseModes("remote_or_city"))).toBe(true);
+    expect(needsCity(parseModes("city"))).toBe(true);
+    expect(needsCity(parseModes("remote,city"))).toBe(true);
     expect(needsCity(parseModes("relocate"))).toBe(true);
-    expect(needsCity(parseModes("remote_or_city,relocate"))).toBe(true);
   });
 });

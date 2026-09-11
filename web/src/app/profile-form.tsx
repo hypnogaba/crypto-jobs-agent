@@ -272,7 +272,7 @@ export default function ProfileForm({ locale, pre, back, error, quote, evidence,
             ))}
           </div>
           {/* Місто видно завжди, а обов'язкове — лише там, де людина обрала
-              офіс чи переїзд.
+              офіс. Тоді воно й означає рівно це місто: офіси деінде не прийдуть.
 
               Раніше воно ховалось від тих, хто працює лише віддалено. З міста
               виводиться країна, з країни — національні дошки, і виходило, що
@@ -371,7 +371,7 @@ export default function ProfileForm({ locale, pre, back, error, quote, evidence,
       <button type="submit" className="btn mt-8">{t(locale, back ? "profile.save" : "onboarding.save")}</button>
 
       {/* Без скрипта форма лишається робочою: місто просто завжди видно, а
-          обов'язковість і виключність «тільки віддалено» доводить сервер. */}
+          обов'язковість для «офісу» доводить сервер. */}
       <script dangerouslySetInnerHTML={{ __html:
         `try{document.getElementById('tz').value=Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC'}catch(e){}
 try{(function(){
@@ -379,14 +379,8 @@ var box=document.getElementById('where'),row=document.getElementById('cityRow'),
 var HINT_NEED=${JSON.stringify(t(locale, "onboarding.locationHint"))},HINT_OPT=${JSON.stringify(t(locale, "onboarding.locationOptional"))};
 var m=box.querySelectorAll('input[name=remoteMode]');
 function sync(e){
-  if(e&&e.target.checked){
-    for(var i=0;i<m.length;i++){
-      var x=m[i];
-      if(x!==e.target&&(x.value==='remote_only'||e.target.value==='remote_only'))x.checked=false;
-    }
-  }
   var need=false;
-  for(var j=0;j<m.length;j++)if(m[j].checked&&m[j].value!=='remote_only')need=true;
+  for(var j=0;j<m.length;j++)if(m[j].checked&&m[j].value==='city')need=true;
   city.required=need;
   var hint=row.querySelector('span:last-child');
   if(hint)hint.textContent=need?HINT_NEED:HINT_OPT;

@@ -12,7 +12,7 @@
  * Чисті функції зверху, робота з базою й Telegram — знизу.
  */
 import {
-  SPHERES, INDUSTRIES, REMOTE_MODES, label, needsCity, parseModes,
+  SPHERES, INDUSTRIES, REMOTE_MODES, DEFAULT_MODE, label, needsCity, parseModes,
   serializeModes, type Locale,
 } from "./vocab";
 import { timezoneFromCity, timeOptions, zoneName } from "./tz";
@@ -143,7 +143,7 @@ export interface Draft {
   customIndustry?: string | null;
   customWhere?: string | null;
   industries: string[];
-  /** Набір варіантів через кому: «офіс у місті» і «переїзд» сумісні. */
+  /** Набір варіантів через кому: «віддалено» і «офіс у місті» сумісні. */
   remoteMode: string | null;
   /**
    * Місто. Питається лише в того, хто готовий працювати не тільки віддалено:
@@ -257,10 +257,10 @@ const ASK: Record<Step, Phrase> = {
     ru: "2 из 3 · В какой отрасли хочешь работать?\nНеобязательно. Например: web3, финтех, игры. Или пропусти.",
   },
   where: {
-    en: "3 of 3 · Where are you looking?\nFor example: remote only · office in Berlin or remote · open to relocating within the EU.",
-    uk: "3 з 3 · Де шукаєш роботу?\nНаприклад: тільки віддалено · офіс у Берліні або віддалено · готовий переїхати в ЄС.",
-    fr: "3 sur 3 · Où cherchez-vous ?\nPar exemple : à distance uniquement · bureau à Berlin ou à distance · prêt à déménager dans l'UE.",
-    ru: "3 из 3 · Где ищешь работу?\nНапример: только удалённо · офис в Берлине или удалённо · готов переехать в ЕС.",
+    en: "3 of 3 · Where are you looking?\nFor example: remote only · office in Paris only · office in Berlin or remote.",
+    uk: "3 з 3 · Де шукаєш роботу?\nНаприклад: тільки віддалено · тільки офіс у Парижі · офіс у Берліні або віддалено.",
+    fr: "3 sur 3 · Où cherchez-vous ?\nPar exemple : à distance uniquement · bureau à Paris uniquement · bureau à Berlin ou à distance.",
+    ru: "3 из 3 · Где ищешь работу?\nНапример: только удалённо · только офис в Париже · офис в Берлине или удалённо.",
   },
   /**
    * Стек, роки, мови — питання, якого в боті не було зовсім.
@@ -290,11 +290,13 @@ const ASK: Record<Step, Phrase> = {
     fr: "Quelle heure est-il chez vous en ce moment ?\nCela règle l'heure d'envoi.",
     ru: "Который у тебя сейчас час?\nОт этого зависит, когда приходит подборка.",
   },
+  // Питання стоїть лише перед тим, хто обрав офіс, і відповідь тепер точна:
+  // прийде саме це місто, а не вся країна (скарга 10.09: Париж → Японія).
   city: {
-    en: "Which city?\nWrite it however you like — Berlin, Kyiv, Paris. It unlocks local job boards.",
-    uk: "Яке місто?\nНапиши як зручно — Берлін, Київ, Париж. Це відкриває місцеві дошки вакансій.",
-    fr: "Quelle ville ?\nÉcrivez-la comme vous voulez — Berlin, Kyiv, Paris. Cela débloque les sites d'emploi locaux.",
-    ru: "Какой город?\nНапиши как удобно — Берлин, Киев, Париж. Это открывает местные доски вакансий.",
+    en: "Which city is the office in?\nOnly jobs in this city will come. Several are fine, comma separated: Paris, Lyon.",
+    uk: "У якому місті офіс?\nПрийдуть лише вакансії з цього міста. Можна кілька через кому: Париж, Ліон.",
+    fr: "Dans quelle ville est le bureau ?\nSeules les offres de cette ville arriveront. Plusieurs villes séparées par des virgules : Paris, Lyon.",
+    ru: "В каком городе офис?\nПридут только вакансии из этого города. Можно несколько через запятую: Париж, Лион.",
   },
   salary: {
     en: "Salary floor, per month, before tax?\nA soft preference, not a hard filter — most postings show no range at all.",
@@ -587,13 +589,12 @@ export function keyboard(step: Step, draft: Draft, locale: Locale, opts: Keyboar
   }
 
   // Місто теж вільний текст, але «Пропустити» тут немає: питання ставиться
-  // лише тому, хто сам обрав офіс у своєму місті чи переїзд. Пропущене місто
+  // лише тому, хто сам обрав офіс у своєму місті. Пропущене місто
   // означало б профіль без країни — тобто без жодної національної дошки, і
   // людина ніколи б не дізналась, чому їй приходить сама лише глобальна стрічка.
   if (step === "city") return [];
 
-  // Кілька відповідей: офіс у своєму місті й готовність переїхати одне одного
-  // не виключають. Виключне тільки «тільки віддалено» — див. toggleMode.
+  // Кілька відповідей: «віддалено» і «офіс у моєму місті» сумісні.
   if (step === "where") {
     const chosen = parseModes(draft.remoteMode);
     for (const it of REMOTE_MODES) {
@@ -684,7 +685,7 @@ export function profileUpdateFor(step: Step, draft: Draft): { set: string; param
     case "where":
     case "city":
       return { set: "remote_mode=?, location=?",
-        params: [serializeModes(parseModes(draft.remoteMode)) || "remote_only", draft.location ?? null] };
+        params: [serializeModes(parseModes(draft.remoteMode)) || DEFAULT_MODE, draft.location ?? null] };
     case "salary":
       return { set: "salary_min=?, salary_currency=?", params: [draft.salaryMin ?? null, draft.salaryCurrency ?? null] };
     case "wishes":

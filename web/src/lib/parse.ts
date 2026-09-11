@@ -1,5 +1,5 @@
 import {
-  INDUSTRIES, REMOTE_MODES, SPHERES, serializeModes,
+  INDUSTRIES, REMOTE_MODES, SPHERES, parseModes, serializeModes,
   type IndustryId, type RemoteModeId, type SphereId,
 } from "./vocab";
 import { logUsage, readUsage } from "@/lib/usage";
@@ -229,13 +229,13 @@ export function parseLocally(text: string): ParsedProfile {
   const location = null;
 
   /**
-   * Режим — набір, а не один вибір: «готовий переїхати» й «офіс у Києві» не
-   * виключають одне одного. «Тільки віддалено» лишається виключним, тож
-   * ставимо його тільки тоді, коли ширшого варіанта немає.
+   * Режим — набір із двох сумісних пунктів. Окремого «переїзду» більше немає
+   * (11.09): людина, що пише про переїзд, згодна на офіс, а про віддалене
+   * не сказала «ні», тож отримує обидва. Місто вона назве на наступному кроці.
    */
   const modes: RemoteModeId[] = [];
-  if (relocateHit) modes.push("relocate");
-  if (modes.length === 0 && remoteHit) modes.push("remote_only");
+  if (relocateHit) modes.push("remote", "city");
+  else if (remoteHit) modes.push("remote");
   if (modes.length > 0) evidence.remoteMode = relocateHit ?? remoteHit!;
 
   const { min, currency, at: salaryAt } = parseSalary(text);
@@ -265,8 +265,10 @@ const SYSTEM = `Ти розбираєш опис пошуку роботи аб�
 spheres — з набору: ${SPHERES.map((s) => s.id).join(", ")}
 industries — з набору: ${INDUSTRIES.map((i) => i.id).join(", ")}
 remoteMode — список із: ${REMOTE_MODES.map((m) => m.id).join(", ")}. Це НАБІР:
-  «готовий переїхати» і «офіс у моєму місті» можуть стояти разом. remote_only
-  ставиться лише окремо, коли людина не згодна на офіс ніде.
+  remote — людина згодна на віддалену роботу; city — на офіс у названому
+  місті (сюди ж «готовий переїхати в X»). Обидва можуть стояти разом. Лише
+  remote — коли людина не згодна на офіс ніде; лише city — коли не хоче
+  віддалено.
 salaryPeriod — "month" або "year": за який період названа сума. Це питання
   культури, а не числа: «3000 євро» в Європі майже завжди місяць, «120k» у
   США — рік. Не впевнений — null, тоді вирішимо за величиною.
@@ -423,9 +425,9 @@ export function mergeParsed(parsed: RawParsed, local: ParsedProfile, text: strin
   // було б відповіддю, якої людина не давала.
   const modeList = Array.isArray(parsed.remoteMode) ? parsed.remoteMode
     : typeof parsed.remoteMode === "string" ? parsed.remoteMode.split(",") : [];
-  const modes = modeList
-    .map((m) => String(m).trim())
-    .filter((m) => REMOTE_MODES.some((x) => x.id === m));
+  // Через parseModes, щоб старі id зі звички моделі («remote_only») не
+  // загубились, а стали новими.
+  const modes = parseModes(modeList.map((m) => String(m).trim()).join(","));
 
   /**
    * Зарплата зводиться до РІЧНОЇ — однієї одиниці виміру на всю систему.

@@ -61,11 +61,29 @@ export const INDUSTRIES = [
  * справді шукаються — на відміну від цих чотирьох кнопок.
  */
 
+/**
+ * «Де працювати» — два пункти, і вони сумісні.
+ *
+ * До 11.09 їх було три, і третій, «готовий переїхати», не мав сталого змісту:
+ * одні писали в поле міста своє місто, інші — список міст, куди готові їхати.
+ * А «віддалено або офіс у місті» з Парижем приносило Японію. Тепер місто
+ * означає саме це місто, а віддалено — усе, що не закрите в чужій країні.
+ * Той самий словник живе в scanner/src/match.ts (`modesOf`).
+ */
 export const REMOTE_MODES = [
-  { id: "remote_only",    en: "Remote only",                 uk: "Тільки віддалено",            fr: "100% à distance",        ru: "Только удалённо" },
-  { id: "remote_or_city", en: "Remote, or office in my city",uk: "Віддалено або офіс у місті",  fr: "À distance ou au bureau",ru: "Удалённо или офис в городе" },
-  { id: "relocate",       en: "Open to relocating",          uk: "Готовий/готова переїхати",    fr: "Prêt à déménager",       ru: "Готов(а) переехать" },
+  { id: "remote", en: "Remote",            uk: "Віддалено",             fr: "À distance",             ru: "Удалённо" },
+  { id: "city",   en: "Office in my city", uk: "В офісі в моєму місті", fr: "Au bureau dans ma ville", ru: "В офисе в моём городе" },
 ] as const;
+
+/**
+ * Старі id, які ще живуть у рядках до міграції 0046 і в чернетках бота.
+ * «Переїзд» став «віддалено + місто»: так людина не втрачає жодного з двох.
+ */
+const LEGACY_MODES: Record<string, RemoteModeId[]> = {
+  remote_only: ["remote"],
+  remote_or_city: ["remote", "city"],
+  relocate: ["remote", "city"],
+};
 
 export type SphereId = (typeof SPHERES)[number]["id"];
 export type IndustryId = (typeof INDUSTRIES)[number]["id"];
@@ -79,40 +97,30 @@ export const label = (
 /**
  * «Де хочеш працювати» — це набір, а не один вибір.
  *
- * Людина, готова і на офіс у своєму місті, і на переїзд, раніше мусила
- * викреслити одне з двох: поле було радіо-кнопкою. Тепер у стовпці
- * `remote_mode` лежить список ідентифікаторів через кому. Старі рядки —
- * це список з одного елемента, тож міграція не потрібна: формат читає
- * і те, що записано до цієї зміни.
- *
- * `remote_only` виключний за змістом: «тільки віддалено» разом з «офіс у
- * місті» — суперечність, і виграє те, що ширше.
+ * У стовпці `remote_mode` лежить список ідентифікаторів через кому. Старі
+ * id розгортаються через LEGACY_MODES, тож рядок, записаний до 11.09, і
+ * чернетка бота, почата вчора, читаються без помилки.
  */
 export const parseModes = (raw: string | null | undefined): RemoteModeId[] => {
   // Порядок завжди словниковий, а не той, у якому людина натискала: інакше
   // той самий набір показувався б по-різному в боті й на сайті.
-  const written = new Set((raw ?? "").split(",").map((s) => s.trim()));
-  const list = REMOTE_MODES.map((m) => m.id).filter((id) => written.has(id));
-  const wide = list.filter((m) => m !== "remote_only");
-  return (wide.length ? wide : list) as RemoteModeId[];
+  const written = new Set((raw ?? "").split(",").map((s) => s.trim())
+    .flatMap((s) => LEGACY_MODES[s] ?? [s]));
+  return REMOTE_MODES.map((m) => m.id).filter((id) => written.has(id));
 };
 
 /** Порожній набір повертає порожній рядок: підставляти замовчування — справа того, хто пише в базу. */
-export const serializeModes = (modes: string[]): string =>
-  REMOTE_MODES.filter((m) => modes.includes(m.id)).map((m) => m.id).join(",");
+export const serializeModes = (modes: string[]): string => parseModes(modes.join(",")).join(",");
 
-/**
- * Дотик по одному варіанту. «Тільки віддалено» витісняє решту й витісняється
- * нею — інакше кнопка виглядала б зламаною: людина тисне, а галочка не
- * з'являється, бо parseModes мовчки викидає суперечність.
- */
+/** Замовчування для запису в базу, коли людина не обрала нічого. */
+export const DEFAULT_MODE: RemoteModeId = "remote";
+
+/** Дотик по одному варіанту. Пункти сумісні, тож дотик нічого іншого не знімає. */
 export const toggleMode = (raw: string | null | undefined, id: string): string => {
   const cur = parseModes(raw);
   if (cur.includes(id as RemoteModeId)) return serializeModes(cur.filter((m) => m !== id));
-  if (id === "remote_only") return "remote_only";
-  return serializeModes([...cur.filter((m) => m !== "remote_only"), id]);
+  return serializeModes([...cur, id]);
 };
 
-/** Місто питається лише в того, хто згоден не тільки на віддалену роботу. */
-export const needsCity = (modes: string[]): boolean =>
-  modes.some((m) => m === "remote_or_city" || m === "relocate");
+/** Місто питається лише в того, хто обрав офіс. */
+export const needsCity = (modes: string[]): boolean => parseModes(modes.join(",")).includes("city");

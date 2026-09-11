@@ -68,8 +68,8 @@ describe("більше не вигадує", () => {
 
   it("французька без акцентів усе одно впізнається", () => {
     // «demenager» з телефона — той самий намір, що й «déménager».
-    expect(parseLocally("Je suis pret a demenager").remoteMode).toBe("relocate");
-    expect(parseLocally("Je suis pret a déménager").remoteMode).toBe("relocate");
+    expect(parseLocally("Je suis pret a demenager").remoteMode).toBe("remote,city");
+    expect(parseLocally("Je suis pret a déménager").remoteMode).toBe("remote,city");
     expect(parseLocally("ingenieur logiciel").spheres).toContain("engineering");
     expect(parseLocally("responsable securite").spheres).toContain("security");
   });
@@ -121,9 +121,11 @@ describe("режим роботи — набір", () => {
   it("порожній, коли людина нічого про це не сказала", () => {
     expect(parseLocally("product manager").remoteMode).toBe("");
   });
-  it("готовність переїхати не змішується з «тільки віддалено»", () => {
-    expect(parseLocally("готовий до переїзду").remoteMode).toBe("relocate");
-    expect(parseLocally("only remote").remoteMode).toBe("remote_only");
+  // Окремого «переїзду» немає з 11.09: той, хто пише про переїзд, згодний на
+  // офіс і не відмовлявся від віддаленого.
+  it("переїзд дає «віддалено + місто», віддалено дає «віддалено»", () => {
+    expect(parseLocally("готовий до переїзду").remoteMode).toBe("remote,city");
+    expect(parseLocally("only remote").remoteMode).toBe("remote");
   });
 });
 
@@ -226,9 +228,10 @@ describe("mergeParsed", () => {
   });
 
   it("приймає режим і списком, і рядком", () => {
-    expect(mergeParsed({ remoteMode: "relocate,remote_or_city" }, local, "x").remoteMode)
-      .toBe("remote_or_city,relocate");
-    expect(mergeParsed({ remoteMode: ["relocate"] }, local, "x").remoteMode).toBe("relocate");
+    expect(mergeParsed({ remoteMode: "city,remote" }, local, "x").remoteMode).toBe("remote,city");
+    expect(mergeParsed({ remoteMode: ["city"] }, local, "x").remoteMode).toBe("city");
+    // Стара звичка моделі не губиться, а стає новим id.
+    expect(mergeParsed({ remoteMode: ["remote_only"] }, local, "x").remoteMode).toBe("remote");
   });
 
   it("не лишає підстави для значень, які відпали", () => {

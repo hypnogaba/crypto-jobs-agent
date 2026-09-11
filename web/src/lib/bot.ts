@@ -16,7 +16,7 @@ import { monthlyFrom, yearlyFrom } from "./salary-period";
 import { isEmptyEdit, readNote, wishClauses } from "./note-to-profile";
 import { logUsage } from "./usage";
 import { t as say, tf, timeNow, timeSet, type CopyKey } from "./bot-copy";
-import { parseModes, serializeModes, toggleMode, type Locale } from "./vocab";
+import { DEFAULT_MODE, parseModes, serializeModes, toggleMode, type Locale } from "./vocab";
 import { persistDerived } from "@/lib/profile-country";
 import { timezoneFor } from "./geo";
 import { isKnownZone, timezoneFromCity, zoneForHour, zoneName } from "./tz";
@@ -589,8 +589,10 @@ export async function handleOnboardingText(
     else if (back === "where") {
       draft.customWhere = own;
       // Написане тут і є місцем: окремо перепитувати місто після цього
-      // означало б питати те саме двічі.
+      // означало б питати те саме двічі. І це місце для офісу: без пункту
+      // «місто» підбір його не читав би, бо шукав би лише віддалене.
       draft.location = own;
+      draft.remoteMode = serializeModes([...parseModes(draft.remoteMode), "city"]);
     }
 
     // Питання з однією відповіддю після свого варіанта йдуть далі самі:
@@ -755,7 +757,7 @@ async function finishOnboarding(
     userId, "bot", null,
     JSON.stringify(draft.spheres), draft.customRole ?? null,
     JSON.stringify(draft.industries), draft.customIndustry ?? null,
-    serializeModes(parseModes(draft.remoteMode)) || "remote_only", draft.location ?? null,
+    serializeModes(parseModes(draft.remoteMode)) || DEFAULT_MODE, draft.location ?? null,
     draft.salaryMin, draft.salaryCurrency, draft.wishes?.trim() || null,
     draft.cvHighlights?.trim() || null);
 
@@ -1017,7 +1019,10 @@ async function handleEditText(
     const own = text.slice(0, 120);
     if (step === "spheres") draft.customRole = own;
     else if (step === "industries") draft.customIndustry = own;
-    else if (step === "where") { draft.customWhere = own; draft.location = own; }
+    else if (step === "where") {
+      draft.customWhere = own; draft.location = own;
+      draft.remoteMode = serializeModes([...parseModes(draft.remoteMode), "city"]);
+    }
     // Списки повертаються до клавіатури — можна дообрати; одиночні пишуться одразу.
     if (step === "spheres" || step === "industries") {
       await showEdit(env, chatId, `edit:${step}`, draft, locale, row.message_id,
@@ -1115,7 +1120,7 @@ async function saveWholeProfile(env: Env, userId: string, draft: Draft): Promise
       WHERE user_id=?`,
     JSON.stringify(draft.spheres), draft.customRole ?? null,
     JSON.stringify(draft.industries), draft.customIndustry ?? null,
-    serializeModes(parseModes(draft.remoteMode)) || "remote_only", draft.location ?? null,
+    serializeModes(parseModes(draft.remoteMode)) || DEFAULT_MODE, draft.location ?? null,
     draft.salaryMin, draft.salaryCurrency, draft.wishes?.trim() || null,
     draft.cvHighlights?.trim() || null, userId);
   await persistDerived(userId, env.ANTHROPIC_API_KEY ?? null);
@@ -1362,7 +1367,7 @@ export async function handleDocument(
     // він порожній. Стовпець remote_mode — NOT NULL, і порожній рядок означав
     // би «жодного варіанта», чого людина не обирала. Найвужче з безпечних —
     // те саме замовчування, що й на сайті.
-    const remoteMode = parsed.remoteMode || "remote_only";
+    const remoteMode = parsed.remoteMode || DEFAULT_MODE;
 
     const existing = await one<{ id: string }>("SELECT id FROM users WHERE telegram_chat_id=?", String(chatId));
     const userId = existing?.id ?? uuid();

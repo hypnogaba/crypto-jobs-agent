@@ -11,7 +11,7 @@ import { CvError, extractCvText } from "@/lib/cv";
 import { DEFAULT_LOCALE, isLocale } from "@/lib/i18n";
 import { safeTimezone } from "@/lib/digest-time";
 import { FEEDBACK_LIMITS, ONBOARD_LIMITS, checkRate, recordFailure } from "@/lib/ratelimit";
-import { INDUSTRIES, SPHERES, needsCity, parseModes, serializeModes, type Locale } from "@/lib/vocab";
+import { DEFAULT_MODE, INDUSTRIES, SPHERES, needsCity, parseModes, serializeModes, type Locale } from "@/lib/vocab";
 import { persistProfile } from "@/lib/profile-write";
 import { PENDING_COOKIE, createPending, dropPending, pendingById } from "@/lib/pending";
 import { pathFor } from "@/lib/seo";
@@ -235,7 +235,7 @@ export async function saveProfile(formData: FormData): Promise<void> {
     // Витяг із резюме людина бачить і може виправити — тому він приходить
     // формою, а не тягнеться з чернетки повз неї.
     cvHighlights: String(formData.get("cvHighlights") ?? "").trim().slice(0, 300) || null,
-    remoteMode: serializeModes(modes) || "remote_only",
+    remoteMode: serializeModes(modes) || DEFAULT_MODE,
     location,
     // Поле МІСЯЧНЕ — так думають люди, і так воно підписане. У базі лежить
     // річна: вакансії зведені до річних, і дві одиниці виміру в одній колонці
