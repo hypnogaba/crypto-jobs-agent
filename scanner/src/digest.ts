@@ -15,8 +15,8 @@ import { D1Client } from "./d1.js";
 import { affected, notifyOwner } from "./notify.js";
 import { retireUnreachable } from "./orphans.js";
 import { mapLimit } from "./http.js";
-import { countriesOf, hasSearchSignal, meaningfulRoleWords, pickTop, pitchWithClaude, roleText, roleWords,
-         type CandidateJob, type Profile } from "./match.js";
+import { citiesOf, cityNames, countriesOf, hasSearchSignal, meaningfulRoleWords, modesOf, pickTop, pitchWithClaude,
+         roleText, roleWords, type CandidateJob, type Profile } from "./match.js";
 import { asLocale, formatWhen, nextDelivery, salaryLine, say, thin, type Locale } from "./digest-copy.js";
 import { summarize } from "./summary.js";
 import { costUsd } from "./pricing.js";
@@ -890,6 +890,34 @@ export function roleSql(p: Pick<Profile, "customRole" | "customRoleEn">): {
   return { sql: `(CASE WHEN ${clauses.join(" OR ")} THEN 1 ELSE 0 END)`, params };
 }
 
+/**
+ * Чи рядок із міста людини — для СОРТУВАННЯ вікна, не для рішення.
+ *
+ * Людина з «офісом у моєму місті» отримує лише своє місто, але вікно в 1200
+ * рядків сортується за роллю й свіжістю. Паризька вакансія тижневої давності
+ * могла не дійти навіть до оцінювання, поступившись свіжим віддаленим.
+ *
+ * `LIKE` тут надмножина точного збігу («parisian» теж пройде), і для
+ * сортування це безпечно: остаточно вирішує reachable(). Рядків це не
+ * додає — змінюється лише порядок того, що й так читається. SQLite знижує
+ * регістр лише латиниці, тож «Île-de-France» так не знайдеться; «Paris» у
+ * тих самих рядках майже завжди поруч.
+ */
+export function citySql(p: Pick<Profile, "remoteMode" | "location" | "locationEn">): {
+  sql: string; params: unknown[];
+} {
+  if (!modesOf(p.remoteMode).has("city")) return { sql: "0", params: [] };
+  const names = [...new Set(citiesOf(p).flatMap(cityNames))].slice(0, CITY_NAMES_IN_SQL);
+  if (names.length === 0) return { sql: "0", params: [] };
+  return {
+    sql: `(CASE WHEN ${names.map(() => "LOWER(j.location) LIKE ?").join(" OR ")} THEN 1 ELSE 0 END)`,
+    params: names.map((n) => `%${n}%`),
+  };
+}
+
+/** Стеля параметрів: D1 приймає до ста на запит, а роль уже бере свої двічі. */
+const CITY_NAMES_IN_SQL = 20;
+
 function roleClauses(p: Pick<Profile, "customRole" | "customRoleEn">): {
   clauses: string[]; params: unknown[];
 } {
@@ -1018,6 +1046,7 @@ export async function fetchCandidateRows(
    * community-вакансію ще до того, як та побачить вікно.
    */
   const role = roleSql(profile);
+  const city = citySql(profile);
   const mine = countriesOf(profile);
   const countrySql = mine.length > 0
     ? `AND (j.country IS NULL OR j.country IN (${mine.map(() => "?").join(",")}))`
@@ -1086,9 +1115,9 @@ export async function fetchCandidateRows(
     // Разом на живих профілях: 799 472 прочитаних рядки D1 на шість добірок
     // → 174 041, тобто −78%. На одну добірку це близько 160 000 → 35 000.
     `SELECT * FROM (
-       SELECT j.*, ${role.sql} AS by_role, ROW_NUMBER() OVER (
+       SELECT j.*, ${role.sql} AS by_role, ${city.sql} AS by_city, ROW_NUMBER() OVER (
          PARTITION BY j.company_key
-         ORDER BY ${role.sql} DESC, j.posted_at DESC, j.fetched_at DESC
+         ORDER BY ${role.sql} DESC, ${city.sql} DESC, j.posted_at DESC, j.fetched_at DESC
        ) AS rn
        FROM jobs_cache j
        WHERE ${topic.sql} = 1
@@ -1099,9 +1128,10 @@ export async function fetchCandidateRows(
            SELECT 1 FROM sent s WHERE s.user_id = ? AND s.dedupe_key = j.dedupe_key)
      )
      WHERE rn <= 3
-     ORDER BY by_role DESC, posted_at DESC, fetched_at DESC
+     ORDER BY by_role DESC, by_city DESC, posted_at DESC, fetched_at DESC
      LIMIT ${limit}`,
-    [...role.params, ...role.params, ...topic.params, ...mine, userId, userId]);
+    [...role.params, ...city.params, ...role.params, ...city.params,
+     ...topic.params, ...mine, userId, userId]);
 }
 
 /** Рядок бази → кандидат для оцінювання. */

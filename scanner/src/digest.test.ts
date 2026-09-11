@@ -669,7 +669,8 @@ describe("fetchCandidateRows — порядок параметрів", () => {
     let sql = "";
     const d1 = { query: async (q: string) => { sql = q; return []; } } as never;
     await fetchCandidateRows(d1, profile, "u1");
-    expect(sql).toMatch(/ORDER BY by_role DESC, posted_at DESC/);
+    // Місто стоїть другим: роль людини важливіша за адресу, свіжість — ні.
+    expect(sql).toMatch(/ORDER BY by_role DESC, by_city DESC, posted_at DESC/);
     expect(sql).toMatch(/PARTITION BY j\.company_key\s+ORDER BY \(CASE WHEN/);
   });
 
@@ -685,6 +686,15 @@ describe("fetchCandidateRows — порядок параметрів", () => {
       '%"engineering"%', "%community%", "%manager%", "%community%",
       "u1", "u1",
     ]);
+  });
+
+  it("місто людини займає свої знаки питання в обох місцях", async () => {
+    let sql = "", params: unknown[] = [];
+    const d1 = { query: async (q: string, p: unknown[]) => { sql = q; params = p; return []; } } as never;
+    const paris = { ...(profile as object), remoteMode: "remote,city", location: "Paris", locationEn: "Paris" } as never;
+    await fetchCandidateRows(d1, paris, "u1");
+    expect(params).toHaveLength((sql.match(/\?/g) ?? []).length);
+    expect(params.filter((x) => x === "%paris%")).toHaveLength(2);
   });
 });
 
@@ -1279,5 +1289,30 @@ describe("підготовлена добірка чекає своєї годи
     });
     await deliverTo(user(), ctx);
     expect(ctx.delivered).toBe(1);
+  });
+});
+
+import { citySql } from "./digest.js";
+
+describe("citySql — місто людини першим у вікні", () => {
+  const paris = { remoteMode: "remote,city", location: "Париж", locationEn: "Paris" };
+
+  it("шукає місто і його передмістя", () => {
+    const { sql, params } = citySql(paris);
+    expect(sql).toContain("LOWER(j.location) LIKE ?");
+    expect(params).toContain("%paris%");
+    expect(params).toContain("%la defense%");
+  });
+
+  it("мовчить, коли офісу людина не просила", () => {
+    expect(citySql({ ...paris, remoteMode: "remote" })).toEqual({ sql: "0", params: [] });
+  });
+
+  it("мовчить, коли в полі лише країна", () => {
+    expect(citySql({ ...paris, location: "France", locationEn: "France" })).toEqual({ sql: "0", params: [] });
+  });
+
+  it("стеля параметрів тримається", () => {
+    expect(citySql(paris).params.length).toBeLessThanOrEqual(20);
   });
 });
