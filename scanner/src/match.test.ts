@@ -115,7 +115,8 @@ describe("explainLocally", () => {
     expect(explainLocally(top!, p)).not.toMatch(/[а-яіїє]/i);
   });
   it("без жодної причини — запасний рядок теж локалізований", () => {
-    const only = { ...p, spheres: [], industries: [], remoteMode: "any", salaryMin: null };
+    // «Віддалено + місто»: віддаленість тут не єдина умова, тож і не причина.
+    const only = { ...p, spheres: [], industries: [], remoteMode: "remote,city", salaryMin: null };
     const [top] = pickTop([job({ tags: ["senior"], title: "Anything" })], { ...only, customRole: "anything" }, 1);
     expect(explainLocally(top!, only, "en")).toBe("role title matches your profile.");
   });
@@ -647,17 +648,20 @@ describe("офіс без локації", () => {
     expect(reachable(job({ location: "   " }), berlin)).toBe(false);
   });
 
-  it("написане місто лишається, навіть якщо словник його не знає", () => {
-    // «Wallingford, Oxfordshire» наш словник не розбирає, але людина прочитає.
-    expect(reachable(job({ location: "Wallingford, Oxfordshire" }), berlin)).toBe(true);
+  it("нерозібране місце більше не проходить: людина назвала своє місто", () => {
+    // До 11.09 «Wallingford, Oxfordshire» лишався: словник його не знає, а
+    // людина, мовляв, прочитає. Тепер «офіс у моєму місті» означає це місто.
+    expect(reachable(job({ location: "Wallingford, Oxfordshire" }), berlin)).toBe(false);
+    expect(reachable(job({ location: "Berlin, Germany" }), berlin)).toBe(true);
   });
 
   it("віддаленої вакансії правило не стосується", () => {
     expect(reachable(job({ remote: true }), berlin)).toBe(true);
   });
 
-  it("готовому переїхати правило теж не заважає", () => {
-    expect(reachable(job(), { ...berlin, remoteMode: "relocate" })).toBe(true);
+  it("старий «переїзд» тепер означає «віддалено + місто», тож правило діє й тут", () => {
+    // Пункт прибрано 11.09; старі профілі читаються як «віддалено + місто».
+    expect(reachable(job(), { ...berlin, remoteMode: "relocate" })).toBe(false);
   });
 });
 
@@ -1187,5 +1191,133 @@ describe("виклик моделі за картками", () => {
       (u: { ok: boolean; status?: number }) => { seen.push(u); }, "uk", new Map(), 0);
     expect(seen[0]!.ok).toBe(false);
     expect(seen[0]!.status).toBe(401);
+  });
+});
+
+import { citiesOf, modesOf } from "./match.js";
+
+/**
+ * Скарга 10.09: «віддалено або офіс у місті» + Париж, а в добірці Японія.
+ * Для людини «Париж» означає Париж: не Ліон, не Токіо і не «Remote, Japan».
+ */
+describe("місто означає це місто", () => {
+  const paris: Profile = {
+    userId: "fr", spheres: ["product"], industries: [],
+    remoteMode: "remote,city", location: "Париж", locationEn: "Paris", country: "FR", salaryMin: null,
+  };
+  const at = (location: string | null, remote: boolean, o: Partial<CandidateJob> = {}): CandidateJob => ({
+    id: `${location}-${remote}`, company: `C ${location}`, companyKey: `c-${location}-${remote}`,
+    title: "Product Manager", location, remote, url: "https://x.test/1",
+    tags: ["product"], postedAt: null, salaryMin: null, salaryCurrency: null, ...o,
+  });
+  const office = (l: string | null) => at(l, false);
+  const remote = (l: string | null) => at(l, true);
+
+  it("офіс проходить лише в самому місті", () => {
+    expect(reachable(office("Paris, France"), paris)).toBe(true);
+    expect(reachable(office("Paris, Île-de-France, France"), paris)).toBe(true);
+    expect(reachable(office("Lyon, France"), paris)).toBe(false);
+    expect(reachable(office("Tokyo, Japan"), paris)).toBe(false);
+  });
+
+  it("передмістя рахуються за місто", () => {
+    expect(reachable(office("La Défense, Île-de-France"), paris)).toBe(true);
+    expect(reachable(office("Boulogne-Billancourt"), paris)).toBe(true);
+    expect(reachable(office("Ile de France"), paris)).toBe(true);
+  });
+
+  it("офіс без локації або з нерозібраним місцем не проходить", () => {
+    // Раніше «Wallingford, Oxfordshire» лишався: людина прочитає й вирішить.
+    // Тепер людина вже вирішила: вона назвала своє місто, і це не воно.
+    expect(reachable(office(null), paris)).toBe(false);
+    expect(reachable(office("Wallingford, Oxfordshire"), paris)).toBe(false);
+  });
+
+  it("віддалена проходить, якщо не закрита в чужій країні", () => {
+    expect(reachable(remote("Remote"), paris)).toBe(true);
+    expect(reachable(remote(null), paris)).toBe(true);
+    expect(reachable(remote("Remote, Europe"), paris)).toBe(true);
+    expect(reachable(remote("Remote, France"), paris)).toBe(true);
+    expect(reachable(remote("Worldwide"), paris)).toBe(true);
+  });
+
+  it("віддалена в чужій країні не проходить — саме так приходила Японія", () => {
+    expect(reachable(remote("Remote, Japan"), paris)).toBe(false);
+    expect(reachable(remote("Tokyo"), paris)).toBe(false);
+    expect(reachable(remote("Remote - United States"), paris)).toBe(false);
+  });
+
+  it("лише місто: віддалені не приходять, крім віддалених у самому місті", () => {
+    const cityOnly = { ...paris, remoteMode: "city" };
+    expect(reachable(remote("Remote"), cityOnly)).toBe(false);
+    expect(reachable(remote("Remote, France"), cityOnly)).toBe(false);
+    expect(reachable(remote("Paris (Remote)"), cityOnly)).toBe(true);
+    expect(reachable(office("Paris"), cityOnly)).toBe(true);
+  });
+
+  it("лише віддалено: офіс не проходить, а рядок без локації лишається", () => {
+    // Правило 03.09: без локації це здебільшого непроставлений прапорець remote.
+    const remoteOnly = { ...paris, remoteMode: "remote" };
+    expect(reachable(office("Paris"), remoteOnly)).toBe(false);
+    expect(reachable(office(null), remoteOnly)).toBe(true);
+    expect(reachable(remote("Remote, Japan"), remoteOnly)).toBe(false);
+  });
+
+  it("країна людини невідома — віддалені проходять усі", () => {
+    const nowhere: Profile = { ...paris, remoteMode: "remote", location: null, locationEn: null, country: null };
+    expect(reachable(remote("Remote, Japan"), nowhere)).toBe(true);
+  });
+
+  it("кілька міст — кожне своє, але не сусіднє", () => {
+    const many = { ...paris, location: "Bratislava, Vienna", locationEn: "Bratislava, Vienna", country: "SK,AT" };
+    expect(reachable(office("Vienna, Austria"), many)).toBe(true);
+    expect(reachable(office("Wien"), many)).toBe(true);
+    expect(reachable(office("Bratislava"), many)).toBe(true);
+    expect(reachable(office("Graz, Austria"), many)).toBe(false);
+  });
+
+  it("у полі міста лише країна — офіс у будь-якому місті цієї країни", () => {
+    const fr = { ...paris, location: "France", locationEn: "France" };
+    expect(citiesOf(fr)).toEqual([]);
+    expect(reachable(office("Lyon, France"), fr)).toBe(true);
+    expect(reachable(office("Berlin, Germany"), fr)).toBe(false);
+  });
+
+  it("«Paris, France» це одне місто, а не два", () => {
+    expect(citiesOf({ location: "Paris, France", locationEn: "Paris, France" })).toEqual(["paris"]);
+  });
+
+  it("старі відповіді читаються як нові", () => {
+    expect([...modesOf("remote_only")]).toEqual(["remote"]);
+    expect([...modesOf("remote_or_city")].sort()).toEqual(["city", "remote"]);
+    expect([...modesOf("relocate")].sort()).toEqual(["city", "remote"]);
+    expect([...modesOf("remote_or_city,relocate")].sort()).toEqual(["city", "remote"]);
+    expect([...modesOf("")]).toEqual(["remote"]);
+    expect(reachable(office("Lyon, France"), { ...paris, remoteMode: "remote_or_city,relocate" })).toBe(false);
+  });
+
+  describe("порядок у добірці", () => {
+    const fresh = new Date().toISOString();
+    const parisJob = (i: number) => at("Paris, France", false, { id: `p${i}`, companyKey: `p${i}`, company: `P${i}` });
+    const remoteJob = (i: number) => at("Remote", true,
+      { id: `r${i}`, companyKey: `r${i}`, company: `R${i}`, postedAt: fresh });
+
+    it("спершу місто, потім віддалені", () => {
+      const top = pickTop([...Array.from({ length: 5 }, (_, i) => remoteJob(i)),
+        parisJob(1), parisJob(2), parisJob(3)], paris, 5);
+      expect(top).toHaveLength(5);
+      expect(top.slice(0, 3).map((j) => j.id).sort()).toEqual(["p1", "p2", "p3"]);
+      expect(top.slice(3).every((j) => j.remote)).toBe(true);
+    });
+
+    it("слабка вакансія з міста не витісняє сильну віддалену", () => {
+      const weak = at("Paris, France", false,
+        { id: "pw", companyKey: "pw", company: "PW", title: "Assistant", tags: ["product"] });
+      const strong = at("Remote", true,
+        { id: "rs", companyKey: "rs", company: "RS", title: "Senior Product Manager", postedAt: fresh });
+      const p2 = { ...paris, customRole: "product manager", customRoleEn: "product manager" };
+      const top = pickTop([weak, strong], p2, 1);
+      expect(top.map((j) => j.id)).toEqual(["rs"]);
+    });
   });
 });

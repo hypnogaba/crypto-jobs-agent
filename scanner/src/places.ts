@@ -368,6 +368,18 @@ for (const [city, iso] of Object.entries(CITY_COUNTRY)) addLookup(city, { kind: 
 for (const [region, words] of REGION_WORDS) for (const w of words) addLookup(w, { kind: "region", v: region });
 for (const w of ANYWHERE) addLookup(w, { kind: "anywhere" });
 
+/**
+ * Чи весь шматок — це назва країни, штату чи регіону, а не міста.
+ *
+ * Потрібне, щоб у полі «місто» відрізнити «Paris» від «France»: «Paris,
+ * France» це одне місто, а не два. Штати сюди теж ідуть — «Illinois» не є
+ * містом, у якому шукати офіс.
+ */
+export function isCountryOrRegion(phrase: string): boolean {
+  const hit = LOOKUP.get(strip(phrase).replace(/[^\p{L}\p{N}]+/gu, " ").trim());
+  return hit !== undefined && hit.kind !== "city";
+}
+
 /** Найдовший n-gram виграє: «new york» не має читатись як «york». */
 const MAX_NGRAM = 3;
 

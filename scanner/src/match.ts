@@ -7,24 +7,114 @@
  */
 
 import { labelOf, languageName, whyLine, type Locale, type WhyBit } from "./digest-copy.js";
-import { parseCountries, placeFit, placeOf } from "./places.js";
+import { isCountryOrRegion, parseCountries, placeFit, placeOf } from "./places.js";
 import { toEur } from "./money.js";
 
 /**
- * «Тільки віддалено» — це коли людина прямо це сказала й не назвала при цьому
- * жодного варіанта з місцем. Мовчання й невідоме значення сюди не рахуються:
- * жорсткий мінус за офіс має спиратись на відповідь, а не на порожнє поле.
+ * «Де працювати» — два пункти, і вони сумісні: `remote` і `city`.
+ *
+ * До 11.09 пунктів було три: «тільки віддалено», «віддалено або офіс у
+ * місті», «готовий переїхати». Скарга, через яку це переписано: людина обрала
+ * другий і написала «Париж», а добірка приносила Японію. Для неї «Париж»
+ * означає Париж, а «переїзд» не мав сталого змісту: одні писали туди своє
+ * місто, інші — список міст, куди готові їхати.
+ *
+ * Старі id читаються як синоніми, поки міграція 0046 не перевела всі рядки,
+ * а чернетки бота не дожили свого. Той самий словник є у web/src/lib/vocab.ts;
+ * сканер його не імпортує, бо це окремий пакет.
  */
-const modesOf = (raw: string): string[] => raw.split(",").map((m) => m.trim()).filter(Boolean);
+export type WhereMode = "remote" | "city";
 
-const remoteOnly = (raw: string): boolean => {
-  const modes = modesOf(raw);
-  return modes.includes("remote_only")
-    && !modes.some((m) => m === "remote_or_city" || m === "relocate");
+const LEGACY_MODES: Record<string, WhereMode[]> = {
+  remote_only: ["remote"],
+  remote_or_city: ["remote", "city"],
+  relocate: ["remote", "city"],
 };
 
-/** Готовність переїхати робить чужу країну незручністю, а не перешкодою. */
-const willRelocate = (raw: string): boolean => modesOf(raw).includes("relocate");
+/** Порожнє чи невідоме значення — «віддалено», те саме замовчування, що пише сайт. */
+export function modesOf(raw: string | null | undefined): Set<WhereMode> {
+  const out = new Set<WhereMode>();
+  for (const m of (raw ?? "").split(",").map((s) => s.trim()).filter(Boolean)) {
+    for (const x of LEGACY_MODES[m] ?? [m]) if (x === "remote" || x === "city") out.add(x);
+  }
+  if (out.size === 0) out.add("remote");
+  return out;
+}
+
+/**
+ * «Тільки віддалено» — коли людина не згодна на офіс ніде. Тоді рядок без
+ * локації лишається (здебільшого це непроставлений прапорець), а офіс карається.
+ */
+const remoteOnly = (raw: string): boolean => {
+  const m = modesOf(raw);
+  return m.has("remote") && !m.has("city");
+};
+
+/**
+ * Одне місто під різними іменами.
+ *
+ * Два роди записів, і обидва з того, як пишуть самі джерела. Екзоніми:
+ * «Vienna» і «Wien» — те саме місто, а людина пише одне, ATS друге.
+ * Передмістя: французькі ATS часто ставлять не «Paris», а «La Défense» чи
+ * «Boulogne-Billancourt», і для людини з Парижа це та сама щоденна дорога.
+ *
+ * Передмістя лише паризькі, бо скарга звідти. Список росте за промахами з
+ * живих даних, не навмання: зайве «передмістя» — це знову офіс не там.
+ */
+const SAME_CITY_RAW: string[][] = [
+  ["paris", "ile de france", "la defense", "boulogne billancourt", "issy les moulineaux",
+   "levallois perret", "neuilly sur seine", "courbevoie", "puteaux", "nanterre", "saint denis",
+   "montrouge", "clichy", "saint ouen", "orly", "greater paris"],
+  ["kyiv", "kiev", "київ", "киев"], ["lviv", "lvov", "львів", "львов"],
+  ["kharkiv", "kharkov", "харків"], ["odesa", "odessa", "одеса"],
+  ["vienna", "wien"], ["munich", "munchen"], ["cologne", "koln"], ["prague", "praha"],
+  ["warsaw", "warszawa"], ["krakow", "cracow"], ["lisbon", "lisboa"], ["milan", "milano"],
+  ["rome", "roma"], ["turin", "torino"], ["naples", "napoli"], ["brussels", "bruxelles", "brussel"],
+  ["geneva", "geneve", "genf"], ["copenhagen", "kobenhavn"], ["gothenburg", "goteborg"],
+  ["the hague", "den haag"], ["bucharest", "bucuresti"], ["belgrade", "beograd"],
+  ["new york", "new york city", "nyc"], ["san francisco", "sf bay area", "bay area"],
+  ["tel aviv", "tel aviv yafo"], ["mexico city", "ciudad de mexico", "cdmx"],
+];
+
+/** Без діакритики, дефіс і пробіл однакові: «Île-de-France» = «ile de france». */
+const flat = (s: string): string =>
+  s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+    .replace(/[-\u2010\u2013\u2014_'\u2019.]+/g, " ").replace(/\s+/g, " ").trim();
+
+/** Групи в тому самому пласкому вигляді, що й порівнювані рядки: «київ» → «киів». */
+const SAME_CITY = SAME_CITY_RAW.map((g) => g.map(flat));
+
+/** Усі імена міста, включно з ним самим. */
+export function cityNames(city: string): string[] {
+  const c = flat(city);
+  return SAME_CITY.find((g) => g.includes(c)) ?? [c];
+}
+
+/**
+ * Міста, які назвала людина, у пласкому вигляді.
+ *
+ * «Bratislava, Vienna» — два міста. «Paris, France» — одне: шматок, що є
+ * назвою країни чи регіону, містом не вважається. Порожній список означає,
+ * що міста не названо зовсім, і тоді людина сама обрала точність «країна».
+ */
+export function citiesOf(p: Pick<Profile, "location" | "locationEn">): string[] {
+  const text = cityText(p);
+  if (!text) return [];
+  const out: string[] = [];
+  for (const piece of text.split(/[,;/|\n]|\s+(?:and|or|et|ou|і|й|та|или|и)\s+/iu)) {
+    const c = flat(piece);
+    if (c.length < 3 || isCountryOrRegion(c) || out.includes(c)) continue;
+    out.push(c);
+  }
+  return out;
+}
+
+/** Чи локація вакансії називає одне з міст (під будь-яким його іменем). */
+export function inCity(jobLocation: string | null | undefined, cities: string[]): boolean {
+  if (!jobLocation?.trim() || cities.length === 0) return false;
+  const loc = ` ${flat(jobLocation).replace(/[^\p{L}\p{N}]+/gu, " ")} `;
+  return cities.some((c) => cityNames(c).some((n) => loc.includes(` ${n} `)));
+}
 
 /**
  * Чи це саме те місто, яке назвала людина.
@@ -33,10 +123,7 @@ const willRelocate = (raw: string): boolean => modesOf(raw).includes("relocate")
  * До нормалізації профілю сюди приходило «Париж», і збіг не траплявся ніколи.
  */
 export function cityMatches(jobLocation: string | null, city: string | null | undefined): boolean {
-  const want = city?.trim().toLowerCase();
-  if (!want || want.length < 3 || !jobLocation) return false;
-  return new RegExp(`(?<!\\p{L})${want.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?!\\p{L})`, "iu")
-    .test(jobLocation);
+  return inCity(jobLocation, citiesOf({ location: city ?? null, locationEn: null }));
 }
 
 export interface Profile {
@@ -742,31 +829,26 @@ export function scoreJob(job: CandidateJob, p: Profile, now = new Date()): Score
   // стовпця `country`, інакше лишились би без географії назавжди.
   const myCountries = countriesOf(p);
   const fit = placeFit(place, myCountries);
-  const cityHit = cityMatches(job.location, cityText(p));
+  const cityHit = modesOf(p.remoteMode).has("city") && inCity(job.location, citiesOf(p));
 
+  // Що саме сюди доходить, вирішує reachable(): офіс не в місті людини й
+  // віддалена вакансія, закрита в чужій країні, до оцінювання вже не
+  // потрапляють. Бали нижче лише впорядковують те, що людина може взяти.
   if (remoteOnly(p.remoteMode)) {
     if (job.remote) {
       add("remote", 3);
       facts.push({ k: "remote" });
     }
-    else add("onsite", -6);                       // майже завжди відсікає onsite
-    // «Віддалено, але тільки в США» — це не віддалено для людини з Європи.
-    // Прапорець remote про це мовчить, і саме такі вакансії заповнювали
-    // добірки: «Senior Account Executive (Remote), United States».
-    if (fit === "miss" && job.remote) add("placeMiss", -4 * w.location);
+    else add("onsite", -6);                       // рядок без локації: можливо, офіс
   } else {
-    // Людина згодна на офіс — отже, місце має значення, а не лише прапорець.
+    // Вакансія в самому місті стоїть вище за віддалену з тим самим збігом.
     if (cityHit) { add("place", 4); facts.push({ k: "place", v: p.location ?? cityText(p)! }); }
     else if (fit === "hit") { add("place", 3); facts.push({ k: "place", v: p.location ?? myCountries.join(", ") }); }
-    else if (fit === "miss") {
-      // Офіс на іншому континенті — не «менш доречно», а неможливо. Готовність
-      // переїхати робить це незручністю; віддаленість — обмеженням у праві
-      // на роботу, а не в географії, тож теж м'якше за офіс.
-      const cost = job.remote ? 5 : willRelocate(p.remoteMode) ? 3 : 12;
-      add("placeMiss", -cost * w.location);
-    }
     if (job.remote) add("remote", 1);
   }
+  // Запобіжник на випадок виклику повз reachable (прогони, пояснення): чужа
+  // країна лишається мінусом, а не мовчанням.
+  if (fit === "miss" && !cityHit) add("placeMiss", -4 * w.location);
 
   // Зарплата — м'який пріоритет: вакансія без вилки НЕ карається.
   //
@@ -919,28 +1001,15 @@ export function onTopic(job: Pick<ScoredJob, "facts">, p: Pick<Profile, "spheres
 /**
  * Чи людина взагалі може взяти цю роботу.
  *
- * Одне-єдине правило, і воно не про доречність, а про можливість: офіс у
- * країні, якої людина не називала, коли вона не готова переїжджати. Це не
- * «менш підходить» — туди неможливо ходити.
+ * Не про доречність, а про можливість, і тому це фільтр, а не бал. Балами це
+ * не лікується: точний збіг за роллю дає +12, дві сфери ще +10, і будь-який
+ * штраф, менший за їхню суму, лишає вакансію в п'ятірці. Живі прогони
+ * показували так Account Manager в Індіанаполісі й «Remote, Tokyo» у людини
+ * з Парижа.
  *
- * Балами це не лікується. Точний збіг за роллю дає +12, дві сфери — ще +10, і
- * будь-який штраф, менший за їхню суму, лишає вакансію в п'ятірці: живий
- * прогін показав Account Manager в Індіанаполісі першим номером у людини з
- * Парижа саме так.
- *
- * Вимикається трьома способами, і кожен — це слова самої людини: «тільки
- * віддалено» (тоді працює власний штраф за onsite), «готовий переїхати», або
- * вакансія віддалена. Плюс четвертий, наш: місце, яке ми не розібрали, але
- * яке в оголошенні НАПИСАНЕ, лишається дозволеним — «Wallingford,
- * Oxfordshire» наш словник не знає, а людина прочитає й вирішить сама.
- *
- * А ось офіс, у якого локації немає ЗОВСІМ, не проходить. Тут нема чого
- * читати й нема чого вирішувати: людині пропонують щодня ходити невідомо
- * куди. Таких у кеші 1 233, і вони справді доходили: у пробному прогоні
- * людина, що просила «віддалено або офіс у Берліні», отримала дві картки з
- * пʼяти саме такі — «Product Owner PBX Software (m/w/d)» без жодної локації.
- * Після межі в неї знову пʼять карток, просто інших: пул достатній, щоб цю
- * чесність нічого не коштувала.
+ * Два шляхи, і кожен — слова самої людини: «офіс у моєму місті» (лише це
+ * місто) і «віддалено» (лише не закрите в чужій країні). Правила й історія
+ * кожного — у тілі reachable() нижче.
  */
 /**
  * Країни людини, у трьох спробах.
@@ -980,26 +1049,61 @@ export function inCountries(job: CandidateJob, mine: string[]): boolean {
   return placeOf(job.location).countries.some((c) => mine.includes(c));
 }
 
+/**
+ * Чи вакансія в місті людини.
+ *
+ * Людина назвала місто — отже, лише воно. Якщо в полі стоїть тільки країна
+ * («France»), вона сама обрала таку точність, і тоді підходить будь-яке місто
+ * цієї країни. Офіс без локації не підходить ні в якому разі.
+ */
+function inMyCity(job: CandidateJob, p: Profile): boolean {
+  const cities = citiesOf(p);
+  if (cities.length > 0) return inCity(job.location, cities);
+  if (!job.location?.trim()) return false;
+  return placeFit(placeOf(job.location), countriesOf(p)) === "hit";
+}
+
 export function reachable(job: CandidateJob, p: Profile): boolean {
-  if (job.remote) return true;
+  const modes = modesOf(p.remoteMode);
+
+  /**
+   * Місто. Скарга 10.09: людина з Парижа, згодна на офіс у своєму місті,
+   * отримувала офіси по всій Франції, а з пунктом «переїзд» — будь-де.
+   * Порівнювалась країна, а не місто. Тепер проходить лише саме місто
+   * (з передмістями й іншими іменами, див. SAME_CITY).
+   *
+   * Колись тут лишалось і нерозібране місце («Wallingford, Oxfordshire»):
+   * людина, мовляв, прочитає й вирішить. Тепер вона вже вирішила — назвала
+   * своє місто, і це не воно.
+   */
+  if (modes.has("city") && inMyCity(job, p)) return true;
+  if (!modes.has("remote")) return false;
+
+  /**
+   * Віддалено, але не закрито в чужій країні.
+   *
+   * Тут стояло `if (job.remote) return true` — першим рядком, для всіх. Саме
+   * так людині з Парижа приходила Японія: «Remote, Tokyo» отримувала штраф
+   * −5, а збіг за роллю дає +12. «Віддалено в Японії» — це право на роботу в
+   * Японії, а не свобода місця. Невідоме місце («Remote») і регіон людини
+   * («Remote, Europe») проходять; країна людини невідома — проходить усе.
+   */
+  if (job.remote) return placeFit(placeOf(job.location), countriesOf(p)) !== "miss";
+
   /**
    * «Лише віддалено» це умова, а не побажання.
    *
-   * Тут стояло `return true` зі штрафом −6 в оцінці, і на живому прогоні
-   * 03.09 людина з remote_only отримала пʼять офісних вакансій із пʼяти:
-   * штраф важить менше, ніж збіг за роллю, тож офіс у Сан-Франциско
-   * обганяв віддалену роботу зі слабшою назвою.
+   * Тут колись стояло `return true` зі штрафом −6 в оцінці, і на живому
+   * прогоні 03.09 людина з remote_only отримала пʼять офісних вакансій із
+   * пʼяти: штраф важить менше, ніж збіг за роллю.
    *
    * Вакансія без жодної локації лишається: там прапорець «віддалено» просто
    * не проставлений, а не сказано «приходь у офіс». У свіжому кеші таких
-   * 2 559 проти 30 явно позначених неправильно, тобто це справді «невідомо»,
-   * а не «офіс». Решта відсікається: віддалених вакансій у кеші 8 369, і
-   * підбирати є з чого.
+   * 2 559 проти 30 явно позначених неправильно. Але лише для того, хто не
+   * просив офісу: людина з містом отримала б «офіс невідомо де» замість
+   * свого міста — такий випадок уже був («Product Owner PBX Software»).
    */
-  if (remoteOnly(p.remoteMode)) return !job.location?.trim();
-  if (willRelocate(p.remoteMode)) return true;
-  if (!job.location?.trim()) return false;     // офіс невідомо де — нікуди ходити
-  return placeFit(placeOf(job.location), countriesOf(p)) !== "miss";
+  return !modes.has("city") && !job.location?.trim();
 }
 
 /**
@@ -1107,8 +1211,22 @@ export function pickTop(jobs: CandidateJob[], p: Profile, limit = 5, now = new D
   // лежить «SK,AT,HU,CZ», у вакансії «AT», і рівність не спрацьовувала
   // жодного разу — резерв мовчки лишався порожнім саме в тих людей, які
   // назвали найбільше місць.
+  /**
+   * Людина назвала місто — коло нульове належить йому, і без стелі в два
+   * місця: «спершу з міста, потім усе інше» (власник, 11.09). Межа слабкості
+   * діє й тут, тож слабка вакансія з міста не витісняє сильну віддалену.
+   */
+  const cities = modesOf(p.remoteMode).has("city") ? citiesOf(p) : [];
+  const fromMyCity = (job: ScoredJob): boolean => inCity(job.location, cities);
   const mine = countriesOf(p);
-  const localSlots = mine.length > 0 ? Math.min(2, Math.floor(limit / 2)) : 0;
+  const localSlots = cities.length > 0 ? 0 : mine.length > 0 ? Math.min(2, Math.floor(limit / 2)) : 0;
+  if (cities.length > 0) {
+    for (const job of scored) {
+      if (picked.length >= limit) break;
+      if (!fromMyCity(job) || !strong(job)) continue;
+      take(job);
+    }
+  }
   if (localSlots > 0) {
     for (const job of scored) {
       if (picked.length >= localSlots) break;
@@ -1176,8 +1294,10 @@ export function pickTop(jobs: CandidateJob[], p: Profile, limit = 5, now = new D
     }
   }
 
-  // Порядок у повідомленні — за силою збігу, а не за тим, як добирали.
-  return picked.sort(byScoreThenFresh);
+  // Порядок у повідомленні — за силою збігу, а не за тим, як добирали. Місто
+  // людини йде першим: вона просила саме його, а віддалені — вже після.
+  return picked.sort((a, b) =>
+    Number(fromMyCity(b)) - Number(fromMyCity(a)) || byScoreThenFresh(a, b));
 }
 
 /**
