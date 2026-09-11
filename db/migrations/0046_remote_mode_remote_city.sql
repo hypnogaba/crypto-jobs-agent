@@ -25,3 +25,5 @@ WHERE remote_mode NOT IN ('remote', 'city', 'remote,city');
 
 UPDATE profiles SET remote_mode = 'remote'
 WHERE remote_mode NOT IN ('remote', 'city', 'remote,city');
+
+INSERT OR IGNORE INTO schema_migrations (name) VALUES ('0046_remote_mode_remote_city.sql');
