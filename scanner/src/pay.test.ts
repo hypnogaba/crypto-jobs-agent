@@ -7,7 +7,7 @@ import { ashbyPay, currencyCode, getroPay, greenhousePay, leverPay, payPeriod, y
  * Getro Coinbase Ventures). Реальні відповіді цілком лежать у
  * sources/fixtures і перевіряються в sources/pay-fields.test.ts.
  */
-describe("payPeriod — слово джерела, а не величина суми", () => {
+describe("payPeriod: слово джерела, а не величина суми", () => {
   it.each([
     ["Annual base salary range (excluding equity and bonus):", "year"],
     ["NY Annual Base Salary Range", "year"],
@@ -25,7 +25,7 @@ describe("payPeriod — слово джерела, а не величина су
   ])("«%s» → %s", (text, want) => expect(payPeriod(text)).toBe(want));
 });
 
-describe("yearly — у кеші лише річні числа", () => {
+describe("yearly: у кеші лише річні числа", () => {
   it("погодинна ставка множиться на 2080 годин, як у speedrun", () => {
     expect(yearly(40, "hour")).toBe(83_200);
   });
@@ -75,7 +75,7 @@ describe("greenhousePay", () => {
     expect(greenhousePay([{ min_cents: 3000, max_cents: 3500, currency_type: "USD", title: "Pay range",
       blurb: "<p>the target hourly rate for this position</p>" }]).salaryMin).toBe(62_400);
   });
-  it("порожній список — порожня вилка", () => {
+  it("порожній список: порожня вилка", () => {
     expect(greenhousePay([])).toEqual({ salaryMin: null, salaryMax: null, salaryCurrency: null });
     expect(greenhousePay(undefined).salaryMin).toBeNull();
   });
@@ -94,7 +94,7 @@ describe("ashbyPay", () => {
       { compensationType: "Salary", interval: "1 HOUR", currencyCode: "USD", minValue: 50, maxValue: 60 }] }))
       .toEqual({ salaryMin: 104_000, salaryMax: 124_800, salaryCurrency: "USD" });
   });
-  it("без Salary — нічого", () => {
+  it("без Salary: нічого", () => {
     expect(ashbyPay({ summaryComponents: [] }).salaryMin).toBeNull();
     expect(ashbyPay(null).salaryMin).toBeNull();
   });
@@ -119,7 +119,7 @@ describe("getroPay", () => {
       compensation_currency: "EUR", compensation_period: "year" }))
       .toEqual({ salaryMin: 25_000, salaryMax: 35_000, salaryCurrency: "EUR" });
   });
-  it("period_not_defined без сум — порожньо", () => {
+  it("period_not_defined без сум: порожньо", () => {
     expect(getroPay({ compensation_amount_min_cents: null, compensation_amount_max_cents: null,
       compensation_currency: null, compensation_period: "period_not_defined" }).salaryMin).toBeNull();
   });

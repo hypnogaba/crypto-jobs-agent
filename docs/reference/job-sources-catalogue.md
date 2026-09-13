@@ -328,3 +328,111 @@ web3 37, games 13, ecommerce 3, defence 1.
 жодного рядка коду**, достатньо рядка в `country_boards` з `kind='rss'`. Плюс
 `/sitemaps/jobs.xml` (18 502 адреси) і `/sitemaps/companies.xml` (800), а на кожній
 сторінці ролі лежить розмітка `JobPosting` — тобто наш `kind='jsonld'` теж підходить.
+
+---
+
+## 11. Крипто-покриття для NextCryptoJob, 2026-09-13
+
+Кеш спільний: NextCryptoJob читає з `jobs_cache` лише рядки з тегом `web3`. Усе нижче
+перевірено живими запитами 13.09.2026; код у `scanner/src/crypto-sources.ts`, дані в
+міграції `0047_ncj_crypto_sources.sql` (генерується з того ж файлу).
+
+### Що змінилось у скані
+
+| Що | Як | Вимикач |
+|---|---|---|
+| Вікно свіжості для `web3` | 30 днів замість 14 (`prepare`). NextRole тримає свої 14 на читанні: `nextrole-window.ts`, та сама умова, що була на записі | `CRYPTO_FRESHNESS_DAYS=14` |
+| Вилка з полів ATS | Greenhouse `pay_transparency=true`, Ashby `includeCompensation=true`, Lever `salaryRange` будь-якого періоду, Recruitee `salary`, Getro `compensation_*`. Період у річний: `pay.ts` | `ATS_PAY=0` |
+| Getro | Щоденний скан Getro не читає. Щотижня (`nextrole-getro-ats`, Нд 05:00) з колекцій береться лише посилання на ATS роботодавця, вакансії йдуть з API самого ATS | `GETRO_MODE=hybrid` або `jobs` |
+| speedrun | Крипто-компанії мережі (галузь «Crypto/Web3» плюс колекція `crypto-web3`, 36 компаній) дістають тег `web3` і читаються з вікном 30 днів через `/companies/{slug}` | `SPEEDRUN_CRYPTO=0` |
+| Європейський Lever | провайдер `lever_eu` (`api.eu.lever.co`): Aave Labs, Kaiko | |
+| `extractAts` | крапка й `%20` у слагу Ashby (`kraken.com`, `Sui%20Foundation`), вбудована форма Greenhouse `?for=`, Recruitee, `jobs.eu.lever.co` | |
+
+### Getro: чому лише розвідка
+
+Умови Getro (https://www.getro.com/terms, версія 3.1, червень 2025) поширюються на
+«any job board operated by Getro» і забороняють те, що «“Crawls,” “scrapes,” or “spiders”
+any page, data, or portion of or relating to the Services or Content». `api.getro.com/robots.txt`
+віддає `Disallow: /`, а борди на curl відповідають пропозицією платного API (api@getro.com).
+
+Режим `discover` зменшує звернення до Getro вп'ятеро (раз на тиждень замість щодня) і не
+кладе в кеш жодної вакансії, взятої з Getro. Ризик не нульовий: тижневий збір посилань теж
+читає колекції. Нуль звернень: не вмикати `nextrole-getro-ats.timer` і вимкнути
+`nextrole-discover.timer` (перебір id колекцій); компанії, уже зібрані з Getro, лишаються в
+`companies` і далі читаються з їхнього ATS.
+
+Скільки коштує `discover` (скан насухо 13.09, ті самі живі відповіді):
+- з 518 крипто-рядків Getro 360 (70%) приходять тими самими вакансіями з ATS роботодавця;
+  решта веде на LinkedIn (65), Notion (13), Workday (12), Phenom (Circle), Pinpoint, Comeet,
+  власні сайти;
+- для NextRole по всіх нішах: з 1 288 рядків Getro через ATS приходять 473; втрачається
+  близько 790 унікальних вакансій на скан (3,6% його видимого пулу), переважно з
+  не-крипто колекцій (Munich Re 163, Workday 108, LinkedIn 100, FIS 68, ізраїльські сайти);
+- `hybrid` повертає майже все (втрата 65 унікальних), але читає Getro щодня, як і раніше.
+
+Помилка 11.09 (колекції Coinbase 1625 і Electric 1640 зникли з кешу): 429 посеред гортання
+викидав усе прочитане, а 429 за правилом не записується як падіння, тож у панелі обидві
+стояли «ok». Тепер прочитане лишається, між сторінками пауза 250 мс.
+
+### Умови інших дощок (перевірено 13.09)
+
+| Дошка | Рішення | Підстава |
+|---|---|---|
+| crypto-careers.com | **вимкнено** (0047) | https://www.crypto-careers.com/terms: «you will not reproduce, duplicate, copy, crawl, scrape…», «Conduct any systematic or automated data collection… without… express written consent». RSS немає. За весь час не дала жодного рядка |
+| remote3.co | лишається, лише RSS | https://www.remote3.co/terms забороняє «automated searches, requests, or queries»; ми читаємо їхній власний `/api/rss` (8 позицій). Не мертва: 8 позицій старші за 14 днів і відсіювались; з вікном 30 днів повертаються |
+| cryptocurrencyjobs.co | лишається, лише RSS; **ризик** | https://cryptocurrencyjobs.co/terms/ забороняє «scrape», «crawl» і «Republish in bulk any information derived from use of our Website»; RSS `/index.xml` вони пропонують самі. Рішення за власником |
+| web3.career | лишається як є; **ризик** | Сторінка умов за Cloudflare, прочитати не вдалось. Офіційний шлях: безкоштовний Web3 Jobs API з токеном (https://web3.career/web3-jobs-api, документація docs.bondex.app), умова: посилання `apply_url` без змін і без nofollow. З вікном 30 днів наша дошка гортає глибше (717 крипто-рядків на скан проти 398). Рекомендація: отримати токен і перейти на API, там же рольові стрічки (`tag=`): DevRel, community, KOL |
+| web3.career рольові сторінки | **не додано** | умови не підтверджені; той самий вміст дає офіційний API |
+| cryptojobslist.com | **не додано** | https://cryptojobslist.com/terms (копія Wayback 01.02.2026): «Republish in bulk», «scrape», «crawl» заборонені; RSS є, але без дат. Із 100 позицій RSS 90 від компаній, які ми вже читаємо з їхнього ATS |
+| Superteam Earn | **не додано в спільний кеш** | Умови не забороняють (8.1.7 забороняє ботів лише для збору імен і пошт), robots запрошує агентів до API. Але це баунті, а не вакансії: у спільному кеші вони пішли б і в добірки NextRole. Краще читати напряму в NextCryptoJob як окремий тип |
+| JobStash | лишається | умови порожні, robots `Allow: /`. Вилка на картках це ринкова статистика (`medianMonthlyUsd`, `sampleCount`), а не зарплата вакансії, тому її свідомо не беремо |
+| Consider (Pantera, Hashed; дані a16z crypto і Paradigm) | **не додано** | https://consider.com/legal/terms (l): «use any robot, spider, scraper, or other automated means… without our express written permission»; API за CSRF. Портфель a16z доступний через speedrun API |
+| speedrun-talent-network.com | лишається, розширено | https://speedrun-talent-network.com/developers: «Reads are open and unauthenticated», `?source=` і посилання на їхній `url` |
+
+### Роботодавці (0047)
+
+82 дошки на публічних ATS, кожна звірена з сайтом компанії: екосистеми й фундації
+(Ethereum Foundation, Optimism Foundation, Sui Foundation, Aptos Foundation, NEAR, Cosmos
+Labs, Starknet Foundation, Celestia, Injective Labs, Sei Labs, Hyperliquid Labs, Aztec,
+Hashgraph, Tools for Humanity, World Foundation, Monad Foundation), біржі й інфраструктура
+(Kraken, Galaxy Digital, Tether, Gate, Nexo, Bitvavo, Uphold, Luno, SatoshiLabs, Lightning
+Labs, Ether.fi, Aave Labs, Lido), аналітика й комплаєнс (TRM Labs, Chainalysis Government
+Solutions, Merkle Science), аудит (Trail of Bits, Halborn, Sigma Prime, Hexens, Quantstamp),
+маркет-мейкери (B2C2, Flowdesk, Auros, Selini, QCP, Presto Labs, Caladan, Amber Group, Jump
+Crypto) та інші. Повний список з доказом для кожної: `crypto-sources.ts`.
+
+Мертві слаги, які старий збір посилань різав на крапці, замінено: `kraken` → `kraken.com`,
+`monad` → `monad.foundation`, `lido` → `lido.fi`, `sui` → `Sui%20Foundation`, `tools` →
+`Tools%20for%20Humanity`, `asymmetric` → `asymmetric.re`, `dourolabs` → `dourolabs.xyz`,
+`li` → `li.fi`, `nexus` → `nexus.xyz`, `sound` → `sound.xyz`; `trmlabs` → `ashby:trm-labs`.
+
+**Однофамільці, яких не брати** (усі перевірено): `rippling:kraken-robotics-inc` (морська
+робототехніка), `ashby:cantina` (відеозастосунок; аудит-фірма Cantina наймає через Loxo),
+`ashby:circle` (circle.so; Circle з USDC на Phenom), `lever:safe` (Safe Security),
+`greenhouse:galaxy` (монтаж охорони), `ashby:base` (консьєрж-сервіс; Base від Coinbase це
+`greenhouse:basejobs`), `ashby:compound`, `ashby:espresso` (Espresso AI), `ashby:ramp`,
+`ashby:casa`, `ashby:mantle`, `ashby:swan`, `ashby:render`, `ashby:maple`, `ashby:gelato`,
+`ashby:jump`, `greenhouse:axiom`, `greenhouse:orca`, `greenhouse:status`, `greenhouse:grayscale`
+(тестова дошка), `personio:kaiko` і `personio:scroll` (демо з lorem ipsum),
+`smartrecruiters:binance` (підозрілі оголошення; справжній `lever:binance`). З трьох перших
+тег `web3` знято в 0047.
+
+**Не на публічному ATS** (записано, щоб не шукати вдруге): Solana Foundation (лише борд
+екосистеми й Google Forms), TON, StarkWare, Jupiter, Backpack і Zellic (Notion), Flashbots
+(Notion), Circle (Phenom), Cantina/Spearbit (Loxo), dYdX → Arcus (Gem), Berachain (Polymer),
+Bitget, KuCoin, HTX, MEXC (власні сайти), Bullish (Workday), Blockaid і Hypernative (Comeet),
+Crossmint (Teamtailor, є RSS), VALR і Mythical (HiBob), Chainlink Labs (дошка Ashby жива, але
+її posting API віддає 404).
+
+### Результат (скан насухо 13.09, пул NextCryptoJob за його ж правилами)
+
+| | До | Після |
+|---|---|---|
+| Пул (web3, не з не-крипто списку, роль у назві) | 1 462 | 2 048 |
+| Унікальні компанія + назва | 1 128 | 1 705 |
+| З вилкою (унікальні) | 404 (35,8%) | 772 (45,3%) |
+| Компаній | 342 | 417 |
+| Записів D1 за скан (оцінка) | 45 203 | 45 437 |
+
+DevRel лишився нулем: серед 2 373 крипто-рядків скану немає жодної посади Developer
+Relations. Цю роль закриває лише рольова стрічка web3.career (через їхній API).

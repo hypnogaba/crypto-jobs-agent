@@ -38,7 +38,7 @@ describe("список роботодавців", () => {
   });
 });
 
-describe("applyOverlay — те саме, що зробить міграція", () => {
+describe("applyOverlay: те саме, що зробить міграція", () => {
   const base = () => ({
     companies: [
       { slug: "coinbase", name: "Coinbase", ats_provider: "greenhouse", ats_slug: "coinbase", tags: '["fintech"]' },

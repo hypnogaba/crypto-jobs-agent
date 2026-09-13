@@ -15,6 +15,43 @@
 
 ## Джерела
 
+- Токен Web3 Jobs API для web3.career (DevRel у крипто-пулі нуль: серед 2 373
+  крипто-рядків скану 13.09 немає жодної посади Developer Relations, а
+  web3.career пише «225 Developer Relations jobs»; community і KOL теж тонкі).
+  API безкоштовний, але потребує токена з акаунта власника (web3.career/web3-jobs-api,
+  документація docs.bondex.app): `GET /api/v1?token=…&tag=developer-relations`,
+  до 100 позицій, `apply_url` показувати без змін і без nofollow. Читач писати
+  лише після живої відповіді з токеном, не за документацією · `boards.ts`, `source_keys`
+
+- Getro у режимі `discover` усе ще читає колекції раз на тиждень (`nextrole-getro-ats`),
+  а умови Getro забороняють будь-який crawl; нуль звернень означає не вмикати цей
+  таймер і вимкнути `nextrole-discover`. Втрата для NextRole тоді близько 790
+  унікальних вакансій на скан, переважно не-крипто корпоративні (Munich Re, FIS,
+  Workday, LinkedIn). Частину можна повернути читачами Comeet (45 рядків),
+  Pinpoint (`{slug}.pinpointhq.com/postings.json`) і Teamtailor (RSS, Crossmint) ·
+  `crypto-sources.ts`, `ats.ts`, каталог §11
+
+- Superteam Earn (баунті, єдине джерело для Creator/KOL) читати напряму в
+  NextCryptoJob, а не через спільний кеш: у кеші баунті пішли б і в добірки
+  NextRole. Умови дозволяють, є агентський API (superteam.fun/skill.md) · nextcryptojob
+
+- `idx_companies_rotation(last_fit_at, last_scanned_at)` робить кожну позначку
+  «компанію проскановано» двома записами замість одного: ~3 000 компаній × 2 на
+  скан (insights 07–11.09: 28 298 записів за 5 сканів). Перевірити, чи хтось
+  читає за цим індексом; якщо ні, зняти (−1,5 тис. записів на скан) · `repo.ts`,
+  міграції
+
+- Панель NextRole показує колекції Getro з лічильниками з `source_stats`: у режимі
+  `discover` рядки `getro:*` старіють і за 30 днів зникнуть (prune), тож колекції
+  стоятимуть із нулем. Показувати там дату останнього збору посилань · `web/src/app/(app)/admin/page.tsx`
+
+- Адмінка (вставити посилання на дошку) не знає провайдера `lever_eu`
+  (`jobs.eu.lever.co`), сканер знає з 13.09 · `web/src/lib/source-link.ts`
+
+- Chainlink Labs: дошка `jobs.ashbyhq.com/chainlink-labs` жива (23 вакансії 13.09),
+  а posting API на той самий слаг віддає 404, тож джерело позначене мертвим.
+  Перевірити раз на місяць; якщо API оживе, скинути стан у `sources_state` · `ashby:chainlink-labs`
+
 — Національні дошки для FR, ES, PL, SE, CZ, GE (вісім із двадцяти чотирьох
   людей сидять у поясі Europe/Paris, ще по одній у Мадриді, Стокгольмі,
   Тбілісі, і жодної дошки під них немає). Виміряно 02.09: у кеші ВЖЕ лежить

@@ -98,7 +98,7 @@ describe("Getro compensation_* (колекція Coinbase Ventures)", () => {
   });
 });
 
-describe("extractAts — поправки 13.09", () => {
+describe("extractAts: поправки 13.09", () => {
   it("Ashby зі крапкою в слагу (Kraken)", () => {
     expect(extractAts("https://jobs.ashbyhq.com/kraken.com/0b9a1b2c-1111-2222-3333-444455556666"))
       .toEqual({ provider: "ashby", slug: "kraken.com" });

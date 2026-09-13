@@ -7,7 +7,7 @@ const job = (o: Partial<RawJob>): RawJob => ({
   url: "https://jobs.ashbyhq.com/acme/1", company: "Acme", title: "Engineer",
   location: null, remote: false, postedAt: null, source: "getro:1625", ...o });
 
-describe("discoveryTags — ніша з галузі організації, колекція лише запас", () => {
+describe("discoveryTags: ніша з галузі організації, колекція лише запас", () => {
   it("галузь організації перемагає тег колекції", () => {
     // Notion у колекції Coinbase Ventures: галузь «Productivity», не крипто.
     const [j] = discoveryTags([job({ company: "Notion", inheritedTags: ["ai"] })], ["web3"]);
@@ -30,7 +30,7 @@ describe("discoveryTags — ніша з галузі організації, к�
   });
 });
 
-describe("unionTags — теги наявної компанії лише доповнюються", () => {
+describe("unionTags: теги наявної компанії лише доповнюються", () => {
   it("не стирає поставлене руками", () => expect(unionTags(["web3"], [])).toEqual(["web3"]));
   it("додає нове без повторів", () => expect(unionTags(["web3"], ["fintech", "web3"])).toEqual(["web3", "fintech"]));
 });

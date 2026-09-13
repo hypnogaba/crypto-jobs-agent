@@ -148,7 +148,7 @@ describe("officeOnly", () => {
   });
 });
 
-describe("prepare — ширше вікно для крипто (CRYPTO_FRESHNESS_DAYS)", () => {
+describe("prepare: ширше вікно для крипто (CRYPTO_FRESHNESS_DAYS)", () => {
   const web3 = (o: Partial<RawJob> = {}) => raw({ inheritedTags: ["web3"], ...o });
 
   it("крипто-вакансія 20-денної давності лишається, звичайна ні", () => {

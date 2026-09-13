@@ -26,7 +26,7 @@ export function nextrolePostedDays(): number {
   return Number.isFinite(n) && n > 0 ? n : 14;
 }
 
-/** Умова для WHERE. `alias` — псевдонім `jobs_cache` у запиті, або порожньо. */
+/** Умова для WHERE. `alias`: псевдонім `jobs_cache` у запиті, або порожньо. */
 export function nextrolePostedSql(alias = "j", days = nextrolePostedDays()): string {
   const d = Math.max(1, Math.floor(days));
   const c = (col: string) => (alias ? `${alias}.${col}` : col);
