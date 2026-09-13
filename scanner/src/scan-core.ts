@@ -1,16 +1,22 @@
-import { loadConfig } from "./config.js";
-import { D1Client } from "./d1.js";
-import { Repo } from "./repo.js";
+/**
+ * Один прогін скану, без знання, куди саме він пише.
+ *
+ * Досі це жило в scan.ts разом зі створенням D1. Винесено, щоб той самий
+ * прогін можна було пустити «насухо» (`dry-scan.ts`): ті самі джерела, ті
+ * самі правила, але сховище замість D1 лише рахує, що було б записано.
+ * Інакше будь-яке «додамо джерело» оцінювалось би не тим кодом, що
+ * працюватиме на сервері.
+ */
+import type { Config } from "./config.js";
+import type { Repo } from "./repo.js";
 import { climbLadder, type LadderRungs } from "./ladder.js";
 import { applySourceOutcomes, skipCompanies, skipSet } from "./selfrepair.js";
 import { runR1, runR2, runR3, runR4, harvestAtsFromJobs } from "./rungs.js";
 import { prepare } from "./normalize.js";
 import type { RawJob, SourceResult } from "./types.js";
 import { fetchBoard } from "./sources/boards.js";
-import { fetchGetro } from "./sources/getro.js";
+import { extractAts, fetchGetro } from "./sources/getro.js";
 import { mapLimit, runSource } from "./http.js";
-import { notifyOwner } from "./notify.js";
-import { refreshSiteStats } from "./site-stats.js";
 
 /**
  * Колекції Getro, підтверджені живими.
@@ -21,13 +27,36 @@ import { refreshSiteStats } from "./site-stats.js";
  */
 const GETRO_FALLBACK = [100, 150, 200, 250, 300, 400, 550, 800, 858, 950, 1000, 1100, 1200, 1300, 1500];
 
-async function main(): Promise<void> {
-  const cfg = loadConfig();
-  const now = new Date();
-  const runId = crypto.randomUUID();
+/** Те зі сховища, чим користується прогін. `Repo` задовольняє це як є. */
+export type ScanRepo = Pick<Repo,
+  | "startRun" | "listSourceStates" | "listGetroCollections" | "listCompanies"
+  | "markCompanyScanned" | "upsertCompany" | "knownCompanyKeys" | "upsertJobs"
+  | "listBoards" | "recordSourceOutcome" | "deprecateSource" | "finishRun"
+  | "refreshSourceStats" | "countJobs">;
 
-  const d1 = new D1Client({ accountId: cfg.cfAccountId, databaseId: cfg.cfDatabaseId, token: cfg.cfApiToken });
-  const repo = new Repo(d1);
+export interface ScanDeps {
+  cfg: Pick<Config, "freshnessDays" | "cryptoFreshnessDays" | "getroMode" | "distinctCompanyTarget" | "anthropicApiKey">;
+  repo: ScanRepo;
+  /** Після всіх записів: числа для сайту. Насухо не потрібні. */
+  afterRun?: () => Promise<void>;
+  /** Лист власнику, коли прогін упав. */
+  notify?: (text: string) => Promise<void>;
+  now?: Date;
+}
+
+/**
+ * Чи лишати вакансію з колекції Getro у режимі `hybrid`.
+ *
+ * Лише ті, у яких немає публічного ATS, що ми вміємо читати: решта прийде
+ * з API самого роботодавця (R1), куди її компанію заносить збір посилань.
+ */
+export const keepInHybrid = (j: RawJob): boolean => extractAts(j.url) === null;
+
+export async function runScan(deps: ScanDeps): Promise<void> {
+  const { cfg, repo } = deps;
+  const now = deps.now ?? new Date();
+  const runId = crypto.randomUUID();
+  const cryptoDays = cfg.cryptoFreshnessDays;
 
   await repo.startRun(runId, now.toISOString());
   const prior = await repo.listSourceStates();
@@ -69,6 +98,8 @@ async function main(): Promise<void> {
     },
 
     R3: async () => {
+      // Режим discover: Getro щодня не читаємо зовсім, навіть сходинкою.
+      if (cfg.getroMode === "discover") return { jobs: [], results: [] };
       const run = await runR3(getroCollections, skip);
       // 80% вакансій Getro ведуть прямо в ATS — забираємо ці компанії собі назавжди
       const harvested = harvestAtsFromJobs(run.jobs);
@@ -106,6 +137,7 @@ async function main(): Promise<void> {
     const outcome = await climbLadder(rungs, {
       distinctCompanyTarget: cfg.distinctCompanyTarget,
       freshnessDays: cfg.freshnessDays,
+      cryptoFreshnessDays: cryptoDays,
       now,
       onRung: (line) => console.log(line),
     });
@@ -126,11 +158,14 @@ async function main(): Promise<void> {
         // мали 36: правило дивиться в назву, а «Senior Backend Engineer» у
         // крипто-компанії слова «crypto» в назві не має й мати не мусить.
         const runs = await mapLimit(boards, 4, (b) => runSource(b.name, async () => {
-          const jobs = await fetchBoard(b, {}, cfg.freshnessDays);
+          // Крипто-дошка гортається до крипто-вікна: інакше вона спиняла б
+          // гортання там, де вакансії ще живі для NextCryptoJob.
+          const days = b.tags?.includes("web3") ? cryptoDays : cfg.freshnessDays;
+          const jobs = await fetchBoard(b, {}, days);
           return b.tags?.length ? jobs.map((j) => ({ ...j, inheritedTags: b.tags })) : jobs;
         }));
         boardResults.push(...runs);
-        const jobs = prepare(runs.flatMap((r) => r.jobs), cfg.freshnessDays, now);
+        const jobs = prepare(runs.flatMap((r) => r.jobs), cfg.freshnessDays, now, cryptoDays);
         await repo.upsertJobs(jobs);
         const alive = runs.filter((r) => r.ok).length;
         console.log(`Національні дошки: ${alive}/${boards.length} відповіли, ${jobs.length} вакансій`);
@@ -150,7 +185,14 @@ async function main(): Promise<void> {
     // рівно наша аудиторія, і він потрібен навіть у день, коли вакансій і так
     // вистачило. Різниця лише в тому, що дошка дає країну, а Getro — нішу.
     const getroResults: SourceResult[] = [];
-    try {
+    // Режим discover (типовий з 13.09.2026): щоденний скан Getro не читає.
+    // Умови Getro забороняють «crawl, scrape or spider» будь-яку частину
+    // сервісу, а нижчий за ризиком шлях уже є: посилання на ATS
+    // роботодавців забирає щотижнева розвідка (discover-getro-ats.ts), а
+    // вакансії приходять з публічного API самого ATS через R1.
+    if (cfg.getroMode === "discover") {
+      console.log("Колекції Getro: щодня не читаються (GETRO_MODE=discover), компанії з них бере щотижнева розвідка");
+    } else try {
       const active = getroCollections.filter((c) => !skip.has(`getro:${c.id}`));
       if (active.length) {
         // Ніша успадковується від конкретної колекції, а не від того, що це
@@ -162,7 +204,9 @@ async function main(): Promise<void> {
           }));
         getroResults.push(...runs);
         const raw = runs.flatMap((r) => r.jobs);
-        const jobs = prepare(raw, cfg.freshnessDays, now);
+        // hybrid: у кеш лише те, до чого немає публічного ATS.
+        const stored = cfg.getroMode === "hybrid" ? raw.filter(keepInHybrid) : raw;
+        const jobs = prepare(stored, cfg.freshnessDays, now, cryptoDays);
         await repo.upsertJobs(jobs);
 
         // Той самий врожай, що робив R3: 80% посилань Getro ведуть просто в
@@ -214,7 +258,7 @@ async function main(): Promise<void> {
         }, 40);
         grown = growth.added;
         if (growth.jobs.length) {
-          await repo.upsertJobs(prepare(growth.jobs, cfg.freshnessDays, now));
+          await repo.upsertJobs(prepare(growth.jobs, cfg.freshnessDays, now, cryptoDays));
         }
         console.log(`Зростання: перевірено кандидатів, додано ${grown} нових компаній`);
       } catch (e) {
@@ -246,7 +290,7 @@ async function main(): Promise<void> {
     // не було, головна рахувала їх на КОЖНЕ відкриття по чверть мільйона
     // прочитаних рядків, і це давало дві третини всього навантаження бази.
     try {
-      await refreshSiteStats(d1);
+      await deps.afterRun?.();
     } catch (e) {
       console.log(`Числа для сайту не оновились: ${e instanceof Error ? e.message : e}`);
     }
@@ -265,9 +309,8 @@ async function main(): Promise<void> {
     await repo.finishRun(runId, {
       distinctCompanies: 0, jobsFound: 0, ladderReached: "none", status: "failed", notes: msg });
     console.error(`Прогін ${runId.slice(0, 8)} впав: ${msg}`);
-    await notifyOwner(`NextRole: скан упав.\n\n${msg}\n\nЯкщо це повториться завтра — кеш почне старіти, і добірки поменшають.`);
+    await deps.notify?.(`NextRole: скан упав.\n\n${msg}\n\nЯкщо це повториться завтра — кеш почне старіти, і добірки поменшають.`);
     process.exitCode = 1;
   }
 }
 
-await main();

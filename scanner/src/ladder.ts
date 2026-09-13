@@ -14,6 +14,8 @@ export interface LadderRungs {
 export interface LadderOptions {
   distinctCompanyTarget: number;
   freshnessDays: number;
+  /** Вікно для крипто-вакансій; без нього те саме, що `freshnessDays`. */
+  cryptoFreshnessDays?: number;
   now?: Date;
   onRung?: (line: string) => void;
   /**
@@ -56,7 +58,7 @@ export async function climbLadder(rungs: LadderRungs, o: LadderOptions): Promise
     pool.push(...run.jobs);
     results.push(...run.results);
 
-    prepared = prepare(pool, o.freshnessDays, now);
+    prepared = prepare(pool, o.freshnessDays, now, o.cryptoFreshnessDays ?? o.freshnessDays);
     distinct = new Set(prepared.map((j) => j.companyKey)).size;
 
     const broken = run.results.filter((r) => !r.ok).map((r) => r.source);

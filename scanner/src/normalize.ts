@@ -94,21 +94,37 @@ export function officeOnly(location: string | null | undefined): boolean {
   return /\boffice\b|on-?\s?site/i.test(s);
 }
 
-/** Усі центральні правила за один прохід: живий URL → свіжість → дедуп. */
-export function prepare(jobs: RawJob[], freshnessDays: number, now = new Date()): NormalizedJob[] {
+/**
+ * Усі центральні правила за один прохід: живий URL → свіжість → дедуп.
+ *
+ * `cryptoDays` — вікно для вакансій із тегом `web3` (успадкованим від
+ * компанії, дошки чи колекції, або з назви). Крипто-вакансії стоять
+ * відкритими місяцями, і 14 днів відрізали від них п'ять шостих. Без
+ * аргументу вікно одне для всіх, як і було.
+ *
+ * NextRole це не зачіпає: свої 14 днів він тримає на читанні
+ * (`NEXTROLE_POSTED_SQL` у digest.ts і site-stats.ts), тож до його
+ * добірки старші крипто-рядки не доходять.
+ */
+export function prepare(jobs: RawJob[], freshnessDays: number, now = new Date(),
+                        cryptoDays = freshnessDays): NormalizedJob[] {
   const seen = new Set<string>();
   const out: NormalizedJob[] = [];
+  const widest = Math.max(freshnessDays, cryptoDays);
   // Сортування стійке (Array.prototype.sort у V8), тож рівні за повнотою
   // лишаються в тому порядку, у якому прийшли, — а не тасуються щопрогону.
   const ordered = jobs.length > 1 ? [...jobs].sort((a, b) => richness(b) - richness(a)) : jobs;
   for (const job of ordered) {
     if (!hasLiveUrl(job)) continue;
     if (!job.title?.trim() || !job.company?.trim()) continue;
-    if (!isFresh(job.postedAt, freshnessDays, now)) continue;
+    // Найширше вікно відсіює одразу, без тегів: так старе не коштує нічого.
+    if (!isFresh(job.postedAt, widest, now)) continue;
     // Прапорець джерела проти його ж локації: перемагає локація, бо вона
     // написана словами, а прапорець — галочкою в чужій адмінці.
     const n = normalizeJob(
       officeOnly(job.location) ? { ...job, remote: false } : job, now);
+    const days = n.tags.includes("web3") ? cryptoDays : freshnessDays;
+    if (days < widest && !isFresh(job.postedAt, days, now)) continue;
     if (seen.has(n.dedupeKey)) continue;
     seen.add(n.dedupeKey);
     out.push(n);

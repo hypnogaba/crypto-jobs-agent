@@ -147,3 +147,32 @@ describe("officeOnly", () => {
     expect(prepare([job], 14, new Date("2026-08-30T00:00:00Z"))[0]!.remote).toBe(false);
   });
 });
+
+describe("prepare — ширше вікно для крипто (CRYPTO_FRESHNESS_DAYS)", () => {
+  const web3 = (o: Partial<RawJob> = {}) => raw({ inheritedTags: ["web3"], ...o });
+
+  it("крипто-вакансія 20-денної давності лишається, звичайна ні", () => {
+    const jobs = prepare([
+      web3({ url: "https://jobs.example.com/c", title: "Protocol Engineer", postedAt: daysAgo(20) }),
+      raw({ url: "https://jobs.example.com/n", title: "Backend Engineer", company: "Plain", postedAt: daysAgo(20) }),
+    ], 14, new Date(), 30);
+    expect(jobs.map((j) => j.url)).toEqual(["https://jobs.example.com/c"]);
+  });
+
+  it("за межею крипто-вікна відсікається й крипта", () => {
+    expect(prepare([web3({ postedAt: daysAgo(31) })], 14, new Date(), 30)).toHaveLength(0);
+  });
+
+  it("тег з назви теж рахується крипто", () => {
+    expect(prepare([raw({ title: "Solidity Engineer, DeFi", postedAt: daysAgo(25) })], 14, new Date(), 30))
+      .toHaveLength(1);
+  });
+
+  it("без четвертого аргументу поведінка рівно стара: одне вікно на всіх", () => {
+    expect(prepare([web3({ postedAt: daysAgo(20) })], 14)).toHaveLength(0);
+  });
+
+  it("без дати проходить, як і раніше", () => {
+    expect(prepare([raw({ postedAt: null })], 14, new Date(), 30)).toHaveLength(1);
+  });
+});

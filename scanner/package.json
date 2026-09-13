@@ -12,7 +12,10 @@
     "discover-speedrun": "node dist/discover-speedrun.js",
     "retag": "node dist/retag.js",
     "replay": "node dist/replay.js",
-    "prune": "node dist/prune.js"
+    "prune": "node dist/prune.js",
+    "dry-scan": "node dist/dry-scan.js",
+    "discover-getro-ats": "node dist/discover-getro-ats.js",
+    "crypto-sources-sql": "node dist/crypto-sources.js"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",

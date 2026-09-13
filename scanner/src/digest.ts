@@ -11,6 +11,7 @@
  * процес одразу виходить.
  */
 import { loadConfig } from "./config.js";
+import { nextrolePostedSql } from "./nextrole-window.js";
 import { D1Client } from "./d1.js";
 import { affected, notifyOwner } from "./notify.js";
 import { retireUnreachable } from "./orphans.js";
@@ -1122,6 +1123,7 @@ export async function fetchCandidateRows(
        FROM jobs_cache j
        WHERE ${topic.sql} = 1
          AND j.fetched_at >= strftime('%Y-%m-%dT%H:%M:%SZ','now','-3 day')
+         AND ${nextrolePostedSql("j")}
          ${countrySql}
          AND NOT EXISTS (SELECT 1 FROM sent s WHERE s.user_id = ? AND s.job_id = j.id)
          AND NOT EXISTS (

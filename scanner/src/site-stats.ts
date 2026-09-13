@@ -1,5 +1,6 @@
 import { loadConfig } from "./config.js";
 import { D1Client } from "./d1.js";
+import { nextrolePostedSql } from "./nextrole-window.js";
 
 /**
  * Числа для публічних сторінок, пораховані один раз на скан.
@@ -60,6 +61,7 @@ const TAG_LIST_SQL = `
                                 ORDER BY j.posted_at DESC, j.fetched_at DESC) rn
         FROM jobs_cache j, json_each(j.tags) t
        WHERE j.fetched_at >= strftime('%Y-%m-%dT%H:%M:%SZ','now','-3 day')
+         AND ${nextrolePostedSql("j")}
     )
    WHERE rn <= ${TAG_LIST_SIZE}`;
 
@@ -100,6 +102,7 @@ const FEED_SQL = `
                                 ORDER BY posted_at DESC, fetched_at DESC) dup
       FROM jobs_cache
       WHERE fetched_at >= strftime('%Y-%m-%dT%H:%M:%SZ','now','-3 day')
+        AND ${nextrolePostedSql("")}
         AND (tags LIKE '%"web3"%' OR tags LIKE '%"engineering"%' OR tags LIKE '%"data-ai"%'
              OR tags LIKE '%"product"%' OR tags LIKE '%"design"%' OR tags LIKE '%"devrel"%'
              OR tags LIKE '%"security"%' OR tags LIKE '%"qa"%' OR tags LIKE '%"ai"%'
@@ -135,6 +138,7 @@ export async function refreshSiteStats(d1: D1Client): Promise<void> {
     `SELECT t.value AS tag, count(*) AS n
        FROM jobs_cache j, json_each(j.tags) t
       WHERE j.fetched_at >= strftime('%Y-%m-%dT%H:%M:%SZ','now','-3 day')
+        AND ${nextrolePostedSql("j")}
       GROUP BY t.value`);
 
   const lists = groupByTag(await d1.query<TagListRow>(TAG_LIST_SQL));
