@@ -1,11 +1,14 @@
-import { fetchJson, type FetchOptions } from "../http.js";
+import { fetchJson, SourceUnavailableError, type FetchOptions } from "../http.js";
 import type { RawJob } from "../types.js";
+import { getroPay } from "../pay.js";
 
 interface GetroJob {
   title: string; url: string;
   organization?: { name?: string; industry_tags?: string[]; topics?: string[] };
   searchable_locations?: string[];
   work_mode?: string; created_at?: number;
+  compensation_amount_min_cents?: number | null; compensation_amount_max_cents?: number | null;
+  compensation_currency?: string | null; compensation_period?: string | null;
 }
 
 /**
@@ -59,14 +62,40 @@ const MAX_PAGES = 200;
 /** Скільки Getro віддає за раз. Не наш вибір і не налаштовується. */
 const PER_PAGE = 20;
 
-export async function fetchGetro(collectionId: number, o: FetchOptions = {}, pages = MAX_PAGES): Promise<RawJob[]> {
+/**
+ * Пауза між сторінками однієї колекції.
+ *
+ * Getro тротлить агресивно, і 11.09 це коштувало двох найбільших крипто-
+ * колекцій: Coinbase (29 сторінок) і Electric (10) отримали 429 посеред
+ * гортання, виняток викинув усе вже прочитане, а 429 за правилом не
+ * записується як падіння. Тож у панелі обидві стояли «ok, 0 днів падінь»,
+ * а в кеші їх того дня не було зовсім. Чверть секунди на сторінку коштує
+ * кілька секунд на колекцію.
+ */
+const PAGE_PAUSE_MS = 250;
+
+export async function fetchGetro(collectionId: number, o: FetchOptions = {}, pages = MAX_PAGES,
+                                 pauseMs = PAGE_PAUSE_MS): Promise<RawJob[]> {
   const jobs: RawJob[] = [];
   let limit = pages;
   for (let page = 0; page < limit; page++) {
-    const p = await fetchJson<{ results?: { jobs?: GetroJob[]; count?: number } }>(
-      `https://api.getro.com/api/v2/collections/${collectionId}/search/jobs`,
-      { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ page, hitsPerPage: PER_PAGE, filters: {} }) }, o);
+    if (page > 0 && pauseMs > 0) await new Promise((r) => setTimeout(r, pauseMs));
+    let p: { results?: { jobs?: GetroJob[]; count?: number } };
+    try {
+      p = await fetchJson<{ results?: { jobs?: GetroJob[]; count?: number } }>(
+        `https://api.getro.com/api/v2/collections/${collectionId}/search/jobs`,
+        { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ page, hitsPerPage: PER_PAGE, filters: {} }) }, o);
+    } catch (e) {
+      // 429 посеред гортання: прочитане лишаємо собі. Перша сторінка без
+      // відповіді означає, що колекції цього разу немає зовсім, і це
+      // чесний виняток.
+      if (page > 0 && e instanceof SourceUnavailableError && e.status === 429) {
+        console.log(`   getro:${collectionId}: 429 на сторінці ${page + 1}/${limit}, лишаю ${jobs.length} прочитаних`);
+        break;
+      }
+      throw e;
+    }
     const batch = p.results?.jobs ?? [];
     if (batch.length === 0) break;
 
@@ -87,6 +116,9 @@ export async function fetchGetro(collectionId: number, o: FetchOptions = {}, pag
         remote: (j.work_mode ?? "").toLowerCase() === "remote",
         postedAt: j.created_at ? new Date(j.created_at * 1000).toISOString() : null,
         source: `getro:${collectionId}`,
+        // Getro зберігає вилку в центах і каже період. На крипто-колекціях
+        // вона є на 17-56% вакансій, а ми її досі не читали.
+        ...getroPay(j),
         ...(inheritedTags.length ? { inheritedTags } : {}) });
     }
   }
@@ -122,17 +154,28 @@ export async function fetchCollectionMeta(
   }
 }
 
-/** Витягує ATS-слаг із посилання на вакансію — так росте список компаній. */
+/**
+ * Витягує ATS-слаг із посилання на вакансію: так росте список компаній.
+ *
+ * Три поправки 13.09.2026, кожна з живого посилання:
+ * - Ashby дозволяє крапку в слагу: Kraken живе на `jobs.ashbyhq.com/kraken.com`.
+ *   Старий взірець різав на крапці, і в список потрапив мертвий `ashby:kraken`.
+ * - Greenhouse віддає і вбудовану форму `boards.greenhouse.io/embed/job_app?for=X`:
+ *   тоді слаг у параметрі `for`, а не в шляху (інакше компанією ставав «embed»).
+ * - Recruitee вже був провайдером, але взірця для нього не було.
+ */
 const ATS_PATTERNS: Array<[string, RegExp]> = [
-  ["greenhouse", /(?:boards|job-boards)\.greenhouse\.io\/([a-z0-9_-]+)/i],
+  ["greenhouse", /(?:boards|job-boards)(?:\.eu)?\.greenhouse\.io\/embed\/job_app\?(?:[^#]*&)?for=([a-z0-9_-]+)/i],
+  ["greenhouse", /(?:boards|job-boards)(?:\.eu)?\.greenhouse\.io\/(?!embed\/)([a-z0-9_-]+)/i],
   ["lever", /jobs\.lever\.co\/([a-z0-9_-]+)/i],
-  ["ashby", /jobs\.ashbyhq\.com\/([a-z0-9_-]+)/i],
+  ["ashby", /jobs\.ashbyhq\.com\/([a-z0-9_.-]+?)(?:[/?#]|$)/i],
   ["workable", /apply\.workable\.com\/([a-z0-9_-]+)/i],
   ["smartrecruiters", /jobs\.smartrecruiters\.com\/([a-z0-9_-]+)/i],
   ["breezy", /([a-z0-9_-]+)\.breezy\.hr/i],
   ["rippling", /ats\.rippling\.com\/([a-z0-9_-]+)/i],
   ["personio", /([a-z0-9_-]+)\.jobs\.personio\.(?:de|com)/i],
   ["bamboohr", /([a-z0-9_-]+)\.bamboohr\.com\/careers/i],
+  ["recruitee", /([a-z0-9_-]+)\.recruitee\.com\/o\//i],
 ];
 
 export function extractAts(url: string): { provider: string; slug: string } | null {

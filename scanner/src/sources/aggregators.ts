@@ -1,6 +1,7 @@
 import { fetchJson, fetchXml, type FetchOptions } from "../http.js";
 import type { RawJob } from "../types.js";
-import { fetchSpeedrun, SPEEDRUN_SOURCE } from "./speedrun.js";
+import { fetchSpeedrunWithCrypto, SPEEDRUN_SOURCE } from "./speedrun.js";
+import { cryptoFreshnessDays } from "../config.js";
 
 const REMOTE = /remote|anywhere|distributed/i;
 const iso = (v: unknown): string | null => {
@@ -239,5 +240,6 @@ export const AGGREGATORS: Record<string, (o?: FetchOptions) => Promise<RawJob[]>
   "aggregator:hn": fetchHackerNews,
   // Єдиний агрегатор із власним задокументованим API й вилкою в полях —
   // див. `speedrun.ts`. Він же головний постачальник нових роботодавців.
-  [SPEEDRUN_SOURCE]: fetchSpeedrun,
+  // Крипто-компанії мережі читаються з ширшим вікном (CRYPTO_FRESHNESS_DAYS).
+  [SPEEDRUN_SOURCE]: (o?: FetchOptions) => fetchSpeedrunWithCrypto(o, cryptoFreshnessDays()),
 };

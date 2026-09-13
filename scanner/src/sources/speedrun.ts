@@ -54,7 +54,7 @@ const PER_PAGE = 50;
 const MAX_PAGES = 60;
 
 /** Скільки днів вважаються свіжими. Та сама стеля, що й у `loadConfig`. */
-const FRESH_DAYS = 14;
+export const FRESH_DAYS = 14;
 
 /**
  * Ширина вибірки.
@@ -163,7 +163,7 @@ export function toRawJob(j: ApiJob): RawJob | null {
   if (!j.url || !j.title || !j.company) return null;
   if (j.stealth) return null;
   return {
-    url: j.url,
+    url: withAgentUtm(j.url),
     company: j.company,
     title: j.title,
     location: j.location ?? null,
@@ -175,6 +175,29 @@ export function toRawJob(j: ApiJob): RawJob | null {
     commitment: j.employment_type ?? null,
     source: SPEEDRUN_SOURCE,
   };
+}
+
+/**
+ * Позначка переходу, як її ставить сам список ролей.
+ *
+ * Список віддає адресу вже з `utm_source=nextrole&utm_medium=agent`, а деталь
+ * компанії ту саму роль без них. `jobs_cache.url` унікальний, тож одна роль
+ * під двома адресами стала б двома рядками: зайвий запис щодня й повтор у
+ * добірці. Тому адресу з деталі доводимо до вигляду зі списку.
+ */
+export function withAgentUtm(url: string): string {
+  // Адресу зі списку не чіпаємо взагалі, навіть не нормалізуємо: будь-яка
+  // зміна рядка зробила б наявний рядок кешу новим.
+  if (/[?&]utm_source=/.test(url)) return url;
+  try {
+    const u = new URL(url);
+    if (!u.hostname.endsWith("speedrun-talent-network.com")) return url;
+    u.searchParams.set("utm_source", AGENT);
+    u.searchParams.set("utm_medium", "agent");
+    return u.toString();
+  } catch {
+    return url;
+  }
 }
 
 const q = (params: Record<string, string | number>): string =>
@@ -361,4 +384,103 @@ export async function firstJobId(companySlug: string, o: FetchOptions = {}): Pro
   const p = await fetchJson<{ company?: { jobs?: Array<{ id?: string }> } }>(
     `${BASE}/companies/${encodeURIComponent(companySlug)}?${q({})}`, {}, o);
   return p.company?.jobs?.find((j) => j.id)?.id ?? null;
+}
+
+// ── крипто-компанії: ширше вікно ─────────────────────────────
+
+/**
+ * Крипто-компанії мережі: за галуззю «Crypto/Web3» у списку компаній плюс
+ * учасники колекції `crypto-web3`. Виміряно 13.09.2026: 36 компаній за
+ * галуззю, 21 у колекції (усі 21 серед тих 36), 223 відкриті ролі.
+ *
+ * Навіщо окремо. Свіжий список (`fetchSpeedrun`) бере лише 14 днів і не
+ * знає галузі: тег `web3` із 768 рядків speedrun у кеші мали 29, лише ті, у
+ * назві яких випадково стояло «crypto». Крипто-вакансії при цьому стоять
+ * відкритими місяцями, і з 14 днів видно заледве п'яту частину.
+ */
+export async function fetchSpeedrunCryptoSlugs(o: FetchOptions = {}): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  for (const c of await fetchSpeedrunCompanies(o)) {
+    if (c.tags.includes("web3")) out.set(c.slug, c.name);
+  }
+  try {
+    const p = await fetchJson<{ collection?: { members?: Array<{ slug?: string; name?: string }> } }>(
+      `${BASE}/collections/crypto-web3?${q({})}`, {}, o);
+    for (const m of p.collection?.members ?? []) {
+      if (m.slug && m.name && !out.has(m.slug)) out.set(m.slug, m.name);
+    }
+  } catch { /* колекція лише доповнює список за галуззю */ }
+  return out;
+}
+
+interface CompanyJob {
+  id?: string; title?: string; url?: string; location?: string | null;
+  workplace_type?: string | null; employment_type?: string | null; remote?: boolean;
+  comp_min?: number | null; comp_max?: number | null; comp_currency?: string | null;
+  comp_period?: string | null; published_at?: string | null;
+}
+
+/**
+ * Усі відкриті ролі однієї компанії, не старші за `days`.
+ *
+ * Деталь компанії (`/companies/{slug}`) віддає ВСІ її ролі одним запитом:
+ * у Anchorage це 26, у Alchemy 20. Назви компанії в ролях немає, її дає
+ * виклик.
+ */
+export async function fetchSpeedrunCompanyJobs(
+  slug: string, name: string, days: number, o: FetchOptions = {},
+): Promise<RawJob[]> {
+  const p = await fetchJson<{ company?: { name?: string; jobs?: CompanyJob[] } }>(
+    `${BASE}/companies/${encodeURIComponent(slug)}?${q({})}`, {}, o);
+  const cutoff = Date.now() - days * 86_400_000;
+  const company = p.company?.name ?? name;
+  const out: RawJob[] = [];
+  for (const j of p.company?.jobs ?? []) {
+    const t = j.published_at ? new Date(j.published_at).getTime() : NaN;
+    if (Number.isFinite(t) && t < cutoff) continue;
+    const raw = toRawJob({ ...j, company, company_slug: slug });
+    if (raw) out.push({ ...raw, inheritedTags: ["web3"] });
+  }
+  return out;
+}
+
+/**
+ * Свіжий список плюс крипто-компанії з вікном `cryptoDays`.
+ *
+ * Роль крипто-компанії зі свіжого списку отримує тег `web3` (галузь
+ * компанії, не слово в назві). Ролі старші за 14 днів добираються з деталі
+ * компанії: один запит на компанію, близько сорока запитів на прогін.
+ *
+ * Збій крипто-частини не валить свіже: без неї джерело лишається рівно
+ * таким, яким було до 13.09.
+ */
+export async function fetchSpeedrunWithCrypto(
+  o: FetchOptions = {}, cryptoDays = FRESH_DAYS,
+): Promise<RawJob[]> {
+  const fresh = await fetchSpeedrun(o);
+  // Вимикач: SPEEDRUN_CRYPTO=0 повертає джерело рівно таким, яким воно було.
+  if (process.env.SPEEDRUN_CRYPTO === "0") return fresh;
+  let crypto: Map<string, string>;
+  try {
+    crypto = await fetchSpeedrunCryptoSlugs(o);
+  } catch (e) {
+    console.log(`   speedrun: список крипто-компаній недоступний (${e instanceof Error ? e.message : e})`);
+    return fresh;
+  }
+  const names = new Set([...crypto.values()].map((n) => n.toLowerCase()));
+  const tagged = fresh.map((j) => (names.has(j.company.toLowerCase())
+    ? { ...j, inheritedTags: [...new Set([...(j.inheritedTags ?? []), "web3"])] } : j));
+
+  const seen = new Set(tagged.map((j) => j.url));
+  const older: RawJob[] = [];
+  for (const [slug, name] of crypto) {
+    try {
+      for (const j of await fetchSpeedrunCompanyJobs(slug, name, Math.max(cryptoDays, FRESH_DAYS), o)) {
+        if (seen.has(j.url)) continue;
+        seen.add(j.url);
+        older.push(j);
+      }
+    } catch { /* одна компанія не відповіла: решта від цього не залежить */ }
+  }
+  return [...tagged, ...older];
 }

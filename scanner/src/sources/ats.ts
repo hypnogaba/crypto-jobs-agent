@@ -1,5 +1,14 @@
 import { fetchJson, fetchXml, type FetchOptions } from "../http.js";
 import type { AtsProvider, RawJob } from "../types.js";
+import { ashbyPay, greenhousePay, leverPay, pay, payPeriod, yearly, currencyCode,
+  type AshbyComponent, type GreenhouseRange } from "../pay.js";
+
+/**
+ * Просити вилку в ATS, де вона є окремим полем. Вимикач, а не налаштування:
+ * `ATS_PAY=0` повертає рівно старі запити, якщо якийсь ATS колись почне на
+ * новий параметр відповідати помилкою.
+ */
+const askPay = (): boolean => process.env.ATS_PAY !== "0";
 
 const REMOTE = /remote|anywhere|distributed|home[- ]office|télétravail/i;
 const iso = (v: unknown): string | null => {
@@ -9,13 +18,20 @@ const iso = (v: unknown): string | null => {
 };
 
 // ── Greenhouse ────────────────────────────────────────────────
+/**
+ * `pay_transparency=true` додає до списку `pay_input_ranges`. Без нього ми
+ * втрачали вилку, яку роботодавець опублікував сам: у Coinbase вона стоїть на
+ * 213 вакансіях із 218, у Ripple на 77 зі 124 (живий запит 13.09.2026).
+ * Текст оголошення (`content=true`) і далі не беремо: він важить мегабайти.
+ */
 export async function fetchGreenhouse(slug: string, name: string, o: FetchOptions = {}): Promise<RawJob[]> {
-  const p = await fetchJson<{ jobs?: Array<{ absolute_url: string; title: string; location?: { name?: string }; updated_at?: string; first_published?: string }> }>(
-    `https://boards-api.greenhouse.io/v1/boards/${slug}/jobs?content=false`, {}, o);
+  const p = await fetchJson<{ jobs?: Array<{ absolute_url: string; title: string; location?: { name?: string }; updated_at?: string; first_published?: string; pay_input_ranges?: GreenhouseRange[] }> }>(
+    `https://boards-api.greenhouse.io/v1/boards/${slug}/jobs?content=false${askPay() ? "&pay_transparency=true" : ""}`, {}, o);
   return (p.jobs ?? []).map((j) => {
     const loc = j.location?.name ?? null;
     return { url: j.absolute_url, company: name, title: j.title, location: loc,
-      remote: REMOTE.test(loc ?? ""), postedAt: iso(j.first_published ?? j.updated_at), source: `greenhouse:${slug}` };
+      remote: REMOTE.test(loc ?? ""), postedAt: iso(j.first_published ?? j.updated_at), source: `greenhouse:${slug}`,
+      ...greenhousePay(j.pay_input_ranges) };
   });
 }
 
@@ -32,16 +48,15 @@ export async function fetchLever(slug: string, name: string, o: FetchOptions = {
   return posts.map((j) => {
     const loc = j.categories?.location ?? null;
 
-    // Lever віддає вилку прямо в списку, а ми її досі викидали. Беремо лише
-    // річні: погодинні й місячні поруч із річними читались би як помилка.
-    const yearly = j.salaryRange?.interval === "per-year-salary";
-    const sr = yearly ? j.salaryRange : undefined;
+    // Lever віддає вилку прямо в списку. Період переводимо в річний
+    // (pay.ts): погодинна ставка стає річною, а не зникає.
+    const sr = leverPay(j.salaryRange);
 
     return {
       url: j.hostedUrl ?? j.applyUrl ?? "", company: name, title: j.text, location: loc,
       remote: j.workplaceType?.toLowerCase() === "remote" || REMOTE.test(loc ?? ""),
       postedAt: iso(j.createdAt), source: `lever:${slug}`,
-      salaryMin: sr?.min ?? null, salaryMax: sr?.max ?? null, salaryCurrency: sr?.currency ?? null,
+      ...sr,
       team: j.categories?.team ?? j.categories?.department ?? null,
       commitment: j.categories?.commitment ?? null,
       description: leverText(j),
@@ -68,14 +83,19 @@ function leverText(j: {
 }
 
 // ── Ashby ─── посилання в полі `jobUrl`
+/**
+ * `includeCompensation=true` додає `compensation`. Kraken публікує вилку на
+ * 30 вакансіях із 74, Circle на 10 із 10, Uniswap на 9 із 9 (13.09.2026).
+ */
 export async function fetchAshby(slug: string, name: string, o: FetchOptions = {}): Promise<RawJob[]> {
-  const p = await fetchJson<{ jobs?: Array<{ title: string; location?: string; isRemote?: boolean; publishedAt?: string; jobUrl: string; isListed?: boolean; descriptionPlain?: string }> }>(
-    `https://api.ashbyhq.com/posting-api/job-board/${slug}`, {}, o);
+  const p = await fetchJson<{ jobs?: Array<{ title: string; location?: string; isRemote?: boolean; publishedAt?: string; jobUrl: string; isListed?: boolean; descriptionPlain?: string; compensation?: { summaryComponents?: AshbyComponent[] } }> }>(
+    `https://api.ashbyhq.com/posting-api/job-board/${slug}${askPay() ? "?includeCompensation=true" : ""}`, {}, o);
   return (p.jobs ?? []).filter((j) => j.isListed !== false).map((j) => ({
     url: j.jobUrl, company: name, title: j.title, location: j.location ?? null,
     remote: j.isRemote === true || REMOTE.test(j.location ?? ""),
     postedAt: iso(j.publishedAt), source: `ashby:${slug}`,
-    description: j.descriptionPlain ?? null }));
+    description: j.descriptionPlain ?? null,
+    ...ashbyPay(j.compensation) }));
 }
 
 // ── Workable ──────────────────────────────────────────────────
@@ -150,6 +170,7 @@ export async function fetchRecruitee(rawSlug: string, name: string, o: FetchOpti
     published_at?: string; created_at?: string; department?: string | null;
     employment_type_code?: string | null; description?: string | null; requirements?: string | null;
     company_name?: string | null; status?: string;
+    salary?: { min?: string | number | null; max?: string | number | null; period?: string | null; currency?: string | null } | null;
   }> }>(`https://${slug}.recruitee.com/api/offers/`, {}, o);
 
   const out: RawJob[] = [];
@@ -172,9 +193,20 @@ export async function fetchRecruitee(rawSlug: string, name: string, o: FetchOpti
       commitment: j.employment_type_code ?? null,
       // Опис і вимоги — два різні поля; для витягу цінні обидва.
       description: [j.description, j.requirements].filter(Boolean).join("\n") || null,
+      ...recruiteePay(j.salary),
     });
   }
   return out;
+}
+
+/** Вилка Recruitee: числа бувають і рядками, період словом. */
+function recruiteePay(s: { min?: string | number | null; max?: string | number | null; period?: string | null; currency?: string | null } | null | undefined) {
+  const num = (v: unknown): number | null => {
+    const n = typeof v === "number" ? v : typeof v === "string" ? Number(v.replace(/[^\d.]/g, "")) : NaN;
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+  const period = payPeriod(s?.period ?? null);
+  return pay(yearly(num(s?.min), period), yearly(num(s?.max), period), currencyCode(s?.currency));
 }
 
 // ── Rippling ──────────────────────────────────────────────────
