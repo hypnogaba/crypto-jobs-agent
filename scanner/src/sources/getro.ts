@@ -163,12 +163,15 @@ export async function fetchCollectionMeta(
  * - Greenhouse віддає і вбудовану форму `boards.greenhouse.io/embed/job_app?for=X`:
  *   тоді слаг у параметрі `for`, а не в шляху (інакше компанією ставав «embed»).
  * - Recruitee вже був провайдером, але взірця для нього не було.
+ * - Європейський Lever (`jobs.eu.lever.co`) має власний API-хост.
+ * - Слаг Ashby буває з пробілом: `Sui%20Foundation`, `Tools%20for%20Humanity`.
  */
 const ATS_PATTERNS: Array<[string, RegExp]> = [
   ["greenhouse", /(?:boards|job-boards)(?:\.eu)?\.greenhouse\.io\/embed\/job_app\?(?:[^#]*&)?for=([a-z0-9_-]+)/i],
   ["greenhouse", /(?:boards|job-boards)(?:\.eu)?\.greenhouse\.io\/(?!embed\/)([a-z0-9_-]+)/i],
-  ["lever", /jobs\.lever\.co\/([a-z0-9_-]+)/i],
-  ["ashby", /jobs\.ashbyhq\.com\/([a-z0-9_.-]+?)(?:[/?#]|$)/i],
+  ["lever", /\/\/jobs\.lever\.co\/([a-z0-9_-]+)/i],
+  ["lever_eu", /\/\/jobs\.eu\.lever\.co\/([a-z0-9_-]+)/i],
+  ["ashby", /jobs\.ashbyhq\.com\/([a-z0-9_.%-]+?)(?:[/?#]|$)/i],
   ["workable", /apply\.workable\.com\/([a-z0-9_-]+)/i],
   ["smartrecruiters", /jobs\.smartrecruiters\.com\/([a-z0-9_-]+)/i],
   ["breezy", /([a-z0-9_-]+)\.breezy\.hr/i],

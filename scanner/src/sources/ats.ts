@@ -37,13 +37,27 @@ export async function fetchGreenhouse(slug: string, name: string, o: FetchOption
 
 // ── Lever ─── назва вакансії в полі `text`, не `title`
 export async function fetchLever(slug: string, name: string, o: FetchOptions = {}): Promise<RawJob[]> {
+  return leverFrom("api.lever.co", "lever", slug, name, o);
+}
+
+/**
+ * Європейський Lever: той самий API на іншому хості. Дошки з
+ * `jobs.eu.lever.co` на звичайному `api.lever.co` відповідають «Document not
+ * found», тож без цього Aave Labs (10 вакансій, 13.09) і Kaiko були
+ * недосяжні.
+ */
+export async function fetchLeverEu(slug: string, name: string, o: FetchOptions = {}): Promise<RawJob[]> {
+  return leverFrom("api.eu.lever.co", "lever_eu", slug, name, o);
+}
+
+async function leverFrom(host: string, provider: string, slug: string, name: string, o: FetchOptions): Promise<RawJob[]> {
   const posts = await fetchJson<Array<{
     text: string; hostedUrl?: string; applyUrl?: string; workplaceType?: string; createdAt?: number;
     categories?: { location?: string; team?: string; department?: string; commitment?: string };
     salaryRange?: { min?: number; max?: number; currency?: string; interval?: string };
     descriptionPlain?: string; descriptionBodyPlain?: string;
     lists?: Array<{ text?: string; content?: string }>;
-  }>>(`https://api.lever.co/v0/postings/${slug}?mode=json`, {}, o);
+  }>>(`https://${host}/v0/postings/${slug}?mode=json`, {}, o);
 
   return posts.map((j) => {
     const loc = j.categories?.location ?? null;
@@ -55,7 +69,7 @@ export async function fetchLever(slug: string, name: string, o: FetchOptions = {
     return {
       url: j.hostedUrl ?? j.applyUrl ?? "", company: name, title: j.text, location: loc,
       remote: j.workplaceType?.toLowerCase() === "remote" || REMOTE.test(loc ?? ""),
-      postedAt: iso(j.createdAt), source: `lever:${slug}`,
+      postedAt: iso(j.createdAt), source: `${provider}:${slug}`,
       ...sr,
       team: j.categories?.team ?? j.categories?.department ?? null,
       commitment: j.categories?.commitment ?? null,
@@ -288,6 +302,7 @@ export async function fetchBambooHr(rawSlug: string, name: string, o: FetchOptio
 export const ATS: Record<AtsProvider, AtsFetcher> = {
   greenhouse: fetchGreenhouse,
   lever: fetchLever,
+  lever_eu: fetchLeverEu,
   ashby: fetchAshby,
   workable: fetchWorkable,
   smartrecruiters: fetchSmartRecruiters,

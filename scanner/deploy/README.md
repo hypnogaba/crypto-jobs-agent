@@ -23,7 +23,7 @@ chmod 600 /etc/nextrole-scanner.env
 chown root:root /etc/nextrole-scanner.env
 ```
 
-Ставимо юніти. Список нижче — ПОВНИЙ: у ньому сім таймерів, і кожен із них
+Ставимо юніти. Список нижче — ПОВНИЙ: у ньому дев'ять таймерів, і кожен із них
 живе на сервері зараз. Раніше тут стояло чотири, тож розгортання за цією
 інструкцією мовчки лишало систему без самоперегляду й обох розвідок — тобто
 без усього, що вона міняє в собі сама.
@@ -36,7 +36,7 @@ systemctl enable --now \
   nextrole-scan.timer nextrole-watchdog.timer \
   nextrole-digest.timer nextrole-requests.timer \
   nextrole-review.timer nextrole-discover.timer nextrole-twitter.timer \
-  nextrole-prune.timer
+  nextrole-prune.timer nextrole-getro-ats.timer
 ```
 
 | Таймер | Коли | Що робить |
@@ -49,6 +49,7 @@ systemctl enable --now \
 | `nextrole-discover` | Нд 04:00 | розвідка колекцій Getro по рухомому вікну |
 | `nextrole-twitter` | Нд 07:00 | пошук дошок під країни, де є люди |
 | `nextrole-prune` | Нд 03:00 | прибирання кеша: старе, чого нікому не слали |
+| `nextrole-getro-ats` | Нд 05:00 | збір роботодавців (посилань на ATS) з увімкнених колекцій Getro; щоденний скан Getro не читає (`GETRO_MODE=discover`) |
 
 `nextrole-prune` НІКОЛИ не видаляє вакансію, яку комусь надсилали:
 `sent.job_id` має `ON DELETE CASCADE`, тож разом із рядком кеша зник би й

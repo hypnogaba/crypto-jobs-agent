@@ -59,7 +59,7 @@ export interface SourceResult {
 export type AtsProvider =
   | "greenhouse" | "lever" | "ashby" | "workable"
   | "smartrecruiters" | "breezy" | "personio" | "rippling" | "workday"
-  | "bamboohr" | "recruitee";
+  | "bamboohr" | "recruitee" | "lever_eu";
 
 export interface Company {
   slug: string;
