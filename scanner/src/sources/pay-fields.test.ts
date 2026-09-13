@@ -140,3 +140,20 @@ describe("speedrun: деталь компанії (Anchorage)", () => {
     expect(withAgentUtm(u)).toBe(u);
   });
 });
+
+describe("Recruitee salary", () => {
+  it("місяць множиться, порожній період із малою сумою не вигадується", async () => {
+    // Форма з живої відповіді cordesconsulting.recruitee.com 13.09: сусідні
+    // вакансії одного роботодавця мають і `month`, і `null`.
+    const body = JSON.stringify({ offers: [
+      { title: "Vertrieb A", careers_url: "https://x.recruitee.com/o/a", status: "published",
+        salary: { max: null, min: "5500", period: "month", currency: "EUR" } },
+      { title: "Vertrieb B", careers_url: "https://x.recruitee.com/o/b", status: "published",
+        salary: { max: null, min: "4500", period: null, currency: "EUR" } },
+    ] });
+    const fetchImpl = (async () => new Response(body, { status: 200 })) as unknown as typeof fetch;
+    const { fetchRecruitee } = await import("./ats.js");
+    const jobs = await fetchRecruitee("x", "X", { fetchImpl });
+    expect(jobs.map((j) => [j.salaryMin, j.salaryCurrency])).toEqual([[66_000, "EUR"], [null, null]]);
+  });
+});

@@ -12,10 +12,13 @@
  *   Getro       `compensation_period`: «year», «period_not_defined»…
  *   speedrun    `comp_period`: null (=рік), «hour», «month», «year»
  *
- * Невідомий період НЕ множимо навмання: беремо як річний і лишаємо межам
- * вирішувати, чи це взагалі схоже на зарплату. Так уже робить speedrun.ts, і
- * саме так «24 USD/hour» не стає вакансією на 24 долари на рік.
+ * Невідомий період НЕ множимо навмання: суму беремо як річну лише тоді, коли
+ * вона правдоподібна як річна (`payFor`), інакше не пишемо нічого. Саме так
+ * «24 USD/hour» не стає вакансією на 24 долари на рік, а місячні 4 500 EUR
+ * не стають річними.
  */
+
+import { plausibleSalary } from "./money.js";
 
 export type PayPeriod = "hour" | "day" | "week" | "month" | "year";
 
@@ -39,7 +42,9 @@ export function payPeriod(text: string | null | undefined): PayPeriod | null {
   if (/\bday\b|daily|per-day/.test(t)) return "day";
   if (/\bweek|weekly|per-week/.test(t)) return "week";
   if (/\bmonth|monthly|per-month/.test(t)) return "month";
-  if (/\byear|annual|yearly|per-year|\bsalary\b/.test(t)) return "year";
+  // Саме слово «salary» період НЕ називає: Astranis пише «Base Salary», а
+  // під ним «$1,925 per week». Перша версія читала це як рік.
+  if (/\byear|annual|yearly|per-year/.test(t)) return "year";
   return null;
 }
 
@@ -73,6 +78,24 @@ export function pay(min: number | null, max: number | null, currency: string | n
   return { salaryMin: min, salaryMax: max, salaryCurrency: currency };
 }
 
+/**
+ * Вилка з сум і періоду джерела.
+ *
+ * Коли період НЕ названо, суму беремо як річну лише тоді, коли вона
+ * правдоподібна як річна (та сама межа, що в картці NextRole, `plausibleSalary`).
+ * Інакше це майже напевно місяць: Wolt пише «Poland Pay Range» без жодного
+ * слова про період і 11 150 PLN, Recruitee віддає `period: null` поруч із
+ * «4500 EUR» при сусідніх вакансіях того самого роботодавця з `month`.
+ * Записати таке як річне означало б вигадати бідну зарплату.
+ */
+export function payFor(lo: number | null, hi: number | null, currency: string | null,
+                       period: PayPeriod | null, every = 1): Pay {
+  const min = yearly(lo, period, every);
+  const max = yearly(hi, period, every);
+  if (period === null && !plausibleSalary(min, max, currency)) return NONE;
+  return pay(min, max, currency);
+}
+
 // ── Greenhouse ────────────────────────────────────────────────
 export interface GreenhouseRange {
   min_cents?: number | null; max_cents?: number | null;
@@ -93,7 +116,7 @@ export function greenhousePay(ranges: GreenhouseRange[] | null | undefined): Pay
   const blurb = (r.blurb ?? "").replace(/<[^>]+>/g, " ");
   const period = payPeriod(r.title) ?? payPeriod(blurb);
   const cents = (v: number | null | undefined) => (typeof v === "number" ? v / 100 : null);
-  return pay(yearly(cents(r.min_cents), period), yearly(cents(r.max_cents), period), currencyCode(r.currency_type));
+  return payFor(cents(r.min_cents), cents(r.max_cents), currencyCode(r.currency_type), period);
 }
 
 // ── Ashby ─────────────────────────────────────────────────────
@@ -115,7 +138,7 @@ export function ashbyPay(c: { summaryComponents?: AshbyComponent[] | null } | nu
   const m = /^\s*(\d+)?\s*([a-z]+)/i.exec(s.interval ?? "");
   const every = m?.[1] ? Number(m[1]) : 1;
   const period = payPeriod(m?.[2] ?? null);
-  return pay(yearly(s.minValue, period, every), yearly(s.maxValue, period, every), currencyCode(s.currencyCode));
+  return payFor(s.minValue ?? null, s.maxValue ?? null, currencyCode(s.currencyCode), period, every);
 }
 
 // ── Lever ─────────────────────────────────────────────────────
@@ -132,7 +155,7 @@ export function leverPay(r: { min?: number; max?: number; currency?: string; int
 }
 
 // ── Getro ─────────────────────────────────────────────────────
-/** Суми в центах, період словом; «period_not_defined» трактуємо як рік. */
+/** Суми в центах, період словом; «period_not_defined» як невідомий (див. `payFor`). */
 export function getroPay(j: {
   compensation_amount_min_cents?: number | null; compensation_amount_max_cents?: number | null;
   compensation_currency?: string | null; compensation_period?: string | null;
@@ -141,6 +164,5 @@ export function getroPay(j: {
   const lo = cents(j.compensation_amount_min_cents);
   const hi = cents(j.compensation_amount_max_cents);
   if (lo === null && hi === null) return NONE;
-  const period = payPeriod(j.compensation_period);
-  return pay(yearly(lo, period), yearly(hi, period), currencyCode(j.compensation_currency));
+  return payFor(lo, hi, currencyCode(j.compensation_currency), payPeriod(j.compensation_period));
 }

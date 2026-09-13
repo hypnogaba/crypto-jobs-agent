@@ -58,6 +58,19 @@ describe("greenhousePay", () => {
     expect(greenhousePay([{ min_cents: 4000, max_cents: 4000, currency_type: "USD", title: "Hourly Rate:" }]))
       .toEqual({ salaryMin: 83_200, salaryMax: 83_200, salaryCurrency: "USD" });
   });
+  it("«Base Salary» з «$1,925 per week» у поясненні: тиждень, а не рік (Astranis)", () => {
+    expect(greenhousePay([{ min_cents: 192500, max_cents: 192500, currency_type: "USD", title: "Base Salary",
+      blurb: "<p>The base salary for this position is $1,925 per week.</p>" }]).salaryMin).toBe(100_100);
+  });
+  it("без періоду місячна сума не стає річною (Wolt, «Poland Pay Range»)", () => {
+    expect(greenhousePay([{ min_cents: 1115000, max_cents: 1393800, currency_type: "PLN", title: "Poland Pay Range",
+      blurb: "The successful candidate's starting pay will fall within the pay range listed below" }]))
+      .toEqual({ salaryMin: null, salaryMax: null, salaryCurrency: null });
+  });
+  it("без періоду правдоподібна річна лишається", () => {
+    expect(greenhousePay([{ min_cents: 15000000, max_cents: 20000000, currency_type: "USD",
+      title: "US pay range (not including bonus, equity or other benefits)" }]).salaryMin).toBe(150_000);
+  });
   it("період у поясненні, коли назва мовчить", () => {
     expect(greenhousePay([{ min_cents: 3000, max_cents: 3500, currency_type: "USD", title: "Pay range",
       blurb: "<p>the target hourly rate for this position</p>" }]).salaryMin).toBe(62_400);

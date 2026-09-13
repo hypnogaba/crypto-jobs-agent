@@ -1,6 +1,6 @@
 import { fetchJson, fetchXml, type FetchOptions } from "../http.js";
 import type { AtsProvider, RawJob } from "../types.js";
-import { ashbyPay, greenhousePay, leverPay, pay, payPeriod, yearly, currencyCode,
+import { ashbyPay, greenhousePay, leverPay, payFor, payPeriod, currencyCode,
   type AshbyComponent, type GreenhouseRange } from "../pay.js";
 
 /**
@@ -219,8 +219,7 @@ function recruiteePay(s: { min?: string | number | null; max?: string | number |
     const n = typeof v === "number" ? v : typeof v === "string" ? Number(v.replace(/[^\d.]/g, "")) : NaN;
     return Number.isFinite(n) && n > 0 ? n : null;
   };
-  const period = payPeriod(s?.period ?? null);
-  return pay(yearly(num(s?.min), period), yearly(num(s?.max), period), currencyCode(s?.currency));
+  return payFor(num(s?.min), num(s?.max), currencyCode(s?.currency), payPeriod(s?.period ?? null));
 }
 
 // ── Rippling ──────────────────────────────────────────────────
